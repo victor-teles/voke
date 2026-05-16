@@ -1,0 +1,66 @@
+import { toEnvKey } from "./env-key";
+
+export interface AwsClientConfig {
+  region: string;
+  endpoint?: string;
+}
+
+export {
+  dynamodbTable,
+  eventBus,
+  s3Bucket,
+  secret,
+  snsTopic,
+  sqsQueue,
+  ssmParameter,
+  type StackResourceDefinition,
+} from "./cloudformation";
+
+export interface ResourceBinding<TValue extends string = string> {
+  name: string;
+  attribute: string;
+  envName: string;
+  value: () => TValue;
+}
+
+export const bindResource = <TValue extends string = string>(
+  name: string,
+  attribute: string
+): ResourceBinding<TValue> => {
+  const envName = `VOKE_RESOURCE_${toEnvKey(name)}_${toEnvKey(attribute)}`;
+
+  return {
+    attribute,
+    envName,
+    name,
+    value: () => {
+      const value = Bun.env[envName];
+
+      if (value === undefined || value === "") {
+        throw new Error(`Missing AWS resource binding: ${envName}`);
+      }
+
+      return value as TValue;
+    },
+  };
+};
+
+export const createAwsClientConfig = (
+  options: Partial<AwsClientConfig> = {}
+): AwsClientConfig => {
+  const endpoint =
+    options.endpoint ??
+    Bun.env.VOKE_AWS_ENDPOINT_URL ??
+    Bun.env.AWS_ENDPOINT_URL;
+
+  return {
+    region:
+      options.region ??
+      Bun.env.AWS_REGION ??
+      Bun.env.AWS_DEFAULT_REGION ??
+      "us-east-1",
+    ...(endpoint === undefined || endpoint === "" ? {} : { endpoint }),
+  };
+};
+
+export { toEnvKey };

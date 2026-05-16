@@ -1,0 +1,22 @@
+{
+  "name": "@voke/hello-api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "voke build",
+    "dev": "voke dev",
+    "synth": "voke synth",
+    "test": "bun test",
+    "typecheck": "bunx tsgo --project tsconfig.json --noEmit",
+    "clean": "rm -rf dist coverage"
+  },
+  "dependencies": {
+    "hono": "^4.0.0",
+    "voke": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@typescript/native-preview": "^7.0.0-dev.20260516.1"
+  }
+}

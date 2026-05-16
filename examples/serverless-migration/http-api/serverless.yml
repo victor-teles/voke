@@ -1,0 +1,17 @@
+service: http-api-service
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  stage: dev
+  region: us-east-1
+  environment:
+    LOG_LEVEL: debug
+
+functions:
+  getProfile:
+    handler: src/functions/get-profile.handler
+    events:
+      - httpApi:
+          method: get
+          path: /profiles/{id}

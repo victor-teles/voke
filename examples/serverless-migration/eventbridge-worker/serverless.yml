@@ -1,0 +1,17 @@
+service: eventbridge-worker-service
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  stage: prod
+  region: us-east-1
+
+functions:
+  syncCustomer:
+    handler: src/functions/sync-customer.handler
+    events:
+      - eventBridge:
+          eventBus: customers
+          pattern:
+            source:
+              - customers

@@ -1,0 +1,32 @@
+{
+  "name": "voke",
+  "version": "0.0.0",
+  "bin": {
+    "voke": "./src/cli.ts"
+  },
+  "type": "module",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./aws": "./src/aws.ts",
+    "./cloudformation": "./src/cloudformation.ts",
+    "./e2e": "./src/e2e.ts",
+    "./invoke": "./src/invoke.ts",
+    "./local": "./src/local.ts",
+    "./serverless-migration": "./src/serverless-migration.ts"
+  },
+  "scripts": {
+    "build": "bun build ./src/index.ts ./src/cli.ts --outdir ./dist --target bun",
+    "test": "bun test",
+    "typecheck": "bunx tsgo --project tsconfig.json --noEmit",
+    "clean": "rm -rf dist coverage"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@typescript/native-preview": "catalog:",
+    "hono": "^4.0.0"
+  },
+  "peerDependencies": {
+    "hono": "^4.0.0"
+  }
+}

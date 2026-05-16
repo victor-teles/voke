@@ -1,0 +1,626 @@
+import { expect, test } from "bun:test";
+
+import { Hono } from "hono";
+import type { LambdaContext, LambdaEvent } from "hono/aws-lambda";
+
+import {
+  dynamodbTable,
+  s3Bucket,
+  secret,
+  snsTopic,
+  sqsQueue,
+  ssmParameter,
+} from "../src/aws";
+import { handleAwsLambdaRequest } from "../src/aws-lambda";
+import { createApiProject, runCli } from "../src/cli";
+import {
+  api,
+  awsContext,
+  bindResource,
+  createApiApp,
+  createAwsClientConfig,
+  defineConfig,
+  getConfig,
+  json,
+  loadVokeConfig,
+  routeModule,
+  synthesizeCloudFormation,
+} from "../src/index";
+import type { VokeEnv } from "../src/index";
+
+const restoreEnv = (name: string, value?: string): void => {
+  Bun.env[name] = value;
+};
+
+const lambdaEvent = (overrides: Record<string, unknown>): LambdaEvent => {
+  const requestContext = {
+    accountId: "local",
+    apiId: "local",
+    authentication: null,
+    authorizer: {},
+    domainName: "localhost",
+    domainPrefix: "localhost",
+    http: {
+      method: "GET",
+      path: "/",
+      protocol: "HTTP/1.1",
+      sourceIp: "127.0.0.1",
+      userAgent: "bun:test",
+    },
+    requestId: "req_local",
+    routeKey: "$default",
+    stage: "$default",
+    time: "01/Jan/2026:00:00:00 +0000",
+    timeEpoch: 1_767_225_600_000,
+  };
+  const { requestContext: overrideRequestContext, ...rest } = overrides as {
+    requestContext?: { http?: Record<string, unknown> };
+  } & Record<string, unknown>;
+
+  return {
+    body: null,
+    headers: {
+      host: "localhost",
+    },
+    isBase64Encoded: false,
+    rawPath: "/",
+    rawQueryString: "",
+    requestContext: {
+      ...requestContext,
+      ...overrideRequestContext,
+      http: {
+        ...requestContext.http,
+        ...overrideRequestContext?.http,
+      },
+    },
+    routeKey: "$default",
+    version: "2.0",
+    ...rest,
+  } as LambdaEvent;
+};
+
+test("wraps a Hono app with a default name and handler", () => {
+  const app = new Hono();
+  const vokeApi = api(app);
+
+  expect(vokeApi.name).toBe("api");
+  expect(vokeApi.config).toEqual({
+    build: {
+      outdir: "./dist",
+    },
+    cloudFormation: {
+      environment: {},
+      handler: "index.handler",
+      out: "./dist/cloudformation.json",
+      resources: {},
+    },
+    entrypoint: "./src/index.ts",
+    name: "api",
+    region: "us-east-1",
+    stage: "local",
+  });
+  expect(vokeApi.app).toBe(app);
+  expect(vokeApi.fetch).toBeFunction();
+  expect(vokeApi.handler).toBeFunction();
+});
+
+test("handles a Lambda HTTP API v2 GET request", async () => {
+  const app = new Hono();
+
+  app.get("/hello/:name", (c) =>
+    c.json({
+      data: {
+        greeting: c.req.query("greeting"),
+        name: c.req.param("name"),
+      },
+    })
+  );
+
+  const vokeApi = api(app, { name: "hello-api" });
+  const response = await vokeApi.handler(
+    lambdaEvent({
+      headers: {
+        host: "api.example.com",
+        "x-forwarded-proto": "https",
+      },
+      rawPath: "/hello/victor",
+      rawQueryString: "greeting=hi",
+      requestContext: {
+        http: {
+          method: "GET",
+          path: "/hello/victor",
+        },
+      },
+    })
+  );
+
+  expect(response.statusCode).toBe(200);
+  expect(response.isBase64Encoded).toBe(false);
+  expect(response.headers?.["content-type"]).toContain("application/json");
+  expect(JSON.parse(response.body)).toEqual({
+    data: {
+      greeting: "hi",
+      name: "victor",
+    },
+  });
+});
+
+test("handles a Lambda HTTP API v2 POST body", async () => {
+  const app = new Hono();
+
+  app.post("/echo", async (c) => c.json({ data: await c.req.json() }));
+
+  const response = await handleAwsLambdaRequest(
+    app,
+    lambdaEvent({
+      body: JSON.stringify({ ok: true }),
+      headers: {
+        "content-type": "application/json",
+        host: "localhost",
+      },
+      rawPath: "/echo",
+      requestContext: {
+        http: {
+          method: "POST",
+          path: "/echo",
+        },
+      },
+    })
+  );
+
+  expect(response.statusCode).toBe(200);
+  expect(JSON.parse(response.body)).toEqual({ data: { ok: true } });
+});
+
+test("composes route modules and exposes config/context helpers", async () => {
+  const routes = new Hono<VokeEnv>();
+
+  routes.get("/:id", (c) =>
+    json({
+      id: c.req.param("id"),
+      requestId: awsContext(c)?.awsRequestId,
+      service: getConfig(c).name,
+    })
+  );
+
+  const app = createApiApp({
+    config: {
+      name: "users-api",
+      region: "sa-east-1",
+      stage: "test",
+    },
+    routes: [routeModule(routes, { basePath: "/users" })],
+  });
+  const service = api(app, { name: "users-api" });
+  const response = await service.handler(
+    lambdaEvent({
+      rawPath: "/users/usr_1",
+      requestContext: {
+        http: {
+          method: "GET",
+          path: "/users/usr_1",
+        },
+      },
+    }),
+    {
+      awsRequestId: "req_123",
+    } as LambdaContext
+  );
+
+  expect(response.statusCode).toBe(200);
+  expect(JSON.parse(response.body)).toEqual({
+    data: {
+      id: "usr_1",
+      requestId: "req_123",
+      service: "users-api",
+    },
+  });
+});
+
+test("returns default JSON errors for missing routes", async () => {
+  const app = createApiApp({ config: { name: "missing-route-api" } });
+  const service = api(app);
+  const response = await service.handler(
+    lambdaEvent({
+      rawPath: "/missing",
+      requestContext: {
+        http: {
+          method: "GET",
+          path: "/missing",
+        },
+      },
+    })
+  );
+
+  expect(response.statusCode).toBe(404);
+  expect(JSON.parse(response.body)).toEqual({
+    error: {
+      code: "NOT_FOUND",
+      message: "Route not found",
+    },
+  });
+});
+
+test("creates a starter API project", async () => {
+  const directory = `/private/tmp/voke-created-api-${crypto.randomUUID()}`;
+
+  await createApiProject({
+    directory,
+    name: "created-api",
+  });
+
+  const packageJson = await Bun.file(`${directory}/package.json`).json();
+  const index = await Bun.file(`${directory}/src/index.ts`).text();
+  const healthRoute = await Bun.file(
+    `${directory}/src/routes/health.ts`
+  ).text();
+  const testFile = await Bun.file(`${directory}/test/api.test.ts`).text();
+
+  expect(packageJson.name).toBe("@voke/created-api");
+  expect(await Bun.file(`${directory}/voke.config.ts`).exists()).toBe(true);
+  expect(index).toContain("createApiApp");
+  expect(index).toContain("voke.config");
+  expect(healthRoute).toContain("healthRoutes.get");
+  expect(testFile).toContain("responds to health checks");
+});
+
+test("normalizes project and CloudFormation settings through defineConfig", () => {
+  const config = defineConfig({
+    build: {
+      outdir: "./build",
+    },
+    cloudFormation: {
+      environment: {
+        LOG_LEVEL: "debug",
+      },
+      handler: "api.handler",
+      out: "./build/stack.json",
+      resources: {
+        ordersTable: dynamodbTable({ partitionKey: "id" }),
+      },
+    },
+    entrypoint: "./src/api.ts",
+    name: "orders-api",
+    region: "sa-east-1",
+    stage: "prod",
+  });
+
+  expect(config).toEqual({
+    build: {
+      outdir: "./build",
+    },
+    cloudFormation: {
+      environment: {
+        LOG_LEVEL: "debug",
+      },
+      handler: "api.handler",
+      out: "./build/stack.json",
+      resources: {
+        ordersTable: dynamodbTable({ partitionKey: "id" }),
+      },
+    },
+    entrypoint: "./src/api.ts",
+    name: "orders-api",
+    region: "sa-east-1",
+    stage: "prod",
+  });
+});
+
+test("exposes AWS resource helpers from voke/aws", () => {
+  const template = synthesizeCloudFormation(
+    defineConfig({
+      cloudFormation: {
+        resources: {
+          jobsQueue: sqsQueue(),
+          notificationsTopic: snsTopic(),
+          ordersTable: dynamodbTable({ partitionKey: "id" }),
+          publicConfig: ssmParameter({ value: "enabled" }),
+          signingSecret: secret(),
+          uploadsBucket: s3Bucket(),
+        },
+      },
+      name: "aws-subpath-api",
+    })
+  );
+
+  expect(template.Resources.OrdersTable?.Type).toBe("AWS::DynamoDB::Table");
+  expect(template.Resources.JobsQueue?.Type).toBe("AWS::SQS::Queue");
+  expect(template.Resources.UploadsBucket?.Type).toBe("AWS::S3::Bucket");
+  expect(template.Resources.NotificationsTopic?.Type).toBe("AWS::SNS::Topic");
+  expect(template.Resources.SigningSecret?.Type).toBe(
+    "AWS::SecretsManager::Secret"
+  );
+  expect(template.Resources.PublicConfig?.Type).toBe("AWS::SSM::Parameter");
+});
+
+test("loads voke.config.ts default export", async () => {
+  const directory = `/private/tmp/voke-config-${crypto.randomUUID()}`;
+  const configPath = `${directory}/voke.config.ts`;
+
+  await Bun.$`mkdir -p ${directory}`;
+  await Bun.write(
+    configPath,
+    `import { defineConfig } from "${import.meta.dir}/../src/index.ts";
+import { sqsQueue } from "${import.meta.dir}/../src/aws.ts";
+
+export default defineConfig({
+  name: "configured-api",
+  stage: "test",
+  region: "sa-east-1",
+  entrypoint: "./src/service.ts",
+  cloudFormation: {
+    out: "./build/template.json",
+    environment: {
+      LOG_LEVEL: "info",
+    },
+    resources: {
+      jobsQueue: sqsQueue(),
+    },
+  },
+});
+`
+  );
+
+  const config = await loadVokeConfig({ path: configPath });
+
+  expect(config.name).toBe("configured-api");
+  expect(config.stage).toBe("test");
+  expect(config.region).toBe("sa-east-1");
+  expect(config.entrypoint).toBe("./src/service.ts");
+  expect(config.cloudFormation.out).toBe("./build/template.json");
+  expect(config.cloudFormation.environment).toEqual({ LOG_LEVEL: "info" });
+  expect(Object.keys(config.cloudFormation.resources)).toEqual(["jobsQueue"]);
+});
+
+test("synth CLI reads voke.config.ts and writes the configured template path", async () => {
+  const directory = `/private/tmp/voke-synth-config-${crypto.randomUUID()}`;
+  const out = `${directory}/build/template.json`;
+  const configPath = `${directory}/voke.config.ts`;
+
+  await Bun.$`mkdir -p ${directory}`;
+  await Bun.write(
+    configPath,
+    `import { defineConfig } from "${import.meta.dir}/../src/index.ts";
+import { sqsQueue } from "${import.meta.dir}/../src/aws.ts";
+
+export default defineConfig({
+  name: "configured-synth",
+  stage: "qa",
+  region: "sa-east-1",
+  entrypoint: "./src/service.ts",
+  cloudFormation: {
+    out: "${out}",
+    environment: {
+      LOG_LEVEL: "info",
+    },
+    resources: {
+      jobsQueue: sqsQueue(),
+    },
+  },
+});
+`
+  );
+
+  await runCli(["synth", "--config", configPath]);
+
+  const template = await Bun.file(out).json();
+
+  expect(template.Description).toBe("Voke stack for configured-synth (qa)");
+  expect(template.Resources.Function.Metadata.VokeEntrypoint).toBe(
+    "./src/service.ts"
+  );
+  expect(
+    template.Resources.Function.Properties.Environment.Variables.LOG_LEVEL
+  ).toBe("info");
+  expect(
+    template.Resources.Function.Properties.Environment.Variables
+      .VOKE_RESOURCE_JOBS_QUEUE_URL
+  ).toEqual({
+    Ref: "JobsQueue",
+  });
+});
+
+test("runs create and build through the CLI parser", async () => {
+  const directory = `/private/tmp/voke-cli-api-${crypto.randomUUID()}`;
+  const buildDirectory = `/private/tmp/voke-cli-build-${crypto.randomUUID()}`;
+  const entrypoint = `${directory}/src/smoke.ts`;
+
+  await runCli(["create", "api", "cli-api", directory]);
+  await Bun.write(
+    entrypoint,
+    "export default { fetch: () => new Response('ok') };\n"
+  );
+  await runCli(["build", entrypoint, buildDirectory]);
+
+  expect(await Bun.file(`${directory}/src/routes/health.ts`).exists()).toBe(
+    true
+  );
+  expect(await Bun.file(`${buildDirectory}/smoke.js`).exists()).toBe(true);
+});
+
+test("synthesizes a CloudFormation template with API, Lambda, IAM, resources, bindings, and outputs", () => {
+  const template = synthesizeCloudFormation(
+    defineConfig({
+      cloudFormation: {
+        environment: {
+          LOG_LEVEL: "info",
+        },
+        resources: {
+          eventsQueue: sqsQueue(),
+          orderCreatedTopic: snsTopic(),
+          ordersTable: dynamodbTable({ partitionKey: "pk", sortKey: "sk" }),
+          publicConfig: ssmParameter({ value: "enabled" }),
+          signingSecret: secret(),
+          uploadsBucket: s3Bucket(),
+        },
+      },
+      entrypoint: "./src/index.ts",
+      name: "orders-api",
+      region: "sa-east-1",
+      stage: "prod",
+    })
+  );
+  const resources = template.Resources;
+  const outputs = template.Outputs;
+  const apiResource = resources.Api;
+  const functionResource = resources.Function;
+  const functionRoleResource = resources.FunctionRole as unknown as {
+    Properties: {
+      Policies: { PolicyDocument: { Statement: unknown[] } }[];
+    };
+  };
+  const apiUrlOutput = outputs.ApiUrl;
+  const ordersTableOutput = outputs.OrdersTableName;
+
+  if (
+    apiResource === undefined ||
+    functionResource === undefined ||
+    apiUrlOutput === undefined ||
+    ordersTableOutput === undefined
+  ) {
+    throw new Error("Expected synthesized stack resources and outputs");
+  }
+
+  const functionProperties = functionResource.Properties as {
+    Environment: { Variables: Record<string, unknown> };
+  };
+
+  expect(template.AWSTemplateFormatVersion).toBe("2010-09-09");
+  expect(apiResource.Type).toBe("AWS::ApiGatewayV2::Api");
+  expect(functionResource.Type).toBe("AWS::Lambda::Function");
+  expect(functionProperties.Environment.Variables).toEqual({
+    LOG_LEVEL: "info",
+    VOKE_RESOURCE_EVENTS_QUEUE_URL: { Ref: "EventsQueue" },
+    VOKE_RESOURCE_ORDERS_TABLE_NAME: { Ref: "OrdersTable" },
+    VOKE_RESOURCE_ORDER_CREATED_TOPIC_ARN: { Ref: "OrderCreatedTopic" },
+    VOKE_RESOURCE_PUBLIC_CONFIG_NAME: { Ref: "PublicConfig" },
+    VOKE_RESOURCE_SIGNING_SECRET_ARN: { "Fn::GetAtt": ["SigningSecret", "Id"] },
+    VOKE_RESOURCE_UPLOADS_BUCKET_NAME: { Ref: "UploadsBucket" },
+  });
+  expect(
+    functionRoleResource.Properties.Policies[0]?.PolicyDocument.Statement
+  ).toContainEqual({
+    Action: [
+      "dynamodb:GetItem",
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    Effect: "Allow",
+    Resource: { "Fn::GetAtt": ["OrdersTable", "Arn"] },
+  });
+  expect(apiUrlOutput.Value).toEqual({
+    "Fn::Sub": `https://\${Api}.execute-api.\${AWS::Region}.amazonaws.com/prod`,
+  });
+  expect(ordersTableOutput.Value).toEqual({ Ref: "OrdersTable" });
+});
+
+test("matches the CloudFormation snapshot for a minimal API stack", async () => {
+  const template = synthesizeCloudFormation({
+    entrypoint: "./src/index.ts",
+    name: "snapshot-api",
+    region: "us-east-1",
+    stage: "test",
+  });
+  const snapshot = await Bun.file(
+    `${import.meta.dir}/fixtures/minimal-cloudformation.json`
+  ).json();
+
+  expect(template).toEqual(snapshot);
+});
+
+test("creates typed AWS resource bindings and client config from environment", () => {
+  const table = bindResource("ordersTable", "name");
+  const queue = bindResource("eventsQueue", "url");
+  const previous = {
+    endpoint: Bun.env.VOKE_AWS_ENDPOINT_URL,
+    queue: Bun.env.VOKE_RESOURCE_EVENTS_QUEUE_URL,
+    region: Bun.env.AWS_REGION,
+    table: Bun.env.VOKE_RESOURCE_ORDERS_TABLE_NAME,
+  };
+
+  Bun.env.VOKE_RESOURCE_ORDERS_TABLE_NAME = "orders-prod";
+  Bun.env.VOKE_RESOURCE_EVENTS_QUEUE_URL = "https://sqs.local/queue";
+  Bun.env.AWS_REGION = "sa-east-1";
+  Bun.env.VOKE_AWS_ENDPOINT_URL = "http://localhost:4566";
+
+  expect(table.envName).toBe("VOKE_RESOURCE_ORDERS_TABLE_NAME");
+  expect(table.value()).toBe("orders-prod");
+  expect(queue.value()).toBe("https://sqs.local/queue");
+  expect(createAwsClientConfig()).toEqual({
+    endpoint: "http://localhost:4566",
+    region: "sa-east-1",
+  });
+
+  restoreEnv("VOKE_RESOURCE_ORDERS_TABLE_NAME", previous.table);
+  restoreEnv("VOKE_RESOURCE_EVENTS_QUEUE_URL", previous.queue);
+  restoreEnv("AWS_REGION", previous.region);
+  restoreEnv("VOKE_AWS_ENDPOINT_URL", previous.endpoint);
+});
+
+test("runs synth, deploy, and remove through the CLI parser", async () => {
+  const directory = `/private/tmp/voke-cfn-${crypto.randomUUID()}`;
+  const templatePath = `${directory}/template.json`;
+  const commands: string[][] = [];
+
+  await runCli([
+    "synth",
+    "--name",
+    "orders-api",
+    "--stage",
+    "prod",
+    "--out",
+    templatePath,
+  ]);
+  await runCli(
+    [
+      "deploy",
+      "--name",
+      "orders-api",
+      "--stage",
+      "prod",
+      "--template",
+      templatePath,
+    ],
+    {
+      run: (command) => {
+        commands.push(command);
+      },
+    }
+  );
+  await runCli(["remove", "--name", "orders-api", "--stage", "prod"], {
+    run: (command) => {
+      commands.push(command);
+    },
+  });
+
+  const template = await Bun.file(templatePath).json();
+
+  expect(template.Resources.Function.Type).toBe("AWS::Lambda::Function");
+  expect(commands).toEqual([
+    [
+      "aws",
+      "cloudformation",
+      "deploy",
+      "--stack-name",
+      "orders-api-prod",
+      "--template-file",
+      templatePath,
+      "--capabilities",
+      "CAPABILITY_IAM",
+      "--region",
+      "us-east-1",
+    ],
+    [
+      "aws",
+      "cloudformation",
+      "delete-stack",
+      "--stack-name",
+      "orders-api-prod",
+      "--region",
+      "us-east-1",
+    ],
+  ]);
+});
