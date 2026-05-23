@@ -100,4 +100,19 @@ export const handler = createSqsEventHandler({
 });
 ```
 
-Each message body is parsed as JSON and validated with the provided Standard Schema-compatible validator. Invalid JSON or schema failures become partial batch failures by default; use `sqsMessageBatch(schema, { invalidMessageBody: "include" })` when a handler needs to inspect invalid messages directly.
+Use `sqsQueue()` in config to define the AWS queue resource. Use `sqsEventSource("ordersQueue")` on a Function to attach that queue as a Lambda event source.
+
+Local tests can send minimal body-first messages:
+
+```ts
+await functions.sendEvent("processOrder", {
+  messages: [{ body: { orderId: "ord_1" } }],
+  source: "sqs",
+});
+```
+
+Each message body is serialized as JSON locally, parsed as JSON in the SQS runtime, and validated with the provided Standard Schema-compatible validator. Invalid JSON or schema failures become partial batch failures by default; use `sqsMessageBatch(schema, { invalidMessageBody: "include" })` when a handler needs to inspect invalid messages directly.
+
+Voke enables Lambda partial batch failure reporting for every synthesized SQS Event Source mapping. `batch.ok()` returns `{ batchItemFailures: [] }` unless validation already marked messages as failed, and `batch.batchResult().fail(message)` adds explicit per-message failures.
+
+The v1 SQS boundary is intentionally small: Event Source Functions cannot mix with HTTP routes or invokable output contracts, event-source options are limited to batch size, maximum batching window, and enabled state, and DLQ/redrive configuration is deferred to the queue resource lifecycle.

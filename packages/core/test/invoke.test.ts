@@ -8,6 +8,7 @@ import {
   InvokeError,
   sqsEventSource,
   sqsMessageBatch,
+  VokeConfigError,
   withInvokeTrace,
 } from "../src/index";
 import type {
@@ -298,6 +299,32 @@ test("sends SQS events to event source functions with minimal messages", async (
   expect(result).toEqual({ batchItemFailures: [] });
 });
 
+test("rejects SQS event source functions mixed with HTTP routes or invokable output", () => {
+  expect(() =>
+    defineFunction({
+      events: [sqsEventSource("ordersQueue")],
+      handler: (event: { ok: () => unknown }) => event.ok(),
+      input: sqsMessageBatch(userInputSchema),
+      routes: [
+        {
+          handler: () => ({ ok: true }),
+          method: "GET",
+          middleware: [],
+          path: "/orders",
+        },
+      ],
+    } as never)
+  ).toThrow(VokeConfigError);
+  expect(() =>
+    defineFunction({
+      events: [sqsEventSource("ordersQueue")],
+      handler: (event: { ok: () => unknown }) => event.ok(),
+      input: sqsMessageBatch(userInputSchema),
+      output: userOutputSchema,
+    } as never)
+  ).toThrow(VokeConfigError);
+});
+
 test("automatically reports invalid SQS message bodies as per-message failures", async () => {
   const handled: string[] = [];
   const functions = defineFunctions({
@@ -325,6 +352,42 @@ test("automatically reports invalid SQS message bodies as per-message failures",
   expect(handled).toEqual(["usr_1", "usr_2"]);
   expect(result).toEqual({
     batchItemFailures: [{ itemIdentifier: "invalid" }],
+  });
+});
+
+test("combines invalid SQS message failures with handler-reported failures", async () => {
+  const functions = defineFunctions({
+    processOrder: defineFunction({
+      events: [sqsEventSource("ordersQueue")],
+      handler: (event) => {
+        const result = event.batchResult();
+
+        for (const message of event.messages) {
+          if (message.body.id === "usr_failed") {
+            result.fail(message);
+          }
+        }
+
+        return result;
+      },
+      input: sqsMessageBatch(userInputSchema),
+    }),
+  });
+
+  const result = await functions.sendEvent("processOrder", {
+    messages: [
+      { body: { id: "usr_failed" }, id: "handler-failed" },
+      { body: "not json", id: "invalid-json" },
+      { body: {}, id: "schema-failed" },
+    ],
+  });
+
+  expect(result).toEqual({
+    batchItemFailures: [
+      { itemIdentifier: "invalid-json" },
+      { itemIdentifier: "schema-failed" },
+      { itemIdentifier: "handler-failed" },
+    ],
   });
 });
 
@@ -417,6 +480,56 @@ test("handles deployed AWS SQS events through the Voke adapter", async () => {
   expect(response).toEqual({
     batchItemFailures: [{ itemIdentifier: "invalid" }],
   });
+});
+
+test("deployed SQS adapter fails clearly for incompatible functions and handler failures", async () => {
+  const functions = defineFunctions({
+    getUser: defineFunction({
+      handler: (payload) => ({ id: payload.id, name: "Victor" }),
+      input: userInputSchema,
+      output: userOutputSchema,
+    }),
+    processOrder: defineFunction({
+      events: [sqsEventSource("ordersQueue")],
+      handler: () => {
+        throw new Error("processor unavailable");
+      },
+      input: sqsMessageBatch(userInputSchema),
+    }),
+  });
+  const event = {
+    Records: [
+      {
+        attributes: {},
+        awsRegion: "us-east-1",
+        body: JSON.stringify({ id: "usr_1" }),
+        eventSource: "aws:sqs" as const,
+        eventSourceARN: "arn:aws:sqs:us-east-1:123456789012:orders",
+        md5OfBody: "",
+        messageAttributes: {},
+        messageId: "valid",
+        receiptHandle: "receipt-valid",
+      },
+    ],
+  };
+
+  await expect(
+    createSqsEventHandler({
+      function: "getUser" as never,
+      functions,
+    })(event)
+  ).rejects.toMatchObject({
+    code: "MISSING_FUNCTION",
+    functionName: "getUser",
+    message:
+      'Function "getUser" cannot receive events with functions.sendEvent',
+  });
+  await expect(
+    createSqsEventHandler({
+      function: "processOrder",
+      functions,
+    })(event)
+  ).rejects.toThrow("processor unavailable");
 });
 
 test("invokes AWS Lambda through an injected transport", async () => {

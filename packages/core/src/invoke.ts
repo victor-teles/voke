@@ -1564,6 +1564,7 @@ export function defineFunction(
     | (EventFunctionDefinitionInput<
         SqsMessageBatchSchema<AnyStandardSchema, SqsInvalidMessageBodyMode>
       > & {
+        readonly output?: AnyStandardSchema;
         readonly routes?: readonly AnyRouteDefinition[];
       })
     | RouteFunctionDefinitionInput
@@ -1576,6 +1577,12 @@ export function defineFunction(
     if (definition.routes !== undefined && definition.routes.length > 0) {
       throw new VokeConfigError(
         "Event Source Functions cannot define HTTP routes in v1."
+      );
+    }
+
+    if (definition.output !== undefined) {
+      throw new VokeConfigError(
+        "Event Source Functions cannot define an output schema because Voke owns the event response contract."
       );
     }
 

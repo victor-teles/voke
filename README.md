@@ -150,6 +150,8 @@ export const handler = createSqsEventHandler({
 
 Use `functions.sendEvent("processOrder", { messages: [...] })` in local tests. Voke parses each JSON message body with the Standard Schema-compatible message schema, reports invalid messages as partial batch failures by default, and synthesizes Lambda event source mappings with `ReportBatchItemFailures` enabled.
 
+`sqsQueue()` defines the AWS queue resource; `sqsEventSource("ordersQueue")` attaches that queue to a Function. Local tests may pass minimal `{ body }` messages and optionally `source: "sqs"`. SQS Event Source Functions cannot mix with HTTP routes or invokable output contracts in v1, and queue DLQ/redrive settings stay with future queue resource lifecycle work.
+
 ## Function Invocation
 
 Define invokable Functions with Standard Schema-compatible input/output contracts, group them in a Function Registry, and call them through `functions.invoke(...)`:
