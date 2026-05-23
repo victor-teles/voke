@@ -1,5 +1,6 @@
 import type { Context, Hono, MiddlewareHandler } from "hono";
 
+import packageJson from "../package.json";
 import { createAwsLambdaInvokeTransport } from "./aws-lambda-invoke-transport";
 import type { VokeNodeRuntime } from "./config";
 import type { VokeEnv } from "./context";
@@ -1472,7 +1473,7 @@ const invokeFunction = async (
   );
 };
 
-const invokeRegistryFunction = async (
+export const invokeRegistryFunction = async (
   registry: object,
   definition: InvokableFunctionDefinition | undefined,
   payload: unknown,
@@ -1681,6 +1682,125 @@ export const assertUniqueFunctionRoutes = (
       routes.set(routeKey, key);
     }
   }
+};
+
+const color = {
+  bold: "\u001B[1m",
+  cyan: "\u001B[36m",
+  dim: "\u001B[2m",
+  green: "\u001B[32m",
+  reset: "\u001B[0m",
+} as const;
+
+const colorize = (value: string, ...codes: string[]): string =>
+  `${codes.join("")}${value}${color.reset}`;
+
+const formatEventSourceSummary = (eventSource: EventSourceDefinition): string =>
+  [
+    colorize(eventSource.source.toUpperCase(), color.green),
+    colorize(eventSource.queue, color.bold),
+    colorize(
+      `batchSize=${eventSource.options.batchSize ?? "-"} maxBatchingWindowSeconds=${eventSource.options.maxBatchingWindowSeconds ?? "-"} enabled=${eventSource.options.enabled ?? true}`,
+      color.dim
+    ),
+  ].join(" ");
+
+const routeUrl = (path: string): string | undefined => {
+  const origin = Bun.env.VOKE_DEV_ORIGIN;
+
+  if (origin === undefined) {
+    return undefined;
+  }
+
+  return new URL(path, origin).toString();
+};
+
+const formatRouteSummary = (route: AnyRouteDefinition): string => {
+  const url = routeUrl(route.path);
+  const formattedRoute = `${colorize(route.method, color.green)} ${route.path}`;
+
+  return `    ${formattedRoute}${url === undefined ? "" : ` ${colorize("->", color.dim)} ${colorize(url, color.cyan)}`}`;
+};
+
+const devOrigin = (): string =>
+  (Bun.env.VOKE_DEV_ORIGIN ?? "http://localhost:3000").replace(/[/]+$/u, "");
+
+const devReadyMs = (): number => {
+  const startedAt = Number(Bun.env.VOKE_DEV_STARTED_AT);
+
+  if (!Number.isFinite(startedAt)) {
+    return 0;
+  }
+
+  return Math.max(0, Date.now() - startedAt);
+};
+
+const formatDevHeader = (): string =>
+  [
+    `  ${colorize("VOKE", color.cyan, color.bold)} ${colorize(`v${packageJson.version}`, color.dim)}  ${colorize(`ready in ${devReadyMs()} ms`, color.green)}`,
+    "",
+    `  ${colorize("➜", color.green)}  ${colorize("Local:", color.bold)}   ${devOrigin()}/`,
+    `  ${colorize("➜", color.green)}  ${colorize("Network:", color.bold)} use --hostname 0.0.0.0 to expose`,
+  ].join("\n");
+
+export const formatDevFunctionSummary = (
+  registry: FunctionRegistry | FunctionRegistryInput
+): string => {
+  const routeFunctions: string[] = [];
+  const invokableFunctions: string[] = [];
+  const eventFunctions: string[] = [];
+
+  for (const [key, definition] of Object.entries(registry)) {
+    if (key === "invoke" || key === "route" || key === "sendEvent") {
+      continue;
+    }
+
+    if (definition.kind === "event") {
+      const eventDefinition = definition as EventFunctionDefinition;
+
+      eventFunctions.push(
+        [
+          `  ${colorize(key, color.bold)}`,
+          ...eventDefinition.events.map(
+            (event) => `    ${formatEventSourceSummary(event)}`
+          ),
+        ].join("\n")
+      );
+      continue;
+    }
+
+    if (definition.routes !== undefined && definition.routes.length > 0) {
+      const routeDefinition = definition as RouteFunctionDefinition;
+
+      routeFunctions.push(
+        [
+          `  ${colorize(key, color.bold)}`,
+          ...routeDefinition.routes.map(formatRouteSummary),
+        ].join("\n")
+      );
+      continue;
+    }
+
+    if (definition.kind === "invokable") {
+      invokableFunctions.push(
+        `  ${colorize(key, color.bold)}\n    ${colorize("internal", color.dim)}`
+      );
+    }
+  }
+
+  const summarySections: { lines: string[]; title: string }[] = [
+    { lines: routeFunctions, title: "Route Functions" },
+    { lines: invokableFunctions, title: "Invokable Functions" },
+    { lines: eventFunctions, title: "Event Functions" },
+  ];
+  const sections = summarySections
+    .filter((section) => section.lines.length > 0)
+    .map(
+      (section) =>
+        `${colorize(section.title, color.cyan, color.bold)}\n${section.lines.join("\n")}`
+    );
+
+  return [formatDevHeader(), ...sections].join("\n\n").trimEnd();
 };
 
 export const defineFunctions = <const TRegistry extends FunctionRegistryInput>(

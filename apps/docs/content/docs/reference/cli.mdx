@@ -55,6 +55,15 @@ voke local reset
 
 Runs Floci-backed local AWS workflows.
 
+## Remote code generation
+
+```bash
+voke remote generate
+voke remote generate users
+```
+
+Fetches runtime-exposed Function Contract metadata from configured remotes and writes generated Remote Function Registry modules. Without a name, Voke generates every configured remote. With a name, Voke generates only that remote.
+
 ## Serverless migration
 
 ```bash

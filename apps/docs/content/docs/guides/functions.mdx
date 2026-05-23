@@ -32,6 +32,62 @@ const functions = defineFunctions({ getUser });
 const user = await functions.invoke("getUser", { id: "usr_1" });
 ```
 
+## Remote Function Registries
+
+Use a **Remote Function Registry** when one Voke Project needs to invoke Functions exposed by another Voke Project during local development.
+
+Provider project:
+
+```ts
+import { createGateway, defineFunction, defineFunctions } from "voke";
+
+export const functions = defineFunctions({
+  getUser: defineFunction({
+    input: userInput,
+    output: userOutput,
+    handler: async (payload) => ({ id: payload.id, name: "Victor" }),
+  }),
+});
+
+export const gateway = createGateway({
+  config: { name: "users" },
+  functions,
+});
+```
+
+Consumer config:
+
+```ts
+import { defineConfig } from "voke";
+
+export default defineConfig({
+  name: "wallet",
+  remotes: {
+    users: {
+      targets: {
+        local: "http://localhost:3001",
+      },
+    },
+  },
+});
+```
+
+Generate the checked-in remote module:
+
+```bash
+voke remote generate users
+```
+
+Then invoke by Function key from the generated registry:
+
+```ts
+import { users } from "./voke/remotes/users";
+
+const user = await users.invoke("getUser", { id: "usr_1" });
+```
+
+During `voke dev`, the provider exposes Voke-owned contract metadata at `/_voke/contract` and a reserved internal Function invoke endpoint. Internal Functions do not need public HTTP routes to be invoked by another local Voke Project.
+
 ## Registry identity
 
 The Function Registry key is the stable project identity used for type-safe invocation. The optional `name` field on a Function is a deployed Lambda name override, not the local registry key.

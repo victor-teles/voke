@@ -9,6 +9,7 @@ import { createDevPlan } from "./dev";
 import { VokeError } from "./errors";
 import { createLocalBootstrapPlan, LocalProviderError } from "./local";
 import type { LocalProvider } from "./local";
+import { generateRemoteModules } from "./remote";
 import { writeServerlessMigration } from "./serverless-migration";
 
 interface CreateApiProjectOptions {
@@ -31,6 +32,7 @@ type CommandRunner = (
 
 interface CommandRunOptions {
   env?: Record<string, string>;
+  stdoutFilter?: (line: string) => boolean;
 }
 
 interface ParsedFlags {
@@ -59,6 +61,7 @@ Usage:
   voke build [entrypoint] [outdir]
   voke create api <name> [directory]
   voke synth [entrypoint] [out] [--config voke.config.ts] [--name api] [--stage local] [--region us-east-1]
+  voke remote generate [name]
   voke local start [--compose .voke/local/docker-compose.yml]
   voke local stop [--compose .voke/local/docker-compose.yml]
   voke local reset [--compose .voke/local/docker-compose.yml]
@@ -86,12 +89,13 @@ const formatCommand = (argv: string[]): string => ["voke", ...argv].join(" ");
 const commandUsage: Record<string, string> = {
   build: "Usage: voke build [entrypoint] [outdir]",
   create: "Usage: voke create api <name> [directory]",
-  dev: "Usage: voke dev [entrypoint]",
+  dev: "Usage: voke dev [entrypoint] [--hostname localhost] [--port 3000]",
   experimental:
     "Usage: voke experimental <deploy|remove> [--config voke.config.ts]",
   local: "Usage: voke local <start|stop|reset|bootstrap>",
   migrate:
     "Usage: voke migrate serverless [serverless.yml] [--out ./voke-migration]",
+  remote: "Usage: voke remote generate [name]",
   synth:
     "Usage: voke synth [entrypoint] [out] [--config voke.config.ts] [--name api] [--stage local] [--region us-east-1]",
 };
@@ -189,24 +193,63 @@ const writeLocalCompose = async (
   );
 };
 
+const forwardFilteredStdout = async (
+  stdout: ReadableStream<Uint8Array>,
+  stdoutFilter: (line: string) => boolean
+): Promise<void> => {
+  const decoder = new TextDecoder();
+  let pending = "";
+
+  for await (const chunk of stdout) {
+    pending += decoder.decode(chunk, { stream: true });
+    const lines = pending.split("\n");
+    pending = lines.pop() ?? "";
+
+    for (const line of lines) {
+      if (stdoutFilter(line)) {
+        process.stdout.write(`${line}\n`);
+      }
+    }
+  }
+
+  pending += decoder.decode();
+
+  if (pending.length > 0 && stdoutFilter(pending)) {
+    process.stdout.write(pending);
+  }
+};
+
 const runCommand = async (
   command: string[],
   options: CommandRunOptions = {}
 ): Promise<void> => {
+  const stdout = options.stdoutFilter === undefined ? "inherit" : "pipe";
   const process = Bun.spawn(command, {
     env: {
       ...Bun.env,
       ...options.env,
     },
     stderr: "inherit",
-    stdout: "inherit",
+    stdout,
   });
+
+  if (
+    options.stdoutFilter !== undefined &&
+    process.stdout !== null &&
+    process.stdout !== undefined
+  ) {
+    await forwardFilteredStdout(process.stdout, options.stdoutFilter);
+  }
+
   const exitCode = await process.exited;
 
   if (exitCode !== 0) {
     throw new Error(`Command failed (${exitCode}): ${command.join(" ")}`);
   }
 };
+
+const hideBunDevelopmentServerBanner = (line: string): boolean =>
+  !line.includes("Started development server:");
 
 const errorMessage = (error: unknown): string => {
   if (error instanceof Error) {
@@ -517,6 +560,8 @@ export const dev = async (
   options: {
     endpoint?: string;
     entrypoint?: string;
+    hostname?: string;
+    port?: number;
     region?: string;
     run?: CommandRunner;
     stage?: string;
@@ -525,11 +570,16 @@ export const dev = async (
   const plan = await createDevPlan(config, {
     endpoint: options.endpoint,
     entrypoint: options.entrypoint,
+    hostname: options.hostname,
+    port: options.port,
     region: options.region,
     stage: options.stage,
   });
 
-  await (options.run ?? runCommand)(plan.command, { env: plan.environment });
+  await (options.run ?? runCommand)(plan.command, {
+    env: plan.environment,
+    stdoutFilter: hideBunDevelopmentServerBanner,
+  });
 };
 
 export const local = async (
@@ -640,6 +690,21 @@ const experimental = async (
   );
 };
 
+const remote = async (
+  subcommand: string | undefined,
+  flags: ParsedFlags
+): Promise<void> => {
+  if (subcommand !== "generate") {
+    throw new CliUsageError("Usage: voke remote generate [name]");
+  }
+
+  const config = await loadConfigFromFlags(flags);
+  await generateRemoteModules(config, {
+    names:
+      flags.positional.length === 0 ? undefined : flags.positional.slice(1),
+  });
+};
+
 const commandHandlers: Record<string, CommandHandler> = {
   build: async (_args, flags, options) => {
     const config = await loadConfigFromFlags(flags);
@@ -669,6 +734,9 @@ const commandHandlers: Record<string, CommandHandler> = {
     await dev(config, {
       endpoint: flags.values.endpoint,
       entrypoint: flags.positional[0] ?? flags.values.entrypoint,
+      hostname: flags.values.hostname,
+      port:
+        flags.values.port === undefined ? undefined : Number(flags.values.port),
       region: flags.values.region,
       run: options.run ?? runCommand,
       stage: flags.values.stage,
@@ -688,6 +756,12 @@ const commandHandlers: Record<string, CommandHandler> = {
     }
 
     await migrateServerless(parseFlags(args.slice(1)));
+  },
+  remote: async (args, flags) => {
+    await remote(args[0], {
+      positional: args,
+      values: flags.values,
+    });
   },
   synth: async (_args, flags) => {
     const config = await loadConfigFromFlags(flags);
@@ -757,7 +831,7 @@ export const runCli = async (
 
 if (import.meta.main) {
   try {
-    await runCli(undefined, { showDetails: true });
+    await runCli(undefined, { showDetails: false });
   } catch (error) {
     console.error(error instanceof Error ? error.message : error);
     process.exit(1);

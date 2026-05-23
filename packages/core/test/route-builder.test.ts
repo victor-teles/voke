@@ -6,6 +6,8 @@ import {
   createGateway,
   defineFunction,
   defineFunctions,
+  sqsEventSource,
+  sqsMessageBatch,
   VokeConfigError,
   Voke,
 } from "../src/index";
@@ -28,6 +30,18 @@ const failingSchema = (message: string): StandardSchemaV1<unknown, never> => ({
     version: 1,
   },
 });
+
+const restoreEnv = (name: string, value?: string): void => {
+  Bun.env[name] = value;
+};
+
+const ansi = {
+  bold: "\u001B[1m",
+  cyan: "\u001B[36m",
+  dim: "\u001B[2m",
+  green: "\u001B[32m",
+  reset: "\u001B[0m",
+} as const;
 
 test("executes route-backed functions through typed route calls and gateway requests", async () => {
   const app = new Voke();
@@ -123,6 +137,76 @@ test("executes route-backed functions through typed route calls and gateway requ
 
   expect(postResponse.status).toBe(201);
   expect(await postResponse.text()).toBe("usr_3:Victor");
+});
+
+test("prints a human function summary automatically under voke dev", () => {
+  const app = new Voke();
+  const previousOrigin = Bun.env.VOKE_DEV_ORIGIN;
+  const previousStartedAt = Bun.env.VOKE_DEV_STARTED_AT;
+  const previousSummary = Bun.env.VOKE_DEV_SUMMARY;
+  const previousInfo = console.info;
+  const logs: string[] = [];
+
+  Bun.env.VOKE_DEV_ORIGIN = "http://localhost:3000";
+  Bun.env.VOKE_DEV_STARTED_AT = String(Date.now() + 1000);
+  Bun.env.VOKE_DEV_SUMMARY = "1";
+  console.info = (message?: unknown) => {
+    logs.push(String(message));
+  };
+
+  try {
+    const functions = defineFunctions({
+      getUser: defineFunction({
+        handler: () => ({ id: "usr_1" }),
+        output: schema<unknown, { id: string }>(() => ({ id: "usr_1" })),
+      }),
+      processOrders: defineFunction({
+        events: [
+          sqsEventSource("ordersQueue", {
+            batchSize: 10,
+            maxBatchingWindowSeconds: 5,
+          }),
+        ],
+        handler: (batch) => batch.ok(),
+        input: sqsMessageBatch(
+          schema<unknown, { id: string }>(() => ({ id: "ord_1" }))
+        ),
+      }),
+      routes: defineFunction({
+        routes: [
+          app.get("/health", {
+            handler: () => ({ ok: true }),
+          }),
+        ],
+      }),
+    });
+
+    createGateway({ functions });
+  } finally {
+    console.info = previousInfo;
+    restoreEnv("VOKE_DEV_ORIGIN", previousOrigin);
+    restoreEnv("VOKE_DEV_STARTED_AT", previousStartedAt);
+    restoreEnv("VOKE_DEV_SUMMARY", previousSummary);
+  }
+
+  expect(logs.map((log) => log.trimEnd())).toEqual([
+    `  ${ansi.cyan}${ansi.bold}VOKE${ansi.reset} ${ansi.dim}v0.0.0${ansi.reset}  ${ansi.green}ready in 0 ms${ansi.reset}
+
+  ${ansi.green}➜${ansi.reset}  ${ansi.bold}Local:${ansi.reset}   http://localhost:3000/
+  ${ansi.green}➜${ansi.reset}  ${ansi.bold}Network:${ansi.reset} use --hostname 0.0.0.0 to expose
+
+${ansi.cyan}${ansi.bold}Route Functions${ansi.reset}
+  ${ansi.bold}routes${ansi.reset}
+    ${ansi.green}GET${ansi.reset} /health ${ansi.dim}->${ansi.reset} ${ansi.cyan}http://localhost:3000/health${ansi.reset}
+
+${ansi.cyan}${ansi.bold}Invokable Functions${ansi.reset}
+  ${ansi.bold}getUser${ansi.reset}
+    ${ansi.dim}internal${ansi.reset}
+
+${ansi.cyan}${ansi.bold}Event Functions${ansi.reset}
+  ${ansi.bold}processOrders${ansi.reset}
+    ${ansi.green}SQS${ansi.reset} ${ansi.bold}ordersQueue${ansi.reset} ${ansi.dim}batchSize=10 maxBatchingWindowSeconds=5 enabled=true${ansi.reset}`,
+  ]);
 });
 
 test("returns a stable Voke error envelope when route body validation fails through gateway requests", async () => {

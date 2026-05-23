@@ -81,6 +81,21 @@ export { json, jsonError, type JsonBody, type JsonErrorBody } from "./http";
 export { createDevPlan, type DevPlan, type DevPlanOverrides } from "./dev";
 export { Voke } from "./route-builder";
 export {
+  createFunctionContractArtifact,
+  defineRemoteFunctions,
+  generateRemoteModules,
+  mountDevFunctionEndpoints,
+  renderRemoteModule,
+  type FunctionContractArtifact,
+  type FunctionContractMetadata,
+  type GenerateRemoteOptions,
+  type JsonSchema,
+  type RemoteFunctionRegistry,
+  type RemoteTarget,
+  type VokeRemoteConfig,
+  type VokeRemoteConfigInput,
+} from "./remote";
+export {
   VokeConfigError,
   VokeError,
   VokeModelError,
@@ -126,6 +141,7 @@ export {
   defineFunctions,
   defineFunction,
   InvokeError,
+  invokeRegistryFunction,
   sqsEventSource,
   sqsMessageBatch,
   withInvokeTrace,

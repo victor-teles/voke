@@ -25,6 +25,7 @@ export default defineConfig({
 | `region`         | AWS region for synthesized and deployed resources.                      |
 | `entrypoint`     | Source entrypoint for build, synth, and dev workflows.                  |
 | `functions`      | Optional Function Registry used by config-aware workflows.              |
+| `remotes`        | Remote Function Registry targets for local cross-project invocation.    |
 | `cloudFormation` | Resource and output declarations for template synthesis.                |
 | `runtime`        | Runtime options, including Lambda runtime selection.                    |
 | `local`          | Local provider configuration for Floci-backed AWS workflows.            |
@@ -39,4 +40,42 @@ import { bindResource, createAwsClientConfig } from "voke";
 const usersTable = bindResource("usersTable", "name");
 const dynamoConfig = createAwsClientConfig();
 const tableName = usersTable.value();
+```
+
+## Remotes
+
+Use `remotes` in the consuming Voke Project to centralize runtime targets for generated Remote Function Registries:
+
+```ts
+import { defineConfig } from "voke";
+
+export default defineConfig({
+  name: "wallet",
+  remotes: {
+    users: {
+      targets: {
+        local: "http://localhost:3001",
+      },
+    },
+  },
+});
+```
+
+The selected target defaults contract metadata discovery to `<target>/_voke/contract`. Set `contract` only when metadata is published somewhere else:
+
+```ts
+export default defineConfig({
+  name: "wallet",
+  remotes: {
+    users: {
+      out: "./src/generated/users.remote.ts",
+      targets: {
+        local: {
+          origin: "http://localhost:3001",
+          contract: "http://localhost:3001/_voke/contract",
+        },
+      },
+    },
+  },
+});
 ```

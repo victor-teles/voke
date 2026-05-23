@@ -3,7 +3,6 @@ import type { Context } from "hono";
 import type { StackResourceDefinition } from "./cloudformation";
 import type { VokeEnv } from "./context";
 import { VokeConfigError } from "./errors";
-import { defineFunctions } from "./invoke";
 import type {
   AnyFunctionDefinition,
   FunctionRegistry,
@@ -11,6 +10,8 @@ import type {
 } from "./invoke";
 import { resolveLocalProvider } from "./local-provider";
 import type { LocalProvider, LocalProviderInput } from "./local-provider";
+import { defineRemoteConfig } from "./remote";
+import type { VokeRemoteConfig, VokeRemoteConfigInput } from "./remote";
 
 export interface VokeConfig {
   api: VokeApiConfig;
@@ -23,6 +24,7 @@ export interface VokeConfig {
   dev: VokeDevConfig;
   functions: FunctionRegistry | FunctionRegistryInput;
   local: VokeLocalConfig;
+  remotes?: Record<string, VokeRemoteConfig>;
   runtime: VokeRuntimeConfig;
 }
 
@@ -78,6 +80,7 @@ export interface VokeConfigInput {
   dev?: Partial<VokeDevConfig>;
   functions?: FunctionRegistry | FunctionRegistryInput;
   local?: Partial<VokeLocalConfigInput>;
+  remotes?: Record<string, VokeRemoteConfig | VokeRemoteConfigInput>;
   runtime?: Partial<VokeRuntimeConfig>;
   handler?: string;
   environment?: Record<string, string>;
@@ -169,19 +172,38 @@ const defineRuntimeConfig = (input: VokeConfigInput): VokeRuntimeConfig => ({
   lambda: defineNodeRuntime(input.runtime?.lambda ?? "nodejs22.x"),
 });
 
-export const defineConfig = (input: VokeConfigInput): VokeConfig => ({
-  api: defineApiConfig(input),
-  build: defineBuildConfig(input),
-  cloudFormation: defineCloudFormationConfig(input),
-  dev: defineDevConfig(input),
-  entrypoint: input.entrypoint ?? "./src/index.ts",
-  functions: input.functions ?? defineFunctions({}),
-  local: defineLocalConfig(input),
-  name: input.name,
-  region: input.region ?? Bun.env.AWS_REGION ?? "us-east-1",
-  runtime: defineRuntimeConfig(input),
-  stage: input.stage ?? Bun.env.VOKE_STAGE ?? Bun.env.STAGE ?? "local",
-});
+const defineRemotesConfig = (
+  input: VokeConfigInput,
+  stage: string
+): Record<string, VokeRemoteConfig> => {
+  const remotes: Record<string, VokeRemoteConfig> = {};
+
+  for (const [name, remote] of Object.entries(input.remotes ?? {})) {
+    remotes[name] = defineRemoteConfig(name, remote, stage);
+  }
+
+  return remotes;
+};
+
+export const defineConfig = (input: VokeConfigInput): VokeConfig => {
+  const stage = input.stage ?? Bun.env.VOKE_STAGE ?? Bun.env.STAGE ?? "local";
+  const remotes = defineRemotesConfig(input, stage);
+
+  return {
+    api: defineApiConfig(input),
+    build: defineBuildConfig(input),
+    cloudFormation: defineCloudFormationConfig(input),
+    dev: defineDevConfig(input),
+    entrypoint: input.entrypoint ?? "./src/index.ts",
+    functions: input.functions ?? {},
+    local: defineLocalConfig(input),
+    name: input.name,
+    region: input.region ?? Bun.env.AWS_REGION ?? "us-east-1",
+    ...(Object.keys(remotes).length > 0 ? { remotes } : {}),
+    runtime: defineRuntimeConfig(input),
+    stage,
+  };
+};
 
 export const loadVokeConfig = async (
   options: {

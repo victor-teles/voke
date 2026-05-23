@@ -6,6 +6,7 @@ import {
   createLocalAwsEnvironment,
   createLocalResourceBindings,
 } from "./local";
+import { remoteEnvironment } from "./remote";
 
 export interface DevPlan {
   command: string[];
@@ -16,9 +17,43 @@ export interface DevPlan {
 export interface DevPlanOverrides {
   endpoint?: string;
   entrypoint?: string;
+  hostname?: string;
+  port?: number;
   region?: string;
   stage?: string;
 }
+
+const createDevOrigin = (
+  config: VokeConfig,
+  overrides: DevPlanOverrides
+): string => {
+  const hasOriginOverride =
+    overrides.hostname !== undefined || overrides.port !== undefined;
+
+  if (hasOriginOverride) {
+    const hostname = overrides.hostname ?? "localhost";
+    const port =
+      overrides.port ??
+      Number(config.dev.environment.PORT ?? Bun.env.PORT ?? 3000);
+
+    return `http://${hostname}:${port}`;
+  }
+
+  if (config.dev.environment.VOKE_DEV_ORIGIN !== undefined) {
+    return config.dev.environment.VOKE_DEV_ORIGIN;
+  }
+
+  if (Bun.env.VOKE_DEV_ORIGIN !== undefined) {
+    return Bun.env.VOKE_DEV_ORIGIN;
+  }
+
+  const hostname = overrides.hostname ?? Bun.env.HOST ?? "localhost";
+  const port =
+    overrides.port ??
+    Number(config.dev.environment.PORT ?? Bun.env.PORT ?? 3000);
+
+  return `http://${hostname}:${port}`;
+};
 
 export const createDevPlan = async (
   input: VokeConfig | VokeConfigInput,
@@ -33,6 +68,7 @@ export const createDevPlan = async (
 
   const region = overrides.region ?? config.region;
   const stage = overrides.stage ?? config.stage;
+  const origin = createDevOrigin(config, overrides);
   const template = synthesizeCloudFormation({
     ...config,
     entrypoint,
@@ -52,11 +88,15 @@ export const createDevPlan = async (
       ...localEnvironment,
       ...config.cloudFormation.environment,
       ...config.dev.environment,
+      ...remoteEnvironment(config.remotes ?? {}),
       ...createLocalResourceBindings(template, {
         accountId: config.local.provider.defaults.accountId,
         endpoint: localEnvironment.AWS_ENDPOINT_URL,
         region,
       }),
+      VOKE_DEV_ORIGIN: origin,
+      VOKE_DEV_STARTED_AT: String(Date.now()),
+      VOKE_DEV_SUMMARY: "1",
       VOKE_STAGE: stage,
     },
   };

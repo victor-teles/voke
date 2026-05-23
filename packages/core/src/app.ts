@@ -9,10 +9,12 @@ import { jsonError } from "./http";
 import {
   activateFunctionRegistry,
   assertUniqueFunctionRoutes,
+  formatDevFunctionSummary,
   InvokeError,
   mountFunctionRoutes,
 } from "./invoke";
 import type { FunctionRegistry, FunctionRegistryInput } from "./invoke";
+import { mountDevFunctionEndpoints } from "./remote";
 
 export interface ApiRouteModule<TEnv extends VokeEnv = VokeEnv> {
   basePath?: string;
@@ -122,6 +124,14 @@ export const createGateway = (options: GatewayOptions = {}): Hono<VokeEnv> => {
     assertUniqueFunctionRoutes(configInput.functions);
     activateFunctionRegistry(configInput.functions);
     mountFunctionRoutes(gateway, configInput.functions);
+
+    if (Bun.env.VOKE_DEV_SUMMARY === "1") {
+      mountDevFunctionEndpoints(gateway, {
+        functions: configInput.functions,
+        project: configInput.name,
+      });
+      console.info(formatDevFunctionSummary(configInput.functions));
+    }
   }
 
   return gateway;
