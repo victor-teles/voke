@@ -6,9 +6,15 @@ provider:
   stage: prod
   region: us-east-1
 
+resources:
+  Resources:
+    OrdersQueue:
+      Type: AWS::SQS::Queue
+
 functions:
   processOrder:
     handler: src/functions/process-order.handler
     events:
       - sqs:
-          arn: arn:aws:sqs:us-east-1:123456789012:orders
+          arn:
+            Fn::GetAtt: [OrdersQueue, Arn]

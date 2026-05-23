@@ -1,0 +1,45 @@
+---
+title: Gateway Testing
+description: Test Function invocation, route calls, Gateway requests, and Lambda/API Gateway semantics.
+---
+
+Voke exposes multiple testing levels so each test can choose the right boundary.
+
+## Direct Function invocation
+
+Use `functions.invoke(...)` when the behavior under test is an invokable Function and its Function Contract:
+
+```ts
+const user = await functions.invoke("getUser", { id: "usr_1" });
+```
+
+## Typed route invocation
+
+Use `functions.route(...)` when the behavior belongs to a typed Route Builder path:
+
+```ts
+const result = await functions.route("GET", "/health");
+```
+
+## Gateway HTTP requests
+
+Use `gateway.request(...)` when a test should exercise method, path, headers, query strings, and serialized HTTP responses:
+
+```ts
+const response = await gateway.request("/health");
+const body = await response.json();
+```
+
+## Lambda/API Gateway semantics
+
+Use `createTestClient()` when tests should run through the exported service shape:
+
+```ts
+import { createTestClient } from "voke";
+import service from "../src/index";
+
+const client = createTestClient(service);
+const response = await client.get("/health");
+```
+
+Use `createStackTestContext()` for CloudFormation outputs and local AWS seed plans, and `createInvokeTestClient()` for worker flows.

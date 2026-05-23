@@ -2,8 +2,9 @@
   "name": "voke-monorepo",
   "private": true,
   "workspaces": [
-    "packages/*",
-    "examples/*"
+    "apps/*",
+    "examples/*",
+    "packages/*"
   ],
   "type": "module",
   "scripts": {
@@ -11,6 +12,7 @@
     "dev": "turbo run dev",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
+    "release:check": "bun run typecheck && bun test",
     "clean": "turbo run clean",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",

@@ -1,0 +1,32 @@
+---
+title: Serverless Framework Migration
+description: Generate a Voke migration skeleton from serverless.yml with Function-first code and risk-grouped reports.
+---
+
+Voke can generate a migration skeleton from an existing Serverless Framework service:
+
+```bash
+voke migrate serverless ./serverless.yml --out ./voke-migration
+```
+
+The migrator detects service and provider settings, Functions, HTTP API and REST API routes, resolvable SQS Event Sources, EventBridge workers, native CloudFormation resources, environment variables, IAM statements, package patterns, and plugins.
+
+## Output
+
+The generated folder includes:
+
+- Function-first route and worker skeletons.
+- First-class SQS Event Source Functions when an SQS event references a generated `sqsQueue()` resource.
+- A `voke.config.ts` file with normalized project settings.
+- Config-first resource declarations where Voke has a safe native mapping.
+- Migration reports with confidence levels and grouped manual work.
+
+## Review loop
+
+After generation:
+
+1. Read the migration report first.
+2. Port handler logic into the generated Function skeletons.
+3. Replace unsupported plugins or events with explicit Voke code.
+4. Run `bun test` and `bun run typecheck`.
+5. Run `voke synth` and review the CloudFormation template.

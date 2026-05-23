@@ -2,7 +2,9 @@ import { expect, test } from "bun:test";
 
 import type { LambdaContext, LambdaEvent } from "hono/aws-lambda";
 
-import helloApi, { handler } from "../src/index";
+import helloApi from "../src/index";
+
+const { handler } = helloApi;
 
 const lambdaEvent = (overrides: Record<string, unknown>): LambdaEvent => {
   const requestContext = {

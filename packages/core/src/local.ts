@@ -1,45 +1,39 @@
+import { createResourceBindingName } from "./bindings";
 import { synthesizeCloudFormation } from "./cloudformation";
 import type {
   CloudFormationResource,
   CloudFormationTemplate,
 } from "./cloudformation";
 import { defineConfig, loadVokeConfig } from "./config";
-import type { VokeConfigInput } from "./config";
-import { toEnvKey } from "./env-key";
+import type { VokeConfig, VokeConfigInput } from "./config";
+import {
+  createFlociLocalProvider,
+  resolveLocalProvider,
+} from "./local-provider";
+import type {
+  FlociComposeOptions,
+  LocalAwsEnvironment,
+  LocalAwsEnvironmentOptions,
+  LocalBootstrapPlan,
+  LocalProviderInput,
+} from "./local-provider";
 
-export interface LocalAwsEnvironment extends Record<string, string> {
-  AWS_ENDPOINT_URL: string;
-  VOKE_AWS_ENDPOINT_URL: string;
-  AWS_DEFAULT_REGION: string;
-  AWS_REGION: string;
-  AWS_ACCESS_KEY_ID: string;
-  AWS_SECRET_ACCESS_KEY: string;
-  AWS_SESSION_TOKEN: string;
-  VOKE_LOCAL_PROVIDER: "floci";
-  VOKE_INVOKE_RUNTIME: "local";
-}
-
-export interface LocalAwsEnvironmentOptions {
-  endpoint?: string;
-  region?: string;
-  accessKeyId?: string;
-  secretAccessKey?: string;
-  sessionToken?: string;
-}
-
-export interface FlociComposeOptions {
-  image?: string;
-  port?: number;
-  region?: string;
-  dataDirectory?: string;
-  hostname?: string;
-  storageMode?: "memory" | "persistent" | "hybrid" | "wal";
-}
-
-export interface LocalBootstrapPlan {
-  environment: LocalAwsEnvironment;
-  commands: string[][];
-}
+export {
+  createFlociLocalProvider,
+  resolveLocalProvider,
+  LocalProviderError,
+  type FlociComposeOptions,
+  type FlociLocalProviderOptions,
+  type LocalAwsEnvironment,
+  type LocalAwsEnvironmentOptions,
+  type LocalBootstrapPlan,
+  type LocalProvider,
+  type LocalProviderBootstrapPlanOptions,
+  type LocalProviderCommandOptions,
+  type LocalProviderComposeOptions,
+  type LocalProviderDefaults,
+  type LocalProviderInput,
+} from "./local-provider";
 
 export interface LocalBootstrapPlanOptions {
   name?: string;
@@ -48,6 +42,7 @@ export interface LocalBootstrapPlanOptions {
   endpoint?: string;
   config?: VokeConfigInput;
   configPath?: string;
+  provider?: LocalProviderInput;
   template?: CloudFormationTemplate;
   templatePath?: string;
 }
@@ -56,14 +51,51 @@ const defaultLocalEndpoint = "http://localhost:4566";
 const defaultLocalRegion = "us-east-1";
 const defaultLocalAccountId = "000000000000";
 
+const writeTemplate = async (
+  templatePath: string,
+  template: CloudFormationTemplate
+): Promise<void> => {
+  const directory = templatePath.split("/").slice(0, -1).join("/");
+
+  if (directory !== "") {
+    await Bun.$`mkdir -p ${directory}`;
+  }
+
+  await Bun.write(templatePath, `${JSON.stringify(template, null, 2)}\n`);
+};
+
 const binding = (
-  logicalId: string,
+  resource: string,
   attribute: string,
   value: string
 ): { envName: string; value: string } => ({
-  envName: `VOKE_RESOURCE_${toEnvKey(logicalId)}_${toEnvKey(attribute)}`,
+  envName: createResourceBindingName(resource, attribute),
   value,
 });
+
+const metadataBinding = (
+  logicalId: string,
+  resource: CloudFormationResource
+): { attribute: string; resource: string } | undefined => {
+  const metadata = resource.Metadata?.VokeBinding;
+
+  if (
+    typeof metadata !== "object" ||
+    metadata === null ||
+    Array.isArray(metadata)
+  ) {
+    return undefined;
+  }
+
+  const attribute = metadata.Attribute;
+  const name = metadata.Resource;
+
+  if (typeof attribute !== "string" || typeof name !== "string") {
+    return undefined;
+  }
+
+  return { attribute, resource: name || logicalId };
+};
 
 const resourceBindingFor = (
   logicalId: string,
@@ -72,40 +104,50 @@ const resourceBindingFor = (
   accountId: string,
   region: string
 ): { envName: string; value: string } | undefined => {
+  const modelBinding = metadataBinding(logicalId, resource);
+  const bindingResource = modelBinding?.resource ?? logicalId;
+  const bindingAttribute = modelBinding?.attribute;
+
   if (resource.Type === "AWS::DynamoDB::Table") {
-    return binding(logicalId, "name", logicalId);
+    return binding(bindingResource, bindingAttribute ?? "name", logicalId);
   }
 
   if (resource.Type === "AWS::SQS::Queue") {
-    return binding(logicalId, "url", `${endpoint}/${accountId}/${logicalId}`);
+    return binding(
+      bindingResource,
+      bindingAttribute ?? "url",
+      `${endpoint}/${accountId}/${logicalId}`
+    );
   }
 
   if (resource.Type === "AWS::S3::Bucket") {
-    return binding(logicalId, "name", logicalId);
+    return binding(bindingResource, bindingAttribute ?? "name", logicalId);
   }
 
   if (resource.Type === "AWS::SNS::Topic") {
     return binding(
-      logicalId,
-      "arn",
+      bindingResource,
+      bindingAttribute ?? "arn",
       `arn:aws:sns:${region}:${accountId}:${logicalId}`
     );
   }
 
   if (resource.Type === "AWS::Events::EventBus") {
-    return binding(logicalId, "name", logicalId);
+    return binding(bindingResource, bindingAttribute ?? "name", logicalId);
   }
 
   if (resource.Type === "AWS::SecretsManager::Secret") {
     return binding(
-      logicalId,
-      "arn",
-      `arn:aws:secretsmanager:${region}:${accountId}:secret:${logicalId}`
+      bindingResource,
+      bindingAttribute ?? "id",
+      bindingAttribute === "arn"
+        ? `arn:aws:secretsmanager:${region}:${accountId}:secret:${logicalId}`
+        : logicalId
     );
   }
 
   if (resource.Type === "AWS::SSM::Parameter") {
-    return binding(logicalId, "name", logicalId);
+    return binding(bindingResource, bindingAttribute ?? "name", logicalId);
   }
 
   return undefined;
@@ -114,47 +156,14 @@ const resourceBindingFor = (
 export const createLocalAwsEnvironment = (
   options: LocalAwsEnvironmentOptions = {}
 ): LocalAwsEnvironment => {
-  const endpoint = options.endpoint ?? defaultLocalEndpoint;
-  const region = options.region ?? defaultLocalRegion;
-  const accessKeyId = options.accessKeyId ?? "test";
-  const secretAccessKey = options.secretAccessKey ?? "test";
-  const sessionToken = options.sessionToken ?? "test";
+  const provider = resolveLocalProvider(options.provider);
 
-  return {
-    AWS_ACCESS_KEY_ID: accessKeyId,
-    AWS_DEFAULT_REGION: region,
-    AWS_ENDPOINT_URL: endpoint,
-    AWS_REGION: region,
-    AWS_SECRET_ACCESS_KEY: secretAccessKey,
-    AWS_SESSION_TOKEN: sessionToken,
-    VOKE_AWS_ENDPOINT_URL: endpoint,
-    VOKE_INVOKE_RUNTIME: "local",
-    VOKE_LOCAL_PROVIDER: "floci",
-  };
+  return provider.environment(options);
 };
 
 export const createFlociComposeConfig = (
   options: FlociComposeOptions = {}
-): string => {
-  const image = options.image ?? "floci/floci:latest";
-  const port = options.port ?? 4566;
-  const region = options.region ?? defaultLocalRegion;
-  const dataDirectory = options.dataDirectory ?? ".voke/local/data";
-  const storageMode = options.storageMode ?? "persistent";
-  const { hostname } = options;
-
-  return `services:
-  floci:
-    image: ${image}
-    ports:
-      - "${port}:4566"
-    environment:
-      - FLOCI_DEFAULT_REGION=${region}
-      - FLOCI_STORAGE_MODE=${storageMode}
-${hostname === undefined ? "" : `      - FLOCI_HOSTNAME=${hostname}\n`}    volumes:
-      - ${dataDirectory}:/app/data
-`;
-};
+): string => createFlociLocalProvider().composeConfig(options);
 
 export const createLocalResourceBindings = (
   template: CloudFormationTemplate,
@@ -187,7 +196,7 @@ export const createLocalResourceBindings = (
 export const createLocalBootstrapPlan = async (
   options: LocalBootstrapPlanOptions
 ): Promise<LocalBootstrapPlan> => {
-  let config: ReturnType<typeof defineConfig>;
+  let config: VokeConfig;
 
   if (options.config !== undefined) {
     config = defineConfig(options.config);
@@ -200,6 +209,9 @@ export const createLocalBootstrapPlan = async (
       stage: options.stage,
     });
   }
+  const provider = resolveLocalProvider(
+    options.provider ?? config.local.provider
+  );
   const name = options.name ?? config.name;
   const stage = options.stage ?? config.stage;
   const region = options.region ?? config.region;
@@ -215,32 +227,18 @@ export const createLocalBootstrapPlan = async (
     options.templatePath ?? ".voke/local/cloudformation.json";
   const environment = createLocalAwsEnvironment({
     endpoint: options.endpoint,
+    provider,
     region,
   });
-  const directory = templatePath.split("/").slice(0, -1).join("/");
 
-  if (directory !== "") {
-    await Bun.$`mkdir -p ${directory}`;
-  }
+  await writeTemplate(templatePath, template);
 
-  await Bun.write(templatePath, `${JSON.stringify(template, null, 2)}\n`);
-
-  return {
-    commands: [
-      [
-        "aws",
-        "cloudformation",
-        "deploy",
-        "--stack-name",
-        `${name}-${stage}`,
-        "--template-file",
-        templatePath,
-        "--capabilities",
-        "CAPABILITY_IAM",
-        "--region",
-        region,
-      ],
-    ],
+  return provider.bootstrapPlan({
     environment,
-  };
+    name,
+    region,
+    stage,
+    template,
+    templatePath,
+  });
 };

@@ -1,0 +1,31 @@
+{
+  "name": "@voke/docs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --port 3942",
+    "generate": "fumadocs-mdx",
+    "build": "next build --webpack",
+    "typecheck": "bun run generate && tsgo --project tsconfig.json --noEmit",
+    "clean": "rm -rf .next .source"
+  },
+  "dependencies": {
+    "@types/mdx": "latest",
+    "fumadocs-core": "latest",
+    "fumadocs-mdx": "latest",
+    "fumadocs-ui": "latest",
+    "next": "latest",
+    "react": "latest",
+    "react-dom": "latest"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "latest",
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "@typescript/native-preview": "catalog:",
+    "postcss": "latest",
+    "tailwindcss": "latest",
+    "typescript": "latest"
+  }
+}

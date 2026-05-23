@@ -1,9 +1,14 @@
 #!/usr/bin/env bun
 
+import packageJson from "../package.json";
+import { createBuildPlan } from "./build";
 import { synthesizeCloudFormation } from "./cloudformation";
 import { defineConfig, loadVokeConfig } from "./config";
 import type { VokeConfig } from "./config";
-import { createFlociComposeConfig, createLocalBootstrapPlan } from "./local";
+import { createDevPlan } from "./dev";
+import { VokeError } from "./errors";
+import { createLocalBootstrapPlan, LocalProviderError } from "./local";
+import type { LocalProvider } from "./local";
 import { writeServerlessMigration } from "./serverless-migration";
 
 interface CreateApiProjectOptions {
@@ -12,8 +17,12 @@ interface CreateApiProjectOptions {
 }
 
 interface CliOptions {
+  output?: CliOutput;
   run?: CommandRunner;
+  showDetails?: boolean;
 }
+
+type CliOutput = (message: string) => void;
 
 type CommandRunner = (
   command: string[],
@@ -35,22 +44,84 @@ type CommandHandler = (
   options: CliOptions
 ) => Promise<void>;
 
+export class CliUsageError extends VokeError {
+  constructor(message: string) {
+    super(message, { code: "CLI_USAGE_ERROR" });
+    this.name = "CliUsageError";
+  }
+}
+
 const printHelp = (): void => {
-  console.log(`Voke
+  console.log(`Voke v${packageJson.version}
 
 Usage:
   voke dev [entrypoint]
   voke build [entrypoint] [outdir]
   voke create api <name> [directory]
   voke synth [entrypoint] [out] [--config voke.config.ts] [--name api] [--stage local] [--region us-east-1]
-  voke deploy --name api [--stage local] [--template ./dist/cloudformation.json]
-  voke remove --name api [--stage local]
   voke local start [--compose .voke/local/docker-compose.yml]
   voke local stop [--compose .voke/local/docker-compose.yml]
   voke local reset [--compose .voke/local/docker-compose.yml]
   voke local bootstrap --name api [--stage local]
   voke migrate serverless [serverless.yml] [--out ./voke-migration]
+
+Experimental:
+  voke experimental deploy --name api [--stage local] [--template ./dist/cloudformation.json]
+  voke experimental remove --name api [--stage local]
 `);
+};
+
+const commandName = (argv: string[]): string => {
+  const [command, subcommand] = argv;
+
+  if (command === "experimental" && subcommand !== undefined) {
+    return `${command} ${subcommand}`;
+  }
+
+  return command ?? "help";
+};
+
+const formatCommand = (argv: string[]): string => ["voke", ...argv].join(" ");
+
+const commandUsage: Record<string, string> = {
+  build: "Usage: voke build [entrypoint] [outdir]",
+  create: "Usage: voke create api <name> [directory]",
+  dev: "Usage: voke dev [entrypoint]",
+  experimental:
+    "Usage: voke experimental <deploy|remove> [--config voke.config.ts]",
+  local: "Usage: voke local <start|stop|reset|bootstrap>",
+  migrate:
+    "Usage: voke migrate serverless [serverless.yml] [--out ./voke-migration]",
+  synth:
+    "Usage: voke synth [entrypoint] [out] [--config voke.config.ts] [--name api] [--stage local] [--region us-east-1]",
+};
+
+const cliUsageMessage = (message: string, command: string): string => {
+  const usage = commandUsage[command];
+
+  if (usage === undefined) {
+    return `Invalid CLI usage: ${message}\nRun \`voke --help\` to see available commands.`;
+  }
+
+  return `Invalid CLI usage: ${message}\n${usage}`;
+};
+
+const cliRunDetails = (argv: string[]): string =>
+  [
+    `Voke v${packageJson.version}`,
+    `Command: ${commandName(argv)}`,
+    `Run: ${formatCommand(argv)}`,
+    `Runtime: Bun ${Bun.version}`,
+  ].join("\n");
+
+const printRunDetails = (argv: string[], options: CliOptions): void => {
+  if (options.showDetails !== true) {
+    return;
+  }
+
+  const output = options.output ?? console.log;
+
+  output(cliRunDetails(argv));
 };
 
 const parseFlags = (args: string[]): ParsedFlags => {
@@ -61,11 +132,22 @@ const parseFlags = (args: string[]): ParsedFlags => {
     const arg = args[index];
 
     if (arg?.startsWith("--") === true) {
-      const key = arg.slice(2);
+      const [rawKey, inlineValue] = arg.slice(2).split(/[=](.*)/su, 2);
+      const key = rawKey ?? "";
+
+      if (key === "") {
+        throw new CliUsageError(`Invalid flag: ${arg}`);
+      }
+
+      if (inlineValue !== undefined) {
+        values[key] = inlineValue;
+        continue;
+      }
+
       const value = args[index + 1];
 
       if (value === undefined || value.startsWith("--")) {
-        throw new Error(`Missing value for --${key}`);
+        throw new CliUsageError(`Missing value for --${key}`);
       }
 
       values[key] = value;
@@ -83,7 +165,8 @@ const parseFlags = (args: string[]): ParsedFlags => {
 
 const stackName = (name: string, stage: string): string => `${name}-${stage}`;
 
-const writeFlociCompose = async (
+const writeLocalCompose = async (
+  config: VokeConfig,
   compose: string,
   flags: ParsedFlags
 ): Promise<void> => {
@@ -95,7 +178,7 @@ const writeFlociCompose = async (
 
   await Bun.write(
     compose,
-    createFlociComposeConfig({
+    config.local.provider.composeConfig({
       dataDirectory: flags.values.data ?? ".voke/local/data",
       hostname: flags.values.hostname,
       image: flags.values.image,
@@ -125,32 +208,80 @@ const runCommand = async (
   }
 };
 
+const errorMessage = (error: unknown): string => {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return String(error);
+};
+
+const localProviderErrorMessage = (options: {
+  provider: LocalProvider;
+  localCommand: string;
+  command: string[];
+  cause: unknown;
+}): string => {
+  const commandText = options.command.join(" ");
+  const base = `Voke local ${options.localCommand} failed while running: ${commandText}. ${errorMessage(options.cause)}`;
+
+  if (options.provider.name !== "floci") {
+    return `${base}\nLocal provider: ${options.provider.name}. Check this provider's local command configuration.`;
+  }
+
+  if (options.localCommand === "bootstrap") {
+    return `${base}\nFloci is Voke's default optional local AWS provider. Make sure Floci is running with "voke local start", then retry "voke local bootstrap". You can also configure local.provider in voke.config.ts.`;
+  }
+
+  return `${base}\nFloci is Voke's default optional local AWS provider. Make sure Docker Compose is installed and Docker is running, then retry "voke local ${options.localCommand}". You can also configure local.provider in voke.config.ts.`;
+};
+
+const runLocalProviderCommand = async (options: {
+  provider: LocalProvider;
+  localCommand: string;
+  command: string[];
+  run: CommandRunner;
+  env?: Record<string, string>;
+}): Promise<void> => {
+  try {
+    await options.run(options.command, { env: options.env });
+  } catch (error) {
+    throw new LocalProviderError({
+      cause: error,
+      command: options.command,
+      message: localProviderErrorMessage({
+        cause: error,
+        command: options.command,
+        localCommand: options.localCommand,
+        provider: options.provider,
+      }),
+      provider: options.provider.name,
+    });
+  }
+};
+
 const createTestTemplate =
   (): string => `import { expect, test } from "bun:test";
-import { handler } from "../src/index";
+import { createTestClient } from "voke";
+
+import service from "../src/index";
 
 test("responds to health checks", async () => {
-  const response = await handler({
-    rawPath: "/health",
-    requestContext: {
-      http: {
-        method: "GET",
-        path: "/health",
-      },
-    },
-  });
+  const client = createTestClient(service);
+  const response = await client.get("/health");
 
-  expect(response.statusCode).toBe(200);
-  expect(JSON.parse(response.body)).toEqual({ data: { ok: true } });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ data: { ok: true } });
 });
 `;
 
-const createHealthRouteTemplate = (): string => `import { Hono } from "hono";
-import { json } from "voke";
+const createHealthRouteTemplate =
+  (): string => `import type { Voke } from "voke";
 
-export const healthRoutes = new Hono();
-
-healthRoutes.get("/health", () => json({ ok: true }));
+export const createHealthRoute = (app: Voke) =>
+  app.get("/health", {
+    handler: () => ({ ok: true }),
+  });
 `;
 
 const createVokeConfigTemplate = (
@@ -158,54 +289,70 @@ const createVokeConfigTemplate = (
 ): string => `import { defineConfig } from "voke";
 
 export default defineConfig({
-  name: "${name}",
-  entrypoint: "./src/index.ts",
   build: {
     outdir: "./dist",
   },
   cloudFormation: {
     out: "./dist/cloudformation.json",
   },
+  entrypoint: "./src/index.ts",
+  name: "${name}",
 });
 `;
 
 const createIndexTemplate =
-  (): string => `import { api, createApiApp } from "voke";
+  (): string => `import { api, createGateway, defineFunction, defineFunctions, Voke } from "voke";
 import config from "../voke.config";
-import { healthRoutes } from "./routes/health";
+import { createHealthRoute } from "./routes/health";
 
-const app = createApiApp({
-  config,
+const app = new Voke();
+const functions = defineFunctions({
+  routes: defineFunction({
+    routes: [createHealthRoute(app)],
+  }),
 });
 
-app.route("/", healthRoutes);
+const gateway = createGateway({
+  config: { ...config, functions },
+});
 
-const service = api(app, { config });
-
-export const handler = service.handler;
-export default service;
+export default api(gateway, { config });
 `;
 
 const createTsconfig = (): Record<string, unknown> => ({
-  extends: "../../tsconfig.json",
+  compilerOptions: {
+    allowImportingTsExtensions: true,
+    lib: ["ESNext", "DOM"],
+    module: "Preserve",
+    moduleDetection: "force",
+    moduleResolution: "bundler",
+    noEmit: true,
+    skipLibCheck: true,
+    strict: true,
+    target: "ESNext",
+    types: ["bun"],
+    verbatimModuleSyntax: true,
+  },
   include: ["voke.config.ts", "src/**/*.ts", "test/**/*.ts"],
 });
 
 const createPackageJson = (packageName: string): Record<string, unknown> => ({
   dependencies: {
     hono: "^4.0.0",
-    voke: "workspace:*",
+    voke: `^${packageJson.version}`,
   },
   devDependencies: {
     "@types/bun": "latest",
-    "@typescript/native-preview": "^7.0.0-dev.20260516.1"
+    "@typescript/native-preview": "^7.0.0-dev.20260516.1",
   },
   name: packageName,
   private: true,
   scripts: {
-    build: "voke build ./src/index.ts ./dist",
+    build: "voke build",
     clean: "rm -rf dist coverage",
-    dev: "voke dev ./src/index.ts",
+    dev: "voke dev",
+    local: "voke local start",
+    synth: "voke synth",
     test: "bun test",
     typecheck: "bunx tsgo --project tsconfig.json --noEmit",
   },
@@ -350,14 +497,39 @@ export const synth = async (options: {
 };
 
 export const build = async (
-  entrypoint: string,
-  outdir: string
+  config: VokeConfig,
+  options: {
+    entrypoints?: string[];
+    outdir?: string;
+    run?: CommandRunner;
+  } = {}
 ): Promise<void> => {
-  await Bun.$`bun build ${entrypoint} --outdir ${outdir} --target bun`;
+  const plan = createBuildPlan(config, {
+    entrypoints: options.entrypoints,
+    outdir: options.outdir,
+  });
+
+  await (options.run ?? runCommand)(plan.command);
 };
 
-export const dev = async (entrypoint: string): Promise<void> => {
-  await Bun.$`bun --hot ${entrypoint}`;
+export const dev = async (
+  config: VokeConfig,
+  options: {
+    endpoint?: string;
+    entrypoint?: string;
+    region?: string;
+    run?: CommandRunner;
+    stage?: string;
+  } = {}
+): Promise<void> => {
+  const plan = await createDevPlan(config, {
+    endpoint: options.endpoint,
+    entrypoint: options.entrypoint,
+    region: options.region,
+    stage: options.stage,
+  });
+
+  await (options.run ?? runCommand)(plan.command, { env: plan.environment });
 };
 
 export const local = async (
@@ -366,25 +538,43 @@ export const local = async (
   run: CommandRunner = runCommand
 ): Promise<void> => {
   const compose = flags.values.compose ?? ".voke/local/docker-compose.yml";
+  const config = await loadConfigFromFlags(flags);
+  const {
+    local: { provider },
+  } = config;
 
   if (subcommand === "start") {
-    await writeFlociCompose(compose, flags);
-    await run(["docker", "compose", "-f", compose, "up", "-d"]);
+    await writeLocalCompose(config, compose, flags);
+    await runLocalProviderCommand({
+      command: provider.startCommand({ composePath: compose }),
+      localCommand: "start",
+      provider,
+      run,
+    });
     return;
   }
 
   if (subcommand === "stop") {
-    await run(["docker", "compose", "-f", compose, "down"]);
+    await runLocalProviderCommand({
+      command: provider.stopCommand({ composePath: compose }),
+      localCommand: "stop",
+      provider,
+      run,
+    });
     return;
   }
 
   if (subcommand === "reset") {
-    await run(["docker", "compose", "-f", compose, "down", "-v"]);
+    await runLocalProviderCommand({
+      command: provider.resetCommand({ composePath: compose }),
+      localCommand: "reset",
+      provider,
+      run,
+    });
     return;
   }
 
   if (subcommand === "bootstrap") {
-    const config = await loadConfigFromFlags(flags);
     const name = flags.values.name ?? config.name;
     const stage = flags.values.stage ?? config.stage;
     const region = flags.values.region ?? config.region;
@@ -403,67 +593,101 @@ export const local = async (
     });
 
     for (const command of plan.commands) {
-      await run(command, { env: plan.environment });
+      await runLocalProviderCommand({
+        command,
+        env: plan.environment,
+        localCommand: "bootstrap",
+        provider,
+        run,
+      });
     }
     return;
   }
 
-  throw new Error("Usage: voke local <start|stop|reset|bootstrap>");
+  throw new CliUsageError("Usage: voke local <start|stop|reset|bootstrap>");
+};
+
+const experimental = async (
+  subcommand: string | undefined,
+  flags: ParsedFlags,
+  options: CliOptions
+): Promise<void> => {
+  const config = await loadConfigFromFlags(flags);
+
+  if (subcommand === "deploy") {
+    await deploy({
+      name: flags.values.name ?? config.name,
+      region: flags.values.region ?? config.region,
+      run: options.run ?? runCommand,
+      stage: flags.values.stage ?? config.stage,
+      template: flags.values.template ?? config.cloudFormation.out,
+    });
+    return;
+  }
+
+  if (subcommand === "remove") {
+    await remove({
+      name: flags.values.name ?? config.name,
+      region: flags.values.region ?? config.region,
+      run: options.run ?? runCommand,
+      stage: flags.values.stage ?? config.stage,
+    });
+    return;
+  }
+
+  throw new CliUsageError(
+    "Usage: voke experimental <deploy|remove> [--config voke.config.ts]"
+  );
 };
 
 const commandHandlers: Record<string, CommandHandler> = {
-  build: async (args, flags) => {
+  build: async (_args, flags, options) => {
     const config = await loadConfigFromFlags(flags);
-    await build(
-      args[0] ?? flags.values.entrypoint ?? config.entrypoint,
-      args[1] ?? flags.values.outdir ?? config.build.outdir
-    );
+    const entrypoint = flags.positional[0] ?? flags.values.entrypoint;
+
+    await build(config, {
+      entrypoints: entrypoint === undefined ? undefined : [entrypoint],
+      outdir: flags.positional[1] ?? flags.values.outdir,
+      run: options.run ?? runCommand,
+    });
   },
   create: async (args) => {
     if (args[0] !== "api") {
-      printHelp();
-      return;
+      throw new CliUsageError("Usage: voke create api <name> [directory]");
     }
 
     const [, name, directory] = args;
 
     if (name === undefined) {
-      throw new Error("Usage: voke create api <name> [directory]");
+      throw new CliUsageError("Usage: voke create api <name> [directory]");
     }
 
     await createApiProject({ directory, name });
   },
-  deploy: async (_args, flags, options) => {
-    await deploy({
-      name: flags.values.name ?? "api",
-      region: flags.values.region ?? "us-east-1",
+  dev: async (_args, flags, options) => {
+    const config = await loadConfigFromFlags(flags);
+    await dev(config, {
+      endpoint: flags.values.endpoint,
+      entrypoint: flags.positional[0] ?? flags.values.entrypoint,
+      region: flags.values.region,
       run: options.run ?? runCommand,
-      stage: flags.values.stage ?? "local",
-      template: flags.values.template ?? "./dist/cloudformation.json",
+      stage: flags.values.stage,
     });
   },
-  dev: async (args, flags) => {
-    const config = await loadConfigFromFlags(flags);
-    await dev(args[0] ?? flags.values.entrypoint ?? config.entrypoint);
+  experimental: async (args, flags, options) => {
+    await experimental(args[0], flags, options);
   },
   local: async (args, flags, options) => {
     await local(args[0], flags, options.run ?? runCommand);
   },
   migrate: async (args) => {
     if (args[0] !== "serverless") {
-      printHelp();
-      return;
+      throw new CliUsageError(
+        "Usage: voke migrate serverless [serverless.yml] [--out ./voke-migration]"
+      );
     }
 
     await migrateServerless(parseFlags(args.slice(1)));
-  },
-  remove: async (_args, flags, options) => {
-    await remove({
-      name: flags.values.name ?? "api",
-      region: flags.values.region ?? "us-east-1",
-      run: options.run ?? runCommand,
-      stage: flags.values.stage ?? "local",
-    });
   },
   synth: async (_args, flags) => {
     const config = await loadConfigFromFlags(flags);
@@ -483,20 +707,57 @@ export const runCli = async (
   options: CliOptions = {}
 ): Promise<void> => {
   const [command, ...args] = argv;
-  const flags = parseFlags(args);
-  const handler = command === undefined ? undefined : commandHandlers[command];
 
-  if (handler !== undefined) {
-    await handler(args, flags, options);
+  if (command === undefined || command === "--help" || command === "-h") {
+    printHelp();
     return;
   }
 
-  printHelp();
+  if (command === "deploy" || command === "remove") {
+    throw new CliUsageError(
+      `Deployment commands are experimental. Use: voke experimental ${command}`
+    );
+  }
+
+  let flags: ParsedFlags;
+
+  try {
+    flags = parseFlags(args);
+  } catch (error) {
+    if (error instanceof CliUsageError) {
+      throw new CliUsageError(cliUsageMessage(error.message, command));
+    }
+
+    throw error;
+  }
+
+  const handler = commandHandlers[command];
+
+  if (handler !== undefined) {
+    printRunDetails(argv, options);
+    try {
+      await handler(args, flags, options);
+    } catch (error) {
+      if (
+        error instanceof CliUsageError &&
+        !error.message.startsWith("Invalid CLI usage:")
+      ) {
+        throw new CliUsageError(cliUsageMessage(error.message, command));
+      }
+
+      throw error;
+    }
+    return;
+  }
+
+  throw new CliUsageError(
+    cliUsageMessage(`Unknown command: ${command}`, command)
+  );
 };
 
 if (import.meta.main) {
   try {
-    await runCli();
+    await runCli(undefined, { showDetails: true });
   } catch (error) {
     console.error(error instanceof Error ? error.message : error);
     process.exit(1);

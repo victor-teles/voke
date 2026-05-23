@@ -11,5 +11,8 @@ export default defineConfig({
   entrypoint: "./src/index.ts",
   name: "hello-api",
   region: "us-east-1",
+  runtime: {
+    lambda: "nodejs24.x",
+  },
   stage: "local",
 });

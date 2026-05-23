@@ -1,0 +1,103 @@
+---
+title: Functions
+description: Define invokable, route-backed, and event-source Voke Functions with explicit contracts and typed registry calls.
+---
+
+## Function
+
+A **Function** is a named serverless compute unit in a Voke Project. It can be invokable, route-backed, or event-source backed.
+
+Use `defineFunction()` for the executable boundary and `defineFunctions()` for the project registry:
+
+```ts
+import { defineFunction, defineFunctions } from "voke";
+import type { StandardSchemaV1 } from "voke";
+
+const userInput: StandardSchemaV1<{ id: string }, { id: string }> = {
+  "~standard": {
+    validate: (value) => ({ data: value, success: true }),
+    vendor: "example",
+    version: 1,
+  },
+};
+
+const getUser = defineFunction({
+  input: userInput,
+  output: userInput,
+  handler: async (payload) => ({ id: payload.id }),
+});
+
+const functions = defineFunctions({ getUser });
+
+const user = await functions.invoke("getUser", { id: "usr_1" });
+```
+
+## Registry identity
+
+The Function Registry key is the stable project identity used for type-safe invocation. The optional `name` field on a Function is a deployed Lambda name override, not the local registry key.
+
+```ts
+const functions = defineFunctions({
+  getUser: defineFunction({
+    name: "production-user-reader",
+    input: userInput,
+    output: userInput,
+    handler: async (payload) => payload,
+  }),
+});
+
+await functions.invoke("getUser", { id: "usr_1" });
+```
+
+## Route-backed Functions
+
+Route-backed Functions expose HTTP routes through the Gateway. The Route Builder keeps Hono-compatible HTTP primitives behind the first-party Voke API:
+
+```ts
+import { defineFunction, Voke } from "voke";
+
+const app = new Voke();
+
+export const routes = defineFunction({
+  routes: [
+    app.get("/health", {
+      handler: () => ({ ok: true }),
+    }),
+  ],
+});
+```
+
+## SQS Event Source Functions
+
+SQS Event Source Functions are invoked by a queue and tested through `functions.sendEvent(...)`. They do not declare an output schema because Voke owns the SQS batch result contract:
+
+```ts
+import {
+  createSqsEventHandler,
+  defineFunction,
+  defineFunctions,
+  sqsEventSource,
+  sqsMessageBatch,
+} from "voke";
+
+export const processOrder = defineFunction({
+  events: [sqsEventSource("ordersQueue")],
+  input: sqsMessageBatch(orderMessageSchema),
+  handler: async (batch) => {
+    for (const message of batch.messages) {
+      await processOrderMessage(message.body);
+    }
+
+    return batch.ok();
+  },
+});
+
+export const functions = defineFunctions({ processOrder });
+
+export const handler = createSqsEventHandler({
+  function: "processOrder",
+  functions,
+});
+```
+
+Each message body is parsed as JSON and validated with the provided Standard Schema-compatible validator. Invalid JSON or schema failures become partial batch failures by default; use `sqsMessageBatch(schema, { invalidMessageBody: "include" })` when a handler needs to inspect invalid messages directly.

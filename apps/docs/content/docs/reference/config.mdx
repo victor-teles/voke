@@ -1,0 +1,42 @@
+---
+title: Config Reference
+description: The core fields in voke.config.ts and how they shape build, runtime, and CloudFormation output.
+---
+
+`voke.config.ts` is the source-controlled configuration file that drives Voke project workflows.
+
+```ts
+import { defineConfig } from "voke";
+
+export default defineConfig({
+  name: "hello-api",
+  stage: "local",
+  region: "us-east-1",
+  entrypoint: "./src/index.ts",
+});
+```
+
+## Core fields
+
+| Field            | Purpose                                                                 |
+| ---------------- | ----------------------------------------------------------------------- |
+| `name`           | Service name used for generated resource names and deployment commands. |
+| `stage`          | Deployment stage, such as `local`, `dev`, or `prod`.                    |
+| `region`         | AWS region for synthesized and deployed resources.                      |
+| `entrypoint`     | Source entrypoint for build, synth, and dev workflows.                  |
+| `functions`      | Optional Function Registry used by config-aware workflows.              |
+| `cloudFormation` | Resource and output declarations for template synthesis.                |
+| `runtime`        | Runtime options, including Lambda runtime selection.                    |
+| `local`          | Local provider configuration for Floci-backed AWS workflows.            |
+
+## Resource bindings
+
+CloudFormation resources can be bound into runtime code:
+
+```ts
+import { bindResource, createAwsClientConfig } from "voke";
+
+const usersTable = bindResource("usersTable", "name");
+const dynamoConfig = createAwsClientConfig();
+const tableName = usersTable.value();
+```

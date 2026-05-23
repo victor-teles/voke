@@ -1,6 +1,13 @@
-import { defineConfig } from "./config";
 import type { VokeConfigInput } from "./config";
-import { toEnvKey } from "./env-key";
+import { VokeModelError } from "./errors";
+import { createInternalModel } from "./model";
+import type {
+  VokeModel,
+  VokeModelAwsResourceProvider,
+  VokeModelResource,
+  VokeModelSqsEventSource,
+  VokeResourceKind,
+} from "./model";
 
 type CloudFormationValue =
   | string
@@ -67,6 +74,8 @@ export const dynamodbTable = (
   }
 
   return {
+    // Voke does not model per-operation table access yet, so these practical
+    // defaults stay table-scoped instead of wildcarding all DynamoDB resources.
     actions: [
       "dynamodb:GetItem",
       "dynamodb:PutItem",
@@ -135,11 +144,11 @@ export const s3Bucket = (): StackResourceDefinition => ({
 
 export const secret = (): StackResourceDefinition => ({
   actions: ["secretsmanager:GetSecretValue"],
-  bindingAttribute: "arn",
+  bindingAttribute: "id",
   bindingValue: "getAttId",
   cloudFormationType: "AWS::SecretsManager::Secret",
-  outputName: "Arn",
-  policyResource: "getAttId",
+  outputName: "Id",
+  policyResource: "getAttArn",
   properties: {
     GenerateSecretString: {},
   },
@@ -172,9 +181,57 @@ const toLogicalId = (value: string): string => {
     .join("");
 };
 
+const resourceSynthesisByKind: Record<
+  Exclude<VokeResourceKind, "awsResource">,
+  VokeModelAwsResourceProvider
+> = {
+  dynamodbTable: {
+    bindingValue: "ref",
+    cloudFormationType: "AWS::DynamoDB::Table",
+    outputName: "Name",
+    policyResource: "getAttArn",
+  },
+  eventBus: {
+    bindingValue: "ref",
+    cloudFormationType: "AWS::Events::EventBus",
+    outputName: "Name",
+    policyResource: "getAttArn",
+  },
+  s3Bucket: {
+    bindingValue: "ref",
+    cloudFormationType: "AWS::S3::Bucket",
+    outputName: "Name",
+    policyResource: "s3ArnWithObjects",
+  },
+  secret: {
+    bindingValue: "getAttId",
+    cloudFormationType: "AWS::SecretsManager::Secret",
+    outputName: "Id",
+    policyResource: "getAttArn",
+  },
+  snsTopic: {
+    bindingValue: "ref",
+    cloudFormationType: "AWS::SNS::Topic",
+    outputName: "Arn",
+    policyResource: "ref",
+  },
+  sqsQueue: {
+    bindingValue: "ref",
+    cloudFormationType: "AWS::SQS::Queue",
+    outputName: "Url",
+    policyResource: "getAttArn",
+  },
+  ssmParameter: {
+    bindingValue: "ref",
+    cloudFormationType: "AWS::SSM::Parameter",
+    outputName: "Name",
+    policyResource: "parameterArn",
+  },
+};
+
 const resourceValue = (
   logicalId: string,
-  bindingValue: StackResourceDefinition["bindingValue"]
+  bindingValue: VokeModelAwsResourceProvider["bindingValue"]
 ): CloudFormationValue => {
   if (bindingValue === "getAttArn") {
     return { "Fn::GetAtt": [logicalId, "Arn"] };
@@ -189,7 +246,7 @@ const resourceValue = (
 
 const resourceArn = (
   logicalId: string,
-  policyResource: StackResourceDefinition["policyResource"]
+  policyResource: VokeModelAwsResourceProvider["policyResource"]
 ): CloudFormationValue => {
   if (policyResource === "ref") {
     return { Ref: logicalId };
@@ -218,143 +275,402 @@ const resourceArn = (
   return { "Fn::GetAtt": [logicalId, "Arn"] };
 };
 
-export const synthesizeCloudFormation = (
-  options: SynthesizeCloudFormationOptions
-): CloudFormationTemplate => {
-  const config = defineConfig(options);
-  const { resources } = config.cloudFormation;
-  const templateResources: Record<string, CloudFormationResource> = {};
-  const outputs: Record<string, CloudFormationOutput> = {};
-  const environmentVariables: Record<string, CloudFormationValue> = {
-    ...config.cloudFormation.environment,
-  };
-  const policyStatements: CloudFormationValue[] = [];
+const toResourcePolicyStatements = (
+  logicalId: string,
+  resource: VokeModelResource,
+  provider: VokeModelAwsResourceProvider
+): CloudFormationValue[] => {
+  if (resource.access.actions.length === 0) {
+    return [];
+  }
 
-  for (const [name, resource] of Object.entries(resources)) {
-    const logicalId = toLogicalId(name);
+  if (provider.policyResource !== "s3ArnWithObjects") {
+    return [
+      {
+        Action: resource.access.actions,
+        Effect: "Allow",
+        Resource: resourceArn(logicalId, provider.policyResource),
+      },
+    ];
+  }
 
-    templateResources[logicalId] = {
-      Properties: resource.properties,
-      Type: resource.cloudFormationType,
-    };
-    environmentVariables[
-      `VOKE_RESOURCE_${toEnvKey(name)}_${toEnvKey(resource.bindingAttribute)}`
-    ] = resourceValue(logicalId, resource.bindingValue);
-    outputs[`${logicalId}${resource.outputName}`] = {
-      Description: `${name} ${resource.bindingAttribute}`,
-      Value: resourceValue(logicalId, resource.bindingValue),
-    };
-    policyStatements.push({
-      Action: resource.actions,
+  const bucketActions = resource.access.actions.filter(
+    (action) => action === "s3:ListBucket"
+  );
+  const objectActions = resource.access.actions.filter(
+    (action) => action !== "s3:ListBucket"
+  );
+  const statements: CloudFormationValue[] = [];
+
+  if (bucketActions.length > 0) {
+    statements.push({
+      Action: bucketActions,
       Effect: "Allow",
-      Resource: resourceArn(logicalId, resource.policyResource),
+      Resource: { "Fn::GetAtt": [logicalId, "Arn"] },
     });
   }
 
-  templateResources.FunctionRole = {
-    Properties: {
-      AssumeRolePolicyDocument: {
-        Statement: [
-          {
-            Action: "sts:AssumeRole",
-            Effect: "Allow",
-            Principal: { Service: "lambda.amazonaws.com" },
-          },
-        ],
-        Version: "2012-10-17",
+  if (objectActions.length > 0) {
+    statements.push({
+      Action: objectActions,
+      Effect: "Allow",
+      Resource: { "Fn::Sub": [`\${${logicalId}.Arn}/*`, {}] },
+    });
+  }
+
+  return statements;
+};
+
+const resourceProvider = (
+  resource: VokeModelResource
+): VokeModelAwsResourceProvider => {
+  if (resource.kind === "awsResource") {
+    if (resource.provider?.aws === undefined) {
+      throw new Error("AWS resource provider metadata is required");
+    }
+
+    return resource.provider.aws;
+  }
+
+  return resourceSynthesisByKind[resource.kind];
+};
+
+const functionLogicalId = (name: string, apiFunctionName: string): string =>
+  name === apiFunctionName ? "Function" : `${toLogicalId(name)}Function`;
+
+const eventSourceMappingLogicalId = (
+  functionId: string,
+  queueId: string
+): string => `${functionId}${queueId}EventSourceMapping`;
+
+const toSqsEventSourceMappingResource = (options: {
+  eventSource: VokeModelSqsEventSource;
+  eventSourceIndex: number;
+  functionName: string;
+  lambdaLogicalId: string;
+  model: VokeModel;
+}): [string, CloudFormationResource] => {
+  const {
+    eventSource,
+    eventSourceIndex,
+    functionName,
+    lambdaLogicalId,
+    model,
+  } = options;
+  const resource = model.resources[eventSource.queue];
+
+  if (resource === undefined) {
+    throw VokeModelError.validation([
+      {
+        message: `Function "${functionName}" SQS event source references resource "${eventSource.queue}", but no matching resource is defined.`,
+        path: `functions.${functionName}.eventSources.${eventSourceIndex}.queue`,
       },
-      ManagedPolicyArns: [
-        "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
-      ],
-      Policies: [
+    ]);
+  }
+
+  if (resource.kind !== "sqsQueue") {
+    throw VokeModelError.validation([
+      {
+        message: `Function "${functionName}" SQS event source references resource "${eventSource.queue}", but it is a "${resource.kind}" resource instead of an "sqsQueue".`,
+        path: `functions.${functionName}.eventSources.${eventSourceIndex}.queue`,
+      },
+    ]);
+  }
+
+  const queueLogicalId = toLogicalId(eventSource.queue);
+
+  return [
+    eventSourceMappingLogicalId(lambdaLogicalId, queueLogicalId),
+    {
+      Properties: {
+        BatchSize: eventSource.batchSize ?? 10,
+        Enabled: eventSource.enabled ?? true,
+        EventSourceArn: { "Fn::GetAtt": [queueLogicalId, "Arn"] },
+        FunctionName: { Ref: lambdaLogicalId },
+        FunctionResponseTypes: ["ReportBatchItemFailures"],
+        MaximumBatchingWindowInSeconds:
+          eventSource.maxBatchingWindowSeconds ?? 0,
+      },
+      Type: "AWS::Lambda::EventSourceMapping",
+    },
+  ];
+};
+
+const outputName = (
+  model: VokeModel,
+  key: string,
+  output: VokeModel["outputs"][string],
+  apiFunctionName: string
+): string => {
+  if ("api" in output.source) {
+    return "ApiUrl";
+  }
+
+  if ("function" in output.source) {
+    return `${functionLogicalId(output.source.function, apiFunctionName)}Name`;
+  }
+
+  const resource = model.resources[output.source.resource];
+
+  if (resource === undefined) {
+    throw new Error(`Missing resource model for output: ${key}`);
+  }
+
+  return `${toLogicalId(output.source.resource)}${resourceProvider(resource).outputName}`;
+};
+
+const outputValue = (
+  model: VokeModel,
+  key: string,
+  output: VokeModel["outputs"][string],
+  apiFunctionName: string
+): CloudFormationValue => {
+  if ("api" in output.source) {
+    return {
+      "Fn::Sub": `https://\${Api}.execute-api.\${AWS::Region}.amazonaws.com/${model.service.stage}`,
+    };
+  }
+
+  if ("function" in output.source) {
+    return { Ref: functionLogicalId(output.source.function, apiFunctionName) };
+  }
+
+  const resource = model.resources[output.source.resource];
+
+  if (resource === undefined) {
+    throw new Error(`Missing resource model for output: ${key}`);
+  }
+
+  return resourceValue(
+    toLogicalId(output.source.resource),
+    resourceProvider(resource).bindingValue
+  );
+};
+
+export const synthesizeCloudFormationFromModel = (
+  model: VokeModel
+): CloudFormationTemplate => {
+  const apiRoutes = model.apis.http?.routes ?? [];
+  const apiFunctionName =
+    apiRoutes[0]?.function ?? Object.keys(model.functions).at(0) ?? "api";
+  const templateResources: Record<string, CloudFormationResource> = {};
+  const outputs: Record<string, CloudFormationOutput> = {};
+  const policyStatements: CloudFormationValue[] = [];
+
+  for (const [name, resource] of Object.entries(model.resources)) {
+    const logicalId = toLogicalId(name);
+    const provider = resourceProvider(resource);
+
+    templateResources[logicalId] = {
+      Metadata: {
+        VokeBinding: {
+          Attribute: resource.binding.attribute,
+          Resource: name,
+        },
+      },
+      Properties: resource.properties,
+      Type: provider.cloudFormationType,
+    };
+    policyStatements.push(
+      ...toResourcePolicyStatements(logicalId, resource, provider)
+    );
+  }
+
+  const functionRoleProperties: Record<string, CloudFormationValue> = {
+    AssumeRolePolicyDocument: {
+      Statement: [
         {
-          PolicyDocument: {
-            Statement: policyStatements,
-            Version: "2012-10-17",
-          },
-          PolicyName: "VokeResourceAccess",
+          Action: "sts:AssumeRole",
+          Effect: "Allow",
+          Principal: { Service: "lambda.amazonaws.com" },
         },
       ],
+      Version: "2012-10-17",
     },
+    ManagedPolicyArns: [
+      "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+    ],
+  };
+
+  if (policyStatements.length > 0) {
+    functionRoleProperties.Policies = [
+      {
+        PolicyDocument: {
+          Statement: policyStatements,
+          Version: "2012-10-17",
+        },
+        PolicyName: "VokeResourceAccess",
+      },
+    ];
+  }
+
+  templateResources.FunctionRole = {
+    Properties: functionRoleProperties,
     Type: "AWS::IAM::Role",
   };
-  templateResources.Function = {
-    Metadata: {
-      VokeEntrypoint: config.entrypoint,
-    },
-    Properties: {
-      Code: {
-        ZipFile:
-          "export const handler = async () => ({ statusCode: 501, body: 'Build and upload this Voke function before deploying.' });",
+  for (const [name, definition] of Object.entries(model.functions).toSorted(
+    ([leftName], [rightName]) => {
+      if (leftName === apiFunctionName) {
+        return -1;
+      }
+
+      if (rightName === apiFunctionName) {
+        return 1;
+      }
+
+      return leftName.localeCompare(rightName);
+    }
+  )) {
+    const logicalId = functionLogicalId(name, apiFunctionName);
+    const environmentVariables: Record<string, CloudFormationValue> = {
+      ...definition.environment,
+    };
+
+    for (const binding of definition.bindings) {
+      const resource = model.resources[binding.resource];
+
+      if (resource === undefined) {
+        throw new Error(
+          `Missing resource model for binding: ${binding.resource}`
+        );
+      }
+
+      environmentVariables[binding.env] = resourceValue(
+        toLogicalId(binding.resource),
+        resourceProvider(resource).bindingValue
+      );
+    }
+
+    templateResources[logicalId] = {
+      Metadata: {
+        VokeDeployedName: definition.deployedName,
+        VokeEntrypoint: definition.entrypoint,
+        VokeFunction: name,
+        VokeInvokable: definition.invokable,
+        VokeRoutes: definition.routes,
       },
-      Environment: {
-        Variables: environmentVariables,
+      Properties: {
+        Code: {
+          ZipFile:
+            "export const handler = async () => ({ statusCode: 501, body: 'Build and upload this Voke function before deploying.' });",
+        },
+        Environment: {
+          Variables: environmentVariables,
+        },
+        FunctionName: definition.deployedName,
+        Handler: definition.handler,
+        Role: { "Fn::GetAtt": ["FunctionRole", "Arn"] },
+        Runtime: definition.runtime,
       },
-      FunctionName: `${config.name}-${config.stage}`,
-      Handler: config.cloudFormation.handler,
-      Role: { "Fn::GetAtt": ["FunctionRole", "Arn"] },
-      Runtime: "nodejs22.x",
-    },
-    Type: "AWS::Lambda::Function",
-  };
-  templateResources.Api = {
-    Properties: {
-      Name: `${config.name}-${config.stage}`,
-      ProtocolType: "HTTP",
-    },
-    Type: "AWS::ApiGatewayV2::Api",
-  };
-  templateResources.Integration = {
-    Properties: {
-      ApiId: { Ref: "Api" },
-      IntegrationType: "AWS_PROXY",
-      IntegrationUri: { "Fn::GetAtt": ["Function", "Arn"] },
-      PayloadFormatVersion: "2.0",
-    },
-    Type: "AWS::ApiGatewayV2::Integration",
-  };
-  templateResources.Route = {
-    Properties: {
-      ApiId: { Ref: "Api" },
-      RouteKey: "$default",
-      Target: { "Fn::Sub": `integrations/\${Integration}` },
-    },
-    Type: "AWS::ApiGatewayV2::Route",
-  };
-  templateResources.Stage = {
-    Properties: {
-      ApiId: { Ref: "Api" },
-      AutoDeploy: true,
-      StageName: config.stage,
-    },
-    Type: "AWS::ApiGatewayV2::Stage",
-  };
-  templateResources.Permission = {
-    Properties: {
-      Action: "lambda:InvokeFunction",
-      FunctionName: { Ref: "Function" },
-      Principal: "apigateway.amazonaws.com",
-      SourceArn: {
-        "Fn::Sub": `arn:aws:execute-api:\${AWS::Region}:\${AWS::AccountId}:\${Api}/*/*`,
+      Type: "AWS::Lambda::Function",
+    };
+
+    for (const [
+      eventSourceIndex,
+      eventSource,
+    ] of definition.eventSources.entries()) {
+      if (eventSource.type !== "sqs") {
+        continue;
+      }
+
+      const [mappingLogicalId, mappingResource] =
+        toSqsEventSourceMappingResource({
+          eventSource,
+          eventSourceIndex,
+          functionName: name,
+          lambdaLogicalId: logicalId,
+          model,
+        });
+
+      templateResources[mappingLogicalId] = mappingResource;
+    }
+  }
+  if (apiRoutes.length > 0) {
+    templateResources.Api = {
+      Properties: {
+        Name: `${model.service.name}-${model.service.stage}`,
+        ProtocolType: "HTTP",
       },
-    },
-    Type: "AWS::Lambda::Permission",
-  };
-  outputs.ApiUrl = {
-    Description: "HTTP API URL",
-    Value: {
-      "Fn::Sub": `https://\${Api}.execute-api.\${AWS::Region}.amazonaws.com/${config.stage}`,
-    },
-  };
-  outputs.FunctionName = {
-    Description: "Lambda function name",
-    Value: { Ref: "Function" },
-  };
+      Type: "AWS::ApiGatewayV2::Api",
+    };
+
+    for (const [index, apiRoute] of apiRoutes.entries()) {
+      const suffix =
+        index === 0
+          ? ""
+          : toLogicalId(`${apiRoute.function}-${apiRoute.route}`);
+      const integrationLogicalId = `${suffix}Integration`;
+      const routeLogicalId = `${suffix}Route`;
+
+      templateResources[integrationLogicalId] = {
+        Properties: {
+          ApiId: { Ref: "Api" },
+          IntegrationType: "AWS_PROXY",
+          IntegrationUri: {
+            "Fn::GetAtt": [
+              functionLogicalId(apiRoute.function, apiFunctionName),
+              "Arn",
+            ],
+          },
+          PayloadFormatVersion: "2.0",
+        },
+        Type: "AWS::ApiGatewayV2::Integration",
+      };
+      templateResources[routeLogicalId] = {
+        Properties: {
+          ApiId: { Ref: "Api" },
+          RouteKey: apiRoute.route,
+          Target: { "Fn::Sub": `integrations/\${${integrationLogicalId}}` },
+        },
+        Type: "AWS::ApiGatewayV2::Route",
+      };
+    }
+
+    templateResources.Stage = {
+      Properties: {
+        ApiId: { Ref: "Api" },
+        AutoDeploy: true,
+        StageName: model.service.stage,
+      },
+      Type: "AWS::ApiGatewayV2::Stage",
+    };
+    for (const functionName of new Set(
+      apiRoutes.map((route) => route.function)
+    )) {
+      const suffix =
+        functionName === apiFunctionName ? "" : toLogicalId(functionName);
+
+      templateResources[`${suffix}Permission`] = {
+        Properties: {
+          Action: "lambda:InvokeFunction",
+          FunctionName: {
+            Ref: functionLogicalId(functionName, apiFunctionName),
+          },
+          Principal: "apigateway.amazonaws.com",
+          SourceArn: {
+            "Fn::Sub": `arn:aws:execute-api:\${AWS::Region}:\${AWS::AccountId}:\${Api}/*/*`,
+          },
+        },
+        Type: "AWS::Lambda::Permission",
+      };
+    }
+  }
+  for (const [key, output] of Object.entries(model.outputs)) {
+    outputs[outputName(model, key, output, apiFunctionName)] = {
+      Description: output.description,
+      Value: outputValue(model, key, output, apiFunctionName),
+    };
+  }
 
   return {
     AWSTemplateFormatVersion: "2010-09-09",
-    Description: `Voke stack for ${config.name} (${config.stage})`,
+    Description: `Voke stack for ${model.service.name} (${model.service.stage})`,
     Outputs: outputs,
     Resources: templateResources,
   };
 };
+
+export const synthesizeCloudFormation = (
+  options: SynthesizeCloudFormationOptions
+): CloudFormationTemplate =>
+  synthesizeCloudFormationFromModel(createInternalModel(options));

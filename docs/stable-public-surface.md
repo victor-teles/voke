@@ -4,19 +4,24 @@ This inventory defines the intended stable API surface for the first stable Voke
 
 ## Root Package: `voke`
 
-Use the root package for the common application authoring path:
+Use the root package for the common Function-first Gateway authoring path:
 
-- API authoring: `api`, `createApiApp`, `routeModule`
+- Function and Gateway authoring: `api`, `createGateway`, `Voke`, `defineFunction`, `defineFunctions`
+- Function Contract helpers: `StandardSchemaV1`-compatible schemas accepted by `defineFunction(...)` and the Route Builder
+- Route Builder support: `new Voke().get(...)`, `.post(...)`, `.put(...)`, `.patch(...)`, `.delete(...)`, `.head(...)`, `.options(...)`, and `.route(...)`
 - Config: `defineConfig`, `loadVokeConfig`, `getConfig`
 - HTTP helpers: `json`, `jsonError`
 - Request context helpers: `awsContext`, `awsEvent`, `requestId`
 - Runtime AWS binding helpers: `bindResource`, `createAwsClientConfig`
 - CloudFormation synthesis entrypoint: `synthesizeCloudFormation`
+- Internal model inspection: `createInternalModel` and the `VokeModel*` types used by model-backed synthesis
 - Local development helpers: `createFlociComposeConfig`, `createLocalAwsEnvironment`, `createLocalBootstrapPlan`, `createLocalResourceBindings`
-- Invoke helpers: `defineFunction`, `createFunctionRegistry`, `createInvoker`, `invoke`, `registerLocalFunction`, `resetLocalFunctions`, `withInvokeTrace`
+- Invoke helpers: `functions.invoke(...)`, `functions.route(...)`, and `withInvokeTrace`
 - Test helpers used by stable examples: `createHttpApiEvent`, `createTestClient`, `createInvokeTestClient`, `createStackTestContext`
 
-The root should not export AWS resource builders such as `dynamodbTable()` or low-level Lambda adapter internals.
+The root keeps `createApiApp()` and `routeModule()` as Hono compatibility helpers, but first-party docs and examples should lead with `new Voke()`, `defineFunction`, `defineFunctions`, and `createGateway`.
+
+The root should not export removed pre-stable APIs such as `createFunctionRegistry()`, global `invoke()`, `registerLocalFunction()`, or `resetLocalFunctions()`. It should also not export AWS resource builders such as `dynamodbTable()` or low-level Lambda adapter internals.
 
 ## AWS Subpath: `voke/aws`
 
@@ -60,3 +65,4 @@ The CLI and low-level Lambda adapter modules are implementation details for now.
 - Prefer domain subpaths over broad root exports when a helper belongs to a specific area.
 - Do not add a package export just because a file exists under `src/`.
 - Add or update public surface tests whenever this inventory changes.
+- Treat `bun run typecheck` as a required release gate, alongside the relevant behavior tests, so public generics and model contracts stay stable.

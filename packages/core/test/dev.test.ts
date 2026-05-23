@@ -1,0 +1,191 @@
+import { expect, test } from "bun:test";
+
+import { dynamodbTable, sqsQueue } from "../src/aws";
+import { runCli } from "../src/cli";
+import { createDevPlan, defineConfig } from "../src/index";
+import type { LocalProvider } from "../src/local";
+
+test("creates a config-first Bun hot reload dev plan with local bindings", async () => {
+  const directory = `/private/tmp/voke-dev-plan-${crypto.randomUUID()}`;
+  const entrypoint = `${directory}/src/api.ts`;
+
+  await Bun.$`mkdir -p ${directory}/src`;
+  await Bun.write(entrypoint, "export const handler = () => undefined;\n");
+
+  const plan = await createDevPlan(
+    defineConfig({
+      cloudFormation: {
+        environment: {
+          LOG_LEVEL: "debug",
+        },
+        resources: {
+          eventsQueue: sqsQueue(),
+          ordersTable: dynamodbTable(),
+        },
+      },
+      dev: {
+        environment: {
+          FEATURE_FLAG: "enabled",
+        },
+      },
+      entrypoint,
+      name: "orders-api",
+      region: "sa-east-1",
+      stage: "local",
+    })
+  );
+
+  expect(plan).toEqual({
+    command: ["bun", "--hot", entrypoint],
+    entrypoint,
+    environment: {
+      AWS_ACCESS_KEY_ID: "test",
+      AWS_DEFAULT_REGION: "sa-east-1",
+      AWS_ENDPOINT_URL: "http://localhost:4566",
+      AWS_REGION: "sa-east-1",
+      AWS_SECRET_ACCESS_KEY: "test",
+      AWS_SESSION_TOKEN: "test",
+      FEATURE_FLAG: "enabled",
+      LOG_LEVEL: "debug",
+      VOKE_AWS_ENDPOINT_URL: "http://localhost:4566",
+      VOKE_INVOKE_RUNTIME: "local",
+      VOKE_LOCAL_PROVIDER: "floci",
+      VOKE_RESOURCE_EVENTS_QUEUE_URL:
+        "http://localhost:4566/000000000000/EventsQueue",
+      VOKE_RESOURCE_ORDERS_TABLE_NAME: "OrdersTable",
+      VOKE_STAGE: "local",
+    },
+  });
+});
+
+test("dev plan reports missing entrypoints clearly", async () => {
+  const missing = `/private/tmp/voke-dev-missing-${crypto.randomUUID()}/src/api.ts`;
+
+  await expect(
+    createDevPlan({
+      entrypoint: missing,
+      name: "missing-api",
+    })
+  ).rejects.toThrow(`Voke dev entrypoint not found: ${missing}`);
+});
+
+test("dev plan uses the configured local provider", async () => {
+  const directory = `/private/tmp/voke-dev-custom-provider-${crypto.randomUUID()}`;
+  const entrypoint = `${directory}/src/api.ts`;
+  const provider: LocalProvider = {
+    bootstrapPlan: ({ environment }) => ({
+      commands: [],
+      environment,
+    }),
+    composeConfig: () => "",
+    defaults: {
+      accountId: "111111111111",
+      endpoint: "http://localhost:9999",
+      region: "us-west-2",
+    },
+    environment: (options = {}) => ({
+      AWS_ACCESS_KEY_ID: "custom",
+      AWS_DEFAULT_REGION: options.region ?? "us-west-2",
+      AWS_ENDPOINT_URL: options.endpoint ?? "http://localhost:9999",
+      AWS_REGION: options.region ?? "us-west-2",
+      AWS_SECRET_ACCESS_KEY: "custom",
+      AWS_SESSION_TOKEN: "custom",
+      VOKE_AWS_ENDPOINT_URL: options.endpoint ?? "http://localhost:9999",
+      VOKE_INVOKE_RUNTIME: "local",
+      VOKE_LOCAL_PROVIDER: "custom-local-aws",
+    }),
+    name: "custom-local-aws",
+    resetCommand: () => [],
+    startCommand: () => [],
+    stopCommand: () => [],
+  };
+
+  await Bun.$`mkdir -p ${directory}/src`;
+  await Bun.write(entrypoint, "export const handler = () => undefined;\n");
+
+  const plan = await createDevPlan(
+    defineConfig({
+      entrypoint,
+      local: {
+        provider,
+      },
+      name: "orders-api",
+      resources: {
+        eventsQueue: sqsQueue(),
+      },
+    })
+  );
+
+  expect(plan.environment).toMatchObject({
+    AWS_ENDPOINT_URL: "http://localhost:9999",
+    VOKE_LOCAL_PROVIDER: "custom-local-aws",
+    VOKE_RESOURCE_EVENTS_QUEUE_URL:
+      "http://localhost:9999/111111111111/EventsQueue",
+  });
+});
+
+test("dev CLI reads config by default and lets flags override one-off runs", async () => {
+  const directory = `/private/tmp/voke-dev-cli-${crypto.randomUUID()}`;
+  const configPath = `${directory}/voke.config.ts`;
+  const apiEntrypoint = `${directory}/src/api.ts`;
+  const workerEntrypoint = `${directory}/src/worker.ts`;
+  const calls: { command: string[]; env?: Record<string, string> }[] = [];
+
+  await Bun.$`mkdir -p ${directory}/src`;
+  await Bun.write(apiEntrypoint, "export const handler = () => undefined;\n");
+  await Bun.write(
+    workerEntrypoint,
+    "export const handler = () => undefined;\n"
+  );
+  await Bun.write(
+    configPath,
+    `import { defineConfig } from "${import.meta.dir}/../src/index";
+import { sqsQueue } from "${import.meta.dir}/../src/aws";
+
+export default defineConfig({
+  name: "dev-api",
+  stage: "local",
+  region: "sa-east-1",
+  entrypoint: "${apiEntrypoint}",
+  cloudFormation: {
+    environment: {
+      LOG_LEVEL: "info",
+    },
+    resources: {
+      jobsQueue: sqsQueue(),
+    },
+  },
+});
+`
+  );
+
+  await runCli(["dev", "--config", configPath], {
+    run: (command, options) => {
+      calls.push({ command, env: options?.env });
+    },
+  });
+  await runCli(["dev", workerEntrypoint, "--config", configPath], {
+    run: (command, options) => {
+      calls.push({ command, env: options?.env });
+    },
+  });
+
+  expect(calls.map((call) => call.command)).toEqual([
+    ["bun", "--hot", apiEntrypoint],
+    ["bun", "--hot", workerEntrypoint],
+  ]);
+  expect(calls[0]?.env).toMatchObject({
+    AWS_REGION: "sa-east-1",
+    LOG_LEVEL: "info",
+    VOKE_INVOKE_RUNTIME: "local",
+    VOKE_RESOURCE_JOBS_QUEUE_URL:
+      "http://localhost:4566/000000000000/JobsQueue",
+    VOKE_STAGE: "local",
+  });
+  expect(calls[1]?.env).toMatchObject({
+    AWS_REGION: "sa-east-1",
+    LOG_LEVEL: "info",
+    VOKE_RESOURCE_JOBS_QUEUE_URL:
+      "http://localhost:4566/000000000000/JobsQueue",
+  });
+});

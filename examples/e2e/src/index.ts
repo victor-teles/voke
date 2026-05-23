@@ -1,33 +1,96 @@
-import { api, createApiApp, invoke, json } from "voke";
+import {
+  api,
+  createGateway,
+  defineFunction,
+  defineFunctions,
+  Voke,
+} from "voke";
+import type { StandardSchemaV1 } from "voke";
 
-import "./functions";
+import { sendWelcomeEmail } from "./functions";
 
-const app = createApiApp({
-  config: { name: "e2e-api" },
+const schema = <TInput, TOutput = TInput>(
+  validate: (value: TInput) => TOutput
+): StandardSchemaV1<TInput, TOutput> => ({
+  "~standard": {
+    validate: (value) => ({ data: validate(value), success: true }),
+    vendor: "voke-example",
+    version: 1,
+  },
 });
 
-app.get("/health", () => json({ ok: true }));
+const createUserBody = schema<unknown, { id: string; email: string }>(
+  (value) => {
+    if (
+      typeof value === "object" &&
+      value !== null &&
+      "id" in value &&
+      "email" in value &&
+      typeof value.id === "string" &&
+      typeof value.email === "string"
+    ) {
+      return { email: value.email, id: value.id };
+    }
 
-app.post("/users", async (c) => {
-  const body = await c.req.json<{ id: string; email: string }>();
-  const welcome = await invoke<
-    { userId: string; email: string },
-    { queued: boolean; userId: string; email: string }
-  >("sendWelcomeEmail", {
-    email: body.email,
-    userId: body.id,
+    return { email: "", id: "" };
+  }
+);
+
+const app = new Voke();
+
+interface EmailFunctions {
+  invoke: (
+    name: "sendWelcomeEmail",
+    payload: { userId: string; email: string }
+  ) => Promise<{ queued: boolean; userId: string; email: string }>;
+}
+
+const functionRuntime: { current?: unknown } = {};
+
+const createUser = async (req: {
+  body: { id: string; email: string };
+}): Promise<Response> => {
+  const functions = functionRuntime.current as EmailFunctions | undefined;
+
+  if (functions === undefined) {
+    throw new Error("Function Registry is not initialized");
+  }
+
+  const welcome = await functions.invoke("sendWelcomeEmail", {
+    email: req.body.email,
+    userId: req.body.id,
   });
 
-  return json(
+  return Response.json(
     {
-      id: body.id,
-      welcome,
+      data: {
+        id: req.body.id,
+        welcome,
+      },
     },
     { status: 201 }
   );
+};
+
+const registry = defineFunctions({
+  routes: defineFunction({
+    routes: [
+      app.get("/health", {
+        handler: () => ({ ok: true }),
+      }),
+      app.post("/users", {
+        body: createUserBody,
+        handler: createUser,
+      }),
+    ],
+  }),
+  sendWelcomeEmail,
+});
+functionRuntime.current = registry;
+
+const gateway = createGateway({
+  config: { name: "e2e-api" },
+  functions: registry,
 });
 
-const service = api(app, { name: "e2e-api" });
-
-export const { handler } = service;
-export default service;
+export default api(gateway, { name: "e2e-api" });

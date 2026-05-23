@@ -7,12 +7,14 @@ import type {
 } from "./aws-lambda";
 import type { CloudFormationTemplate } from "./cloudformation";
 import { toEnvKey } from "./env-key";
-import { createInvoker, invoke } from "./invoke";
+import { activateFunctionRegistry, InvokeError } from "./invoke";
 import type {
+  AnyFunctionDefinition,
   AsyncInvokeResult,
-  FunctionDefinition,
   FunctionRegistry,
+  InvokableFunctionDefinition,
   InvokeOptions,
+  StandardSchemaV1,
 } from "./invoke";
 import {
   createLocalAwsEnvironment,
@@ -80,14 +82,46 @@ export interface StackTestContext {
   createSeedPlan: (input: StackSeedInput) => StackSeedPlan;
 }
 
+type SchemaInput<TSchema> = TSchema extends {
+  readonly "~standard": { readonly types: { input: infer TInput } };
+}
+  ? TInput
+  : TSchema extends {
+        readonly "~standard": { validate(value: infer TInput): unknown };
+      }
+    ? TInput
+    : never;
+
+type SchemaOutput<TSchema> = TSchema extends {
+  readonly "~standard": { readonly types: { output: infer TOutput } };
+}
+  ? TOutput
+  : TSchema extends {
+        readonly "~standard": {
+          validate(
+            value: unknown
+          ):
+            | { data: infer TOutput; success: true }
+            | Promise<{ data: infer TOutput; success: true }>;
+        };
+      }
+    ? TOutput
+    : never;
+
 type InferPayload<TDefinition> =
-  TDefinition extends FunctionDefinition<string, infer TPayload, infer _TResult>
-    ? TPayload
+  TDefinition extends InvokableFunctionDefinition<string, infer TInputSchema>
+    ? TInputSchema extends StandardSchemaV1
+      ? SchemaInput<TInputSchema>
+      : undefined
     : never;
 
 type InferResult<TDefinition> =
-  TDefinition extends FunctionDefinition<string, infer _TPayload, infer TResult>
-    ? TResult
+  TDefinition extends InvokableFunctionDefinition<
+    string,
+    StandardSchemaV1 | undefined,
+    infer TOutputSchema
+  >
+    ? SchemaOutput<TOutputSchema>
     : never;
 
 type Requester = (
@@ -95,18 +129,6 @@ type Requester = (
   path: string,
   options?: TestRequestOptions
 ) => Promise<Response>;
-
-type UntypedInvoker = (
-  functionName: string,
-  payload: unknown,
-  options?: InvokeOptions
-) => Promise<unknown>;
-
-type UntypedAsyncInvoker = (
-  functionName: string,
-  payload: unknown,
-  options?: InvokeOptions
-) => Promise<AsyncInvokeResult>;
 
 type InvokeRegistry = Record<string, unknown>;
 
@@ -429,10 +451,9 @@ export const createInvokeTestClient = <
 >(
   registry?: TRegistry
 ): InvokeTestClient<TRegistry> => {
-  const registryInvoker =
-    registry === undefined
-      ? undefined
-      : createInvoker(registry as FunctionRegistry);
+  if (registry !== undefined) {
+    activateFunctionRegistry(registry);
+  }
 
   return {
     invoke: ((
@@ -440,29 +461,59 @@ export const createInvokeTestClient = <
       payload: unknown,
       options?: InvokeOptions
     ) => {
-      if (registryInvoker !== undefined) {
-        return (registryInvoker as UntypedInvoker)(
-          functionName,
-          payload,
-          options
+      if (registry === undefined) {
+        throw new Error("createInvokeTestClient requires a function registry");
+      }
+
+      const functions = registry as FunctionRegistry<
+        Record<string, AnyFunctionDefinition>
+      >;
+      if (functions[functionName] === undefined) {
+        return Promise.reject(
+          new InvokeError("Cannot invoke an undefined function definition", {
+            code: "MISSING_FUNCTION",
+          })
         );
       }
 
-      return invoke(functionName, payload, options);
+      const invokeFunction = functions.invoke as (
+        functionName: string,
+        payload?: unknown,
+        options?: InvokeOptions
+      ) => Promise<unknown>;
+
+      return invokeFunction(functionName, payload, options);
     }) as InvokeTestClient<TRegistry>["invoke"],
     invokeAsync: ((
       functionName: string,
       payload: unknown,
       options?: Omit<InvokeOptions, "mode">
     ) => {
-      if (registryInvoker !== undefined) {
-        return (registryInvoker as UntypedAsyncInvoker)(functionName, payload, {
-          ...options,
-          mode: "async",
-        });
+      if (registry === undefined) {
+        throw new Error("createInvokeTestClient requires a function registry");
       }
 
-      return invoke(functionName, payload, { ...options, mode: "async" });
+      const functions = registry as FunctionRegistry<
+        Record<string, AnyFunctionDefinition>
+      >;
+      if (functions[functionName] === undefined) {
+        return Promise.reject(
+          new InvokeError("Cannot invoke an undefined function definition", {
+            code: "MISSING_FUNCTION",
+          })
+        );
+      }
+
+      const invokeFunction = functions.invoke as (
+        functionName: string,
+        payload?: unknown,
+        options?: InvokeOptions
+      ) => Promise<AsyncInvokeResult>;
+
+      return invokeFunction(functionName, payload, {
+        ...options,
+        mode: "async",
+      });
     }) as InvokeTestClient<TRegistry>["invokeAsync"],
   };
 };

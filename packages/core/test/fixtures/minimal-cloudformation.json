@@ -19,22 +19,17 @@
         },
         "ManagedPolicyArns": [
           "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-        ],
-        "Policies": [
-          {
-            "PolicyName": "VokeResourceAccess",
-            "PolicyDocument": {
-              "Version": "2012-10-17",
-              "Statement": []
-            }
-          }
         ]
       }
     },
     "Function": {
       "Type": "AWS::Lambda::Function",
       "Metadata": {
-        "VokeEntrypoint": "./src/index.ts"
+        "VokeDeployedName": "snapshot-api-test",
+        "VokeEntrypoint": "./src/index.ts",
+        "VokeFunction": "api",
+        "VokeInvokable": false,
+        "VokeRoutes": ["$default"]
       },
       "Properties": {
         "FunctionName": "snapshot-api-test",
@@ -115,7 +110,7 @@
       }
     },
     "FunctionName": {
-      "Description": "Lambda function name",
+      "Description": "api Lambda function name",
       "Value": {
         "Ref": "Function"
       }

@@ -1,4 +1,5 @@
-import { toEnvKey } from "./env-key";
+import { createResourceBindingName } from "./bindings";
+import { VokeResourceBindingError } from "./errors";
 
 export interface AwsClientConfig {
   region: string;
@@ -27,7 +28,7 @@ export const bindResource = <TValue extends string = string>(
   name: string,
   attribute: string
 ): ResourceBinding<TValue> => {
-  const envName = `VOKE_RESOURCE_${toEnvKey(name)}_${toEnvKey(attribute)}`;
+  const envName = createResourceBindingName(name, attribute);
 
   return {
     attribute,
@@ -37,7 +38,9 @@ export const bindResource = <TValue extends string = string>(
       const value = Bun.env[envName];
 
       if (value === undefined || value === "") {
-        throw new Error(`Missing AWS resource binding: ${envName}`);
+        throw new VokeResourceBindingError(
+          `Missing AWS resource binding: ${envName}`
+        );
       }
 
       return value as TValue;
@@ -63,4 +66,5 @@ export const createAwsClientConfig = (
   };
 };
 
-export { toEnvKey };
+export { createResourceBindingName };
+export { toEnvKey } from "./env-key";

@@ -1,0 +1,121 @@
+@import "tailwindcss";
+@source "./**/*.{ts,tsx,mdx}";
+@source "../content/**/*.{md,mdx}";
+@import "fumadocs-ui/css/neutral.css";
+@import "fumadocs-ui/css/preset.css";
+
+:root {
+  --color-fd-background: #fbfaf6;
+  --color-fd-foreground: #17140f;
+  --color-fd-muted: #f1eee7;
+  --color-fd-muted-foreground: #62594c;
+  --color-fd-card: #fffdf8;
+  --color-fd-card-foreground: #17140f;
+  --color-fd-border: #ded7c8;
+  --color-fd-primary: #0f5f59;
+  --color-fd-primary-foreground: #fbfaf6;
+  --color-fd-secondary: #263238;
+  --color-fd-secondary-foreground: #fbfaf6;
+  --color-fd-accent: #d6f1e7;
+  --color-fd-accent-foreground: #0f3f3b;
+  --font-sans: "Avenir Next", Avenir, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+}
+
+.dark {
+  --color-fd-background: #101412;
+  --color-fd-foreground: #f7f1e5;
+  --color-fd-muted: #1b211f;
+  --color-fd-muted-foreground: #c7bfae;
+  --color-fd-card: #151a18;
+  --color-fd-card-foreground: #f7f1e5;
+  --color-fd-border: #2d3834;
+  --color-fd-primary: #74d3c5;
+  --color-fd-primary-foreground: #0b1d1a;
+  --color-fd-secondary: #f0b86b;
+  --color-fd-secondary-foreground: #23160a;
+  --color-fd-accent: #20332f;
+  --color-fd-accent-foreground: #c6f3eb;
+}
+
+body {
+  min-height: 100vh;
+  font-family: var(--font-sans);
+  background:
+    linear-gradient(135deg, rgb(15 95 89 / 0.08), transparent 36rem),
+    radial-gradient(
+      circle at 90% 12%,
+      rgb(240 184 107 / 0.22),
+      transparent 24rem
+    ),
+    var(--color-fd-background);
+  color: var(--color-fd-foreground);
+}
+
+code,
+pre,
+kbd,
+samp {
+  font-family: var(--font-mono);
+}
+
+.voke-hero {
+  position: relative;
+  overflow: hidden;
+  border-bottom: 1px solid var(--color-fd-border);
+}
+
+.voke-hero::before {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  content: "";
+  background-image:
+    linear-gradient(rgb(15 95 89 / 0.09) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(15 95 89 / 0.09) 1px, transparent 1px);
+  background-size: 42px 42px;
+  mask-image: linear-gradient(to bottom, black, transparent 72%);
+}
+
+.voke-card {
+  border: 1px solid var(--color-fd-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-fd-card) 86%, transparent);
+  box-shadow: 0 24px 60px rgb(23 20 15 / 0.08);
+}
+
+.voke-code-keyword {
+  color: #b45309;
+}
+
+.voke-code-symbol {
+  color: #0f5f59;
+}
+
+.voke-code-string {
+  color: #1d4ed8;
+}
+
+.voke-code-property {
+  color: #9333ea;
+}
+
+.voke-code-muted {
+  color: var(--color-fd-muted-foreground);
+}
+
+.dark .voke-code-keyword {
+  color: #f0b86b;
+}
+
+.dark .voke-code-symbol {
+  color: #74d3c5;
+}
+
+.dark .voke-code-string {
+  color: #93c5fd;
+}
+
+.dark .voke-code-property {
+  color: #d8b4fe;
+}

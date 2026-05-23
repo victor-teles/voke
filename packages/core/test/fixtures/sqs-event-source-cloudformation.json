@@ -1,0 +1,161 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Voke stack for orders-worker (prod)",
+  "Outputs": {
+    "FunctionName": {
+      "Description": "processOrders Lambda function name",
+      "Value": {
+        "Ref": "Function"
+      }
+    },
+    "OrdersQueueUrl": {
+      "Description": "ordersQueue url",
+      "Value": {
+        "Ref": "OrdersQueue"
+      }
+    },
+    "PriorityQueueUrl": {
+      "Description": "priorityQueue url",
+      "Value": {
+        "Ref": "PriorityQueue"
+      }
+    }
+  },
+  "Resources": {
+    "OrdersQueue": {
+      "Metadata": {
+        "VokeBinding": {
+          "Attribute": "url",
+          "Resource": "ordersQueue"
+        }
+      },
+      "Properties": {},
+      "Type": "AWS::SQS::Queue"
+    },
+    "PriorityQueue": {
+      "Metadata": {
+        "VokeBinding": {
+          "Attribute": "url",
+          "Resource": "priorityQueue"
+        }
+      },
+      "Properties": {},
+      "Type": "AWS::SQS::Queue"
+    },
+    "FunctionRole": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "ManagedPolicyArns": [
+          "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        ],
+        "Policies": [
+          {
+            "PolicyDocument": {
+              "Statement": [
+                {
+                  "Action": [
+                    "sqs:SendMessage",
+                    "sqs:ReceiveMessage",
+                    "sqs:DeleteMessage",
+                    "sqs:GetQueueAttributes"
+                  ],
+                  "Effect": "Allow",
+                  "Resource": {
+                    "Fn::GetAtt": ["OrdersQueue", "Arn"]
+                  }
+                },
+                {
+                  "Action": [
+                    "sqs:SendMessage",
+                    "sqs:ReceiveMessage",
+                    "sqs:DeleteMessage",
+                    "sqs:GetQueueAttributes"
+                  ],
+                  "Effect": "Allow",
+                  "Resource": {
+                    "Fn::GetAtt": ["PriorityQueue", "Arn"]
+                  }
+                }
+              ],
+              "Version": "2012-10-17"
+            },
+            "PolicyName": "VokeResourceAccess"
+          }
+        ]
+      },
+      "Type": "AWS::IAM::Role"
+    },
+    "Function": {
+      "Metadata": {
+        "VokeDeployedName": "orders-worker-prod-processOrders",
+        "VokeEntrypoint": "./src/functions/process-orders.ts",
+        "VokeFunction": "processOrders",
+        "VokeInvokable": true,
+        "VokeRoutes": []
+      },
+      "Properties": {
+        "Code": {
+          "ZipFile": "export const handler = async () => ({ statusCode: 501, body: 'Build and upload this Voke function before deploying.' });"
+        },
+        "Environment": {
+          "Variables": {
+            "VOKE_RESOURCE_ORDERS_QUEUE_URL": {
+              "Ref": "OrdersQueue"
+            },
+            "VOKE_RESOURCE_PRIORITY_QUEUE_URL": {
+              "Ref": "PriorityQueue"
+            }
+          }
+        },
+        "FunctionName": "orders-worker-prod-processOrders",
+        "Handler": "process-orders.handler",
+        "Role": {
+          "Fn::GetAtt": ["FunctionRole", "Arn"]
+        },
+        "Runtime": "nodejs22.x"
+      },
+      "Type": "AWS::Lambda::Function"
+    },
+    "FunctionOrdersQueueEventSourceMapping": {
+      "Properties": {
+        "BatchSize": 10,
+        "Enabled": true,
+        "EventSourceArn": {
+          "Fn::GetAtt": ["OrdersQueue", "Arn"]
+        },
+        "FunctionName": {
+          "Ref": "Function"
+        },
+        "FunctionResponseTypes": ["ReportBatchItemFailures"],
+        "MaximumBatchingWindowInSeconds": 0
+      },
+      "Type": "AWS::Lambda::EventSourceMapping"
+    },
+    "FunctionPriorityQueueEventSourceMapping": {
+      "Properties": {
+        "BatchSize": 5,
+        "Enabled": false,
+        "EventSourceArn": {
+          "Fn::GetAtt": ["PriorityQueue", "Arn"]
+        },
+        "FunctionName": {
+          "Ref": "Function"
+        },
+        "FunctionResponseTypes": ["ReportBatchItemFailures"],
+        "MaximumBatchingWindowInSeconds": 30
+      },
+      "Type": "AWS::Lambda::EventSourceMapping"
+    }
+  }
+}

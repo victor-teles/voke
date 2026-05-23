@@ -19,14 +19,18 @@ import {
   bindResource,
   createApiApp,
   createAwsClientConfig,
+  createGateway,
   defineConfig,
+  defineFunction,
+  defineFunctions,
   getConfig,
   json,
   loadVokeConfig,
   routeModule,
   synthesizeCloudFormation,
+  VokeConfigError,
 } from "../src/index";
-import type { VokeEnv } from "../src/index";
+import type { StandardSchemaV1, VokeEnv } from "../src/index";
 
 const restoreEnv = (name: string, value?: string): void => {
   Bun.env[name] = value;
@@ -79,14 +83,30 @@ const lambdaEvent = (overrides: Record<string, unknown>): LambdaEvent => {
   } as LambdaEvent;
 };
 
+const passthroughSchema = <TValue>(): StandardSchemaV1<TValue, TValue> => ({
+  "~standard": {
+    validate: (value) => ({ data: value, success: true }),
+    vendor: "voke-test",
+    version: 1,
+  },
+});
+
 test("wraps a Hono app with a default name and handler", () => {
   const app = new Hono();
   const vokeApi = api(app);
 
   expect(vokeApi.name).toBe("api");
   expect(vokeApi.config).toEqual({
+    api: {
+      function: "api",
+      name: "api",
+      protocol: "http",
+      routes: ["$default"],
+    },
     build: {
+      entrypoints: ["./src/index.ts"],
       outdir: "./dist",
+      target: "bun",
     },
     cloudFormation: {
       environment: {},
@@ -94,14 +114,122 @@ test("wraps a Hono app with a default name and handler", () => {
       out: "./dist/cloudformation.json",
       resources: {},
     },
+    dev: {
+      entrypoint: "./src/index.ts",
+      environment: {},
+    },
     entrypoint: "./src/index.ts",
+    functions: {},
+    local: {
+      provider: expect.objectContaining({
+        name: "floci",
+      }),
+      providerOptional: true,
+    },
     name: "api",
     region: "us-east-1",
+    runtime: {
+      lambda: "nodejs22.x",
+    },
     stage: "local",
   });
   expect(vokeApi.app).toBe(app);
   expect(vokeApi.fetch).toBeFunction();
   expect(vokeApi.handler).toBeFunction();
+});
+
+test("uses createApiApp config metadata when wrapping a Hono app", () => {
+  const app = createApiApp({
+    config: {
+      api: {
+        name: "orders-http",
+        routes: ["GET /orders", "POST /orders"],
+      },
+      cloudFormation: {
+        environment: {
+          LOG_LEVEL: "debug",
+        },
+        handler: "orders.handler",
+      },
+      name: "orders-api",
+      region: "sa-east-1",
+      runtime: {
+        lambda: "nodejs22.x",
+      },
+      stage: "prod",
+    },
+  });
+  const service = api(app);
+
+  expect(service.name).toBe("orders-http");
+  expect(service.config.name).toBe("orders-api");
+  expect(service.config.api).toEqual({
+    function: "api",
+    name: "orders-http",
+    protocol: "http",
+    routes: ["GET /orders", "POST /orders"],
+  });
+  expect(service.config.cloudFormation.handler).toBe("orders.handler");
+  expect(service.config.cloudFormation.environment).toEqual({
+    LOG_LEVEL: "debug",
+  });
+});
+
+test("activates local Function Registry invocation through createGateway", async () => {
+  const functions = defineFunctions({
+    greet: defineFunction({
+      handler: (payload) => ({ message: `hello ${payload.name}` }),
+      input: passthroughSchema<{ name: string }>(),
+      output: passthroughSchema<{ message: string }>(),
+    }),
+  });
+
+  await expect(functions.invoke("greet", { name: "before" })).rejects.toThrow(
+    VokeConfigError
+  );
+  await expect(functions.invoke("greet", { name: "before" })).rejects.toThrow(
+    "Local Function invocation requires Gateway activation"
+  );
+
+  const gateway = createGateway({
+    config: {
+      name: "greeting-api",
+    },
+    functions,
+  });
+
+  expect(gateway.fetch).toBeFunction();
+  await expect(functions.invoke("greet", { name: "Victor" })).resolves.toEqual({
+    message: "hello Victor",
+  });
+});
+
+test("rejects duplicate Function Registry configuration on createGateway", () => {
+  const functions = defineFunctions({
+    ping: defineFunction({
+      handler: () => ({ ok: true }),
+      output: passthroughSchema<{ ok: boolean }>(),
+    }),
+  });
+
+  expect(() =>
+    createGateway({
+      config: {
+        functions,
+        name: "duplicate-functions-api",
+      },
+      functions,
+    })
+  ).toThrow(VokeConfigError);
+  expect(() =>
+    createGateway({
+      config: {
+        functions,
+        name: "duplicate-functions-api",
+      },
+      functions,
+    })
+  ).toThrow("Pass functions either top-level or in config.functions, not both");
 });
 
 test("handles a Lambda HTTP API v2 GET request", async () => {
@@ -254,14 +382,52 @@ test("creates a starter API project", async () => {
   const healthRoute = await Bun.file(
     `${directory}/src/routes/health.ts`
   ).text();
+  const config = await Bun.file(`${directory}/voke.config.ts`).text();
   const testFile = await Bun.file(`${directory}/test/api.test.ts`).text();
 
   expect(packageJson.name).toBe("@voke/created-api");
-  expect(await Bun.file(`${directory}/voke.config.ts`).exists()).toBe(true);
-  expect(index).toContain("createApiApp");
+  expect(packageJson.dependencies.voke).toBe("^0.0.0");
+  expect(packageJson.scripts.build).toBe("voke build");
+  expect(packageJson.scripts.dev).toBe("voke dev");
+  expect(packageJson.scripts.synth).toBe("voke synth");
+  expect(packageJson.scripts.test).toBe("bun test");
+  expect(packageJson.scripts.typecheck).toBe(
+    "bunx tsgo --project tsconfig.json --noEmit"
+  );
+  expect(config).toContain('name: "created-api"');
+  expect(config).toContain('entrypoint: "./src/index.ts"');
+  expect(config).toContain('out: "./dist/cloudformation.json"');
+  expect(index).toContain("new Voke");
+  expect(index).toContain("createGateway");
+  expect(index).toContain("defineFunctions");
   expect(index).toContain("voke.config");
-  expect(healthRoute).toContain("healthRoutes.get");
+  expect(index).toContain("routes: [createHealthRoute(app)]");
+  expect(healthRoute).toContain("createHealthRoute");
   expect(testFile).toContain("responds to health checks");
+});
+
+test("generated starter test suite passes with local package links", async () => {
+  const directory = `/private/tmp/voke-created-api-smoke-${crypto.randomUUID()}`;
+
+  await createApiProject({
+    directory,
+    name: "created-api-smoke",
+  });
+  await Bun.$`mkdir -p ${directory}/node_modules`;
+  await Bun.$`ln -s ${`${import.meta.dir}/..`} ${`${directory}/node_modules/voke`}`;
+  await Bun.$`ln -s ${`${import.meta.dir}/../node_modules/hono`} ${`${directory}/node_modules/hono`}`;
+
+  const process = Bun.spawn(["bun", "test"], {
+    cwd: directory,
+    stderr: "pipe",
+    stdout: "pipe",
+  });
+  const exitCode = await process.exited;
+  const stderr = await new Response(process.stderr).text();
+  const stdout = await new Response(process.stdout).text();
+
+  expect(`${stdout}\n${stderr}`).toContain("responds to health checks");
+  expect(exitCode).toBe(0);
 });
 
 test("normalizes project and CloudFormation settings through defineConfig", () => {
@@ -286,8 +452,16 @@ test("normalizes project and CloudFormation settings through defineConfig", () =
   });
 
   expect(config).toEqual({
+    api: {
+      function: "api",
+      name: "orders-api",
+      protocol: "http",
+      routes: ["$default"],
+    },
     build: {
+      entrypoints: ["./src/api.ts"],
       outdir: "./build",
+      target: "bun",
     },
     cloudFormation: {
       environment: {
@@ -299,11 +473,56 @@ test("normalizes project and CloudFormation settings through defineConfig", () =
         ordersTable: dynamodbTable({ partitionKey: "id" }),
       },
     },
+    dev: {
+      entrypoint: "./src/api.ts",
+      environment: {},
+    },
     entrypoint: "./src/api.ts",
+    functions: {},
+    local: {
+      provider: expect.objectContaining({
+        name: "floci",
+      }),
+      providerOptional: true,
+    },
     name: "orders-api",
     region: "sa-east-1",
+    runtime: {
+      lambda: "nodejs22.x",
+    },
     stage: "prod",
   });
+});
+
+test("only supports nodejs22 and nodejs24 Lambda runtimes in defineConfig", () => {
+  expect(
+    defineConfig({
+      name: "runtime-api",
+      runtime: {
+        lambda: "nodejs24.x",
+      },
+    }).runtime.lambda
+  ).toBe("nodejs24.x");
+  expect(() =>
+    defineConfig({
+      name: "runtime-api",
+      runtime: {
+        lambda: "nodejs20.x",
+      },
+    } as unknown as Parameters<typeof defineConfig>[0])
+  ).toThrow(
+    'Invalid Voke config at runtime.lambda: expected one of "nodejs22.x", "nodejs24.x"; received "nodejs20.x"'
+  );
+  expect(() =>
+    defineConfig({
+      name: "runtime-api",
+      runtime: {
+        lambda: "python3.12",
+      },
+    } as unknown as Parameters<typeof defineConfig>[0])
+  ).toThrow(
+    'Invalid Voke config at runtime.lambda: expected one of "nodejs22.x", "nodejs24.x"; received "python3.12"'
+  );
 });
 
 test("exposes AWS resource helpers from voke/aws", () => {
@@ -420,6 +639,64 @@ export default defineConfig({
   });
 });
 
+test("experimental deploy and remove CLI commands default to voke.config.ts", async () => {
+  const directory = `/private/tmp/voke-deploy-config-${crypto.randomUUID()}`;
+  const configPath = `${directory}/voke.config.ts`;
+  const calls: string[][] = [];
+
+  await Bun.$`mkdir -p ${directory}`;
+  await Bun.write(
+    configPath,
+    `import { defineConfig } from "${import.meta.dir}/../src/index.ts";
+
+export default defineConfig({
+  name: "configured-deploy",
+  stage: "qa",
+  region: "sa-east-1",
+  cloudFormation: {
+    out: "${directory}/template.json",
+  },
+});
+`
+  );
+
+  await runCli(["experimental", "deploy", "--config", configPath], {
+    run: (command) => {
+      calls.push(command);
+    },
+  });
+  await runCli(["experimental", "remove", "--config", configPath], {
+    run: (command) => {
+      calls.push(command);
+    },
+  });
+
+  expect(calls).toEqual([
+    [
+      "aws",
+      "cloudformation",
+      "deploy",
+      "--stack-name",
+      "configured-deploy-qa",
+      "--template-file",
+      `${directory}/template.json`,
+      "--capabilities",
+      "CAPABILITY_IAM",
+      "--region",
+      "sa-east-1",
+    ],
+    [
+      "aws",
+      "cloudformation",
+      "delete-stack",
+      "--stack-name",
+      "configured-deploy-qa",
+      "--region",
+      "sa-east-1",
+    ],
+  ]);
+});
+
 test("runs create and build through the CLI parser", async () => {
   const directory = `/private/tmp/voke-cli-api-${crypto.randomUUID()}`;
   const buildDirectory = `/private/tmp/voke-cli-build-${crypto.randomUUID()}`;
@@ -494,7 +771,7 @@ test("synthesizes a CloudFormation template with API, Lambda, IAM, resources, bi
     VOKE_RESOURCE_ORDERS_TABLE_NAME: { Ref: "OrdersTable" },
     VOKE_RESOURCE_ORDER_CREATED_TOPIC_ARN: { Ref: "OrderCreatedTopic" },
     VOKE_RESOURCE_PUBLIC_CONFIG_NAME: { Ref: "PublicConfig" },
-    VOKE_RESOURCE_SIGNING_SECRET_ARN: { "Fn::GetAtt": ["SigningSecret", "Id"] },
+    VOKE_RESOURCE_SIGNING_SECRET_ID: { "Fn::GetAtt": ["SigningSecret", "Id"] },
     VOKE_RESOURCE_UPLOADS_BUCKET_NAME: { Ref: "UploadsBucket" },
   });
   expect(
@@ -560,7 +837,7 @@ test("creates typed AWS resource bindings and client config from environment", (
   restoreEnv("VOKE_AWS_ENDPOINT_URL", previous.endpoint);
 });
 
-test("runs synth, deploy, and remove through the CLI parser", async () => {
+test("runs synth and experimental deploy/remove through the CLI parser", async () => {
   const directory = `/private/tmp/voke-cfn-${crypto.randomUUID()}`;
   const templatePath = `${directory}/template.json`;
   const commands: string[][] = [];
@@ -576,6 +853,7 @@ test("runs synth, deploy, and remove through the CLI parser", async () => {
   ]);
   await runCli(
     [
+      "experimental",
       "deploy",
       "--name",
       "orders-api",
@@ -590,11 +868,14 @@ test("runs synth, deploy, and remove through the CLI parser", async () => {
       },
     }
   );
-  await runCli(["remove", "--name", "orders-api", "--stage", "prod"], {
-    run: (command) => {
-      commands.push(command);
-    },
-  });
+  await runCli(
+    ["experimental", "remove", "--name", "orders-api", "--stage", "prod"],
+    {
+      run: (command) => {
+        commands.push(command);
+      },
+    }
+  );
 
   const template = await Bun.file(templatePath).json();
 

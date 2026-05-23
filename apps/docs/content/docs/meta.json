@@ -1,0 +1,14 @@
+{
+  "title": "Voke",
+  "pages": [
+    "index",
+    "getting-started",
+    "---Guides---",
+    "guides/functions",
+    "guides/gateway-testing",
+    "guides/serverless-migration",
+    "---Reference---",
+    "reference/config",
+    "reference/cli"
+  ]
+}

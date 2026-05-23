@@ -1,0 +1,102 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Voke stack for worker-api (test)",
+  "Outputs": {
+    "FunctionName": {
+      "Description": "sendWelcomeEmail Lambda function name",
+      "Value": {
+        "Ref": "Function"
+      }
+    },
+    "EventsQueueUrl": {
+      "Description": "eventsQueue url",
+      "Value": {
+        "Ref": "EventsQueue"
+      }
+    }
+  },
+  "Resources": {
+    "EventsQueue": {
+      "Metadata": {
+        "VokeBinding": {
+          "Attribute": "url",
+          "Resource": "eventsQueue"
+        }
+      },
+      "Properties": {},
+      "Type": "AWS::SQS::Queue"
+    },
+    "FunctionRole": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "ManagedPolicyArns": [
+          "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        ],
+        "Policies": [
+          {
+            "PolicyDocument": {
+              "Statement": [
+                {
+                  "Action": [
+                    "sqs:SendMessage",
+                    "sqs:ReceiveMessage",
+                    "sqs:DeleteMessage",
+                    "sqs:GetQueueAttributes"
+                  ],
+                  "Effect": "Allow",
+                  "Resource": {
+                    "Fn::GetAtt": ["EventsQueue", "Arn"]
+                  }
+                }
+              ],
+              "Version": "2012-10-17"
+            },
+            "PolicyName": "VokeResourceAccess"
+          }
+        ]
+      },
+      "Type": "AWS::IAM::Role"
+    },
+    "Function": {
+      "Metadata": {
+        "VokeDeployedName": "sendWelcomeEmail",
+        "VokeEntrypoint": "./src/functions/send-welcome-email.ts",
+        "VokeFunction": "sendWelcomeEmail",
+        "VokeInvokable": true,
+        "VokeRoutes": []
+      },
+      "Properties": {
+        "Code": {
+          "ZipFile": "export const handler = async () => ({ statusCode: 501, body: 'Build and upload this Voke function before deploying.' });"
+        },
+        "Environment": {
+          "Variables": {
+            "LOG_LEVEL": "info",
+            "EMAIL_FROM": "hello@example.com",
+            "VOKE_RESOURCE_EVENTS_QUEUE_URL": {
+              "Ref": "EventsQueue"
+            }
+          }
+        },
+        "FunctionName": "sendWelcomeEmail",
+        "Handler": "send-welcome-email.handler",
+        "Role": {
+          "Fn::GetAtt": ["FunctionRole", "Arn"]
+        },
+        "Runtime": "nodejs24.x"
+      },
+      "Type": "AWS::Lambda::Function"
+    }
+  }
+}

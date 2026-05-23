@@ -1,3 +1,4 @@
+import { getApiAppConfig } from "./app";
 import { createAwsLambdaHandler } from "./aws-lambda";
 import type {
   AwsLambdaContext,
@@ -29,8 +30,9 @@ export const api = <TApp extends HonoLikeApp>(
   app: TApp,
   options: VokeApiOptions = {}
 ): VokeApi<TApp> => {
-  const name = options.name ?? options.config?.name ?? "api";
-  const config = defineConfig(options.config ?? { name });
+  const appConfig = getApiAppConfig(app);
+  const config = defineConfig(options.config ?? appConfig ?? { name: "api" });
+  const name = options.name ?? config.api.name;
   const handler = createAwsLambdaHandler(app);
 
   return {

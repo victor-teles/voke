@@ -9,7 +9,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./aws": "./src/aws.ts",
+    "./build": "./src/build.ts",
     "./cloudformation": "./src/cloudformation.ts",
+    "./dev": "./src/dev.ts",
     "./e2e": "./src/e2e.ts",
     "./invoke": "./src/invoke.ts",
     "./local": "./src/local.ts",
@@ -20,6 +22,9 @@
     "test": "bun test",
     "typecheck": "bunx tsgo --project tsconfig.json --noEmit",
     "clean": "rm -rf dist coverage"
+  },
+  "dependencies": {
+    "@aws-sdk/client-lambda": "^3.1050.0"
   },
   "devDependencies": {
     "@types/bun": "latest",

@@ -1,12 +1,22 @@
-import { defineFunction, registerLocalFunction } from "voke";
+import { defineFunction, defineFunctions } from "voke";
+import type { StandardSchemaV1 } from "voke";
+
+const schema = <TValue>(): StandardSchemaV1<TValue, TValue> => ({
+  "~standard": {
+    validate: (value) => ({ data: value, success: true }),
+    vendor: "voke-example",
+    version: 1,
+  },
+});
 
 export const sendWelcomeEmail = defineFunction({
-  handler: (payload: { userId: string; email: string }) => ({
+  handler: (payload) => ({
     email: payload.email,
     queued: true,
     userId: payload.userId,
   }),
-  name: "sendWelcomeEmail",
+  input: schema<{ userId: string; email: string }>(),
+  output: schema<{ queued: boolean; userId: string; email: string }>(),
 });
 
-registerLocalFunction(sendWelcomeEmail);
+export const functions = defineFunctions({ sendWelcomeEmail });

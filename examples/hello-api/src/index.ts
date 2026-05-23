@@ -1,23 +1,112 @@
-import { api, createApiApp, json } from "voke";
+import {
+  api,
+  createGateway,
+  defineFunction,
+  defineFunctions,
+  jsonError,
+  Voke,
+} from "voke";
+import type { StandardSchemaV1 } from "voke";
 
 import config from "../voke.config";
 import { requestInfo } from "./middleware/request-info";
-import { healthRoutes } from "./routes/health";
-import { usersRoutes } from "./routes/users";
 
-const app = createApiApp({
-  config,
-  middleware: [requestInfo],
-  routes: [usersRoutes],
+interface User {
+  id: string;
+  name: string;
+}
+
+const users = new Map<string, User>([
+  ["usr_1", { id: "usr_1", name: "Victor" }],
+]);
+
+const schema = <TInput, TOutput = TInput>(
+  validate: (value: TInput) => TOutput
+): StandardSchemaV1<TInput, TOutput> => ({
+  "~standard": {
+    validate: (value) => ({ data: validate(value), success: true }),
+    vendor: "voke-example",
+    version: 1,
+  },
 });
 
-app.get("/", (c) => c.json({ data: { message: "Hello from Voke" } }));
-app.route("/health", healthRoutes);
-app.get("/typed", () =>
-  json<{ message: string }>({ message: "Typed route response" })
-);
+const userParams = schema<{ id: string }>((params) => params);
+const createUserBody = schema<unknown, { name: string }>((value) => {
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "name" in value &&
+    typeof value.name === "string"
+  ) {
+    return { name: value.name.trim() };
+  }
 
-const helloApi = api(app, { config });
+  return { name: "" };
+});
 
-export const { handler } = helloApi;
-export default helloApi;
+const app = new Voke();
+
+const functions = defineFunctions({
+  routes: defineFunction({
+    routes: [
+      app.get("/", {
+        handler: () => ({ message: "Hello from Voke" }),
+      }),
+      app.get("/health", {
+        handler: () => ({
+          ok: true,
+          service: config.name,
+          stage: config.stage,
+        }),
+      }),
+      app.get("/typed", {
+        handler: () => ({ message: "Typed route response" }),
+      }),
+      app.get("/users", {
+        handler: () => [...users.values()],
+      }),
+      app.get("/users/:id", {
+        handler: (req) => {
+          const user = users.get(req.params.id);
+
+          if (user === undefined) {
+            return jsonError("User not found", {
+              code: "USER_NOT_FOUND",
+              status: 404,
+            });
+          }
+
+          return user;
+        },
+        params: userParams,
+      }),
+      app.post("/users", {
+        body: createUserBody,
+        handler: (req) => {
+          if (req.body.name.length === 0) {
+            return jsonError("User name is required", {
+              code: "USER_NAME_REQUIRED",
+              status: 400,
+            });
+          }
+
+          const user = {
+            id: `usr_${users.size + 1}`,
+            name: req.body.name,
+          };
+
+          users.set(user.id, user);
+
+          return Response.json({ data: user }, { status: 201 });
+        },
+      }),
+    ],
+  }),
+});
+
+const gateway = createGateway({
+  config: { ...config, functions },
+  middleware: [requestInfo],
+});
+
+export default api(gateway, { config });

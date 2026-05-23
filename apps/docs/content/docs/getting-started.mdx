@@ -1,0 +1,89 @@
+---
+title: Getting Started
+description: Create a config-first Voke project, define route-backed Functions, and run the local Gateway.
+---
+
+## Install
+
+Use Bun for dependency and script execution:
+
+```bash
+bun install
+```
+
+Inside a Voke project, add `voke.config.ts`:
+
+```ts
+import { defineConfig } from "voke";
+import { dynamodbTable, sqsQueue } from "voke/aws";
+
+export default defineConfig({
+  name: "hello-api",
+  stage: "local",
+  region: "us-east-1",
+  entrypoint: "./src/index.ts",
+  cloudFormation: {
+    resources: {
+      usersTable: dynamodbTable({ partitionKey: "id" }),
+      eventsQueue: sqsQueue(),
+    },
+  },
+});
+```
+
+## Define an API
+
+Create route-backed Functions and mount them in a Gateway:
+
+```ts
+import {
+  api,
+  createGateway,
+  defineFunction,
+  defineFunctions,
+  Voke,
+} from "voke";
+import config from "../voke.config";
+
+const app = new Voke();
+
+const functions = defineFunctions({
+  routes: defineFunction({
+    routes: [
+      app.get("/", {
+        handler: () => ({ message: "Hello from Voke" }),
+      }),
+      app.get("/health", {
+        handler: () => ({ ok: true, service: config.name }),
+      }),
+    ],
+  }),
+});
+
+const gateway = createGateway({ config: { ...config, functions } });
+
+export default api(gateway, { config });
+```
+
+## Run local checks
+
+Use the project gates while developing:
+
+```bash
+bun test
+bun run typecheck
+bun run release:check
+```
+
+For local HTTP behavior, call the Gateway directly from tests:
+
+```ts
+const response = await gateway.request("/health");
+```
+
+## Build and synthesize
+
+```bash
+voke build ./src/index.ts ./dist
+voke synth ./src/index.ts ./dist/cloudformation.json --config voke.config.ts
+```

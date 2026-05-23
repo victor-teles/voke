@@ -1,0 +1,64 @@
+---
+title: CLI Reference
+description: Common Voke CLI commands for development, build, synth, deploy, local AWS, and migration workflows.
+---
+
+## Development
+
+```bash
+voke dev [entrypoint]
+```
+
+Starts the local development workflow for the configured entrypoint.
+
+## Build
+
+```bash
+voke build [entrypoint] [outdir]
+```
+
+Builds the Voke project entrypoint for Bun.
+
+## Project starter
+
+```bash
+voke create api <name> [directory]
+```
+
+Creates a new Voke Project starter.
+
+## CloudFormation
+
+```bash
+voke synth [entrypoint] [out] --config voke.config.ts
+```
+
+Synthesizes the CloudFormation template for the configured project.
+
+## Deploy and remove
+
+```bash
+voke deploy --name hello-api --stage local --template ./dist/cloudformation.json
+voke remove --name hello-api --stage local
+```
+
+Deploys or removes the synthesized stack.
+
+## Local AWS
+
+```bash
+voke local start
+voke local bootstrap --name hello-api --stage local
+voke local stop
+voke local reset
+```
+
+Runs Floci-backed local AWS workflows.
+
+## Serverless migration
+
+```bash
+voke migrate serverless [serverless.yml] --out ./voke-migration
+```
+
+Generates a Function-first migration skeleton and report from Serverless Framework config.

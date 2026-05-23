@@ -1,8 +1,6 @@
 # voke
 
-Voke is planned as an AWS Lambda framework made with Hono and Bun, focused on simple API development, CloudFormation-native AWS integration, local AWS emulation, Serverless Framework migration, E2E testing, and AI-native development skills.
-
-See the [roadmap](./ROADMAP.md) for the planned direction.
+Voke is a Function-first AWS Lambda framework for Bun. You describe work as Functions, collect them in a Function Registry, expose route-backed Functions through a Gateway, and use the Route Builder when a Function should also be an HTTP route.
 
 ## Quickstart
 
@@ -26,69 +24,61 @@ export default defineConfig({
 });
 ```
 
-Then create a Hono API and wrap it with `api()`:
+Then create Functions with explicit Function Contracts and mount them in a Gateway:
 
 ```ts
-import { api, createApiApp, json } from "voke";
+import {
+  api,
+  createGateway,
+  defineFunction,
+  defineFunctions,
+  Voke,
+} from "voke";
 import config from "../voke.config";
-import { usersRoutes } from "./routes/users";
 
-const app = createApiApp({
-  config,
-  routes: [usersRoutes],
+const app = new Voke();
+
+const functions = defineFunctions({
+  routes: defineFunction({
+    routes: [
+      app.get("/", {
+        handler: () => ({ message: "Hello from Voke" }),
+      }),
+      app.get("/health", {
+        handler: () => ({ ok: true, service: config.name }),
+      }),
+    ],
+  }),
 });
 
-app.get("/", () => json({ message: "Hello from Voke" }));
+const gateway = createGateway({ config: { ...config, functions } });
 
-const helloApi = api(app, { config });
-
-export const handler = helloApi.handler;
-export default helloApi;
+export default api(gateway, { config });
 ```
 
-The exported `handler` accepts AWS Lambda HTTP API v2 events:
+The default export has an constant `handler` accepts AWS Lambda HTTP API v2 events. For local tests, call the Gateway directly:
 
 ```ts
-const response = await handler({
-  rawPath: "/",
-  requestContext: {
-    http: {
-      method: "GET",
-      path: "/",
-    },
-  },
-});
+const response = await gateway.request("/health");
 ```
 
-Voke uses Hono's official `hono/aws-lambda` adapter under the hood, so Lambda event conversion, binary response handling, and AWS context bindings stay aligned with Hono.
+Voke still uses Hono-compatible HTTP primitives under the hood, but the first-party authoring model is Function-first: `defineFunction`, `defineFunctions`, `new Voke()`, and `createGateway`.
+
+## Vocabulary
+
+- **Function**: a unit of Lambda work. It can be invokable, route-backed, or both.
+- **Function Contract**: Standard Schema-compatible input, output, params, query, headers, and body types that validate Function boundaries.
+- **Function Registry**: the `defineFunctions({ ... })` collection that gives Functions stable typed names.
+- **Route Builder**: the `new Voke().get(...)`, `.post(...)`, and `.route(...)` API for declaring typed HTTP routes.
+- **Gateway**: the `createGateway({ functions })` HTTP surface that activates local Function invocation and mounts route-backed Functions.
 
 ## Monorepo
 
 This repository uses Bun workspaces and Turborepo.
 
 - `packages/core` contains the framework package.
-- `examples/hello-api` contains a small example API.
-
-## API Project Layout
-
-Voke apps can be organized with route modules and middleware:
-
-```txt
-src/
-  index.ts
-  middleware/
-    request-info.ts
-  routes/
-    health.ts
-    users.ts
-```
-
-Use:
-
-- `createApiApp()` to create a configured Hono app with default JSON errors.
-- `routeModule()` to mount route groups with a `basePath`.
-- `json()` and `jsonError()` for `{ data: ... }` and `{ error: ... }` responses.
-- `getConfig()`, `awsEvent()`, `awsContext()`, and `requestId()` inside handlers/middleware.
+- `examples/hello-api` contains a small Function-first Gateway example.
+- `examples/e2e` contains local API, Function invoke, Gateway request, and deployed smoke examples.
 
 ## CLI
 
@@ -106,14 +96,12 @@ voke migrate serverless [serverless.yml] --out ./voke-migration
 
 ## AWS and CloudFormation
 
-Voke can synthesize a direct CloudFormation template for a Hono Lambda API, API Gateway HTTP API, Lambda IAM role, environment variables, outputs, and common AWS resources from the same normalized config:
+Voke synthesizes a direct CloudFormation template for a Gateway-backed Lambda API, API Gateway HTTP API, Lambda IAM role, environment variables, outputs, Function Registry entries, and common AWS resources from the same normalized config:
 
 ```bash
 voke synth
 voke local bootstrap
 ```
-
-Both commands read `voke.config.ts` by default, so apps do not need a separate `src/stack.ts` file for the normal local/build/synth workflow.
 
 Runtime code can read the generated environment bindings and pass consistent config into AWS SDK clients:
 
@@ -128,62 +116,87 @@ const tableName = usersTable.value();
 
 Resource helpers are included for DynamoDB, SQS, SNS, EventBridge, S3, Secrets Manager, and Parameter Store.
 
-## API-to-API Invoke
+## SQS Event Sources
 
-Define local functions with typed payloads/results, register them in the local runtime, and call them through `invoke()` from API handlers:
+SQS Event Source Functions use the same Function Registry model, but receive normalized message batches instead of direct `functions.invoke(...)` payloads:
 
 ```ts
-import { defineFunction, invoke, registerLocalFunction } from "voke";
+import {
+  createSqsEventHandler,
+  defineFunction,
+  defineFunctions,
+  sqsEventSource,
+  sqsMessageBatch,
+} from "voke";
 
-const getUser = defineFunction({
-  name: "getUser",
-  handler: async (payload: { id: string }) => {
-    return { id: payload.id, name: "Victor" };
+const processOrder = defineFunction({
+  events: [sqsEventSource("ordersQueue", { batchSize: 10 })],
+  input: sqsMessageBatch(orderMessageSchema),
+  handler: async (batch) => {
+    for (const message of batch.messages) {
+      await processOrderMessage(message.body);
+    }
+
+    return batch.ok();
   },
 });
 
-registerLocalFunction(getUser);
-
-const user = await invoke<{ id: string }, { id: string; name: string }>(
-  "getUser",
-  {
-    id: "usr_1",
-  }
-);
+export const functions = defineFunctions({ processOrder });
+export const handler = createSqsEventHandler({
+  function: "processOrder",
+  functions,
+});
 ```
 
-For strongly typed call sites, create a registry-scoped invoker:
+Use `functions.sendEvent("processOrder", { messages: [...] })` in local tests. Voke parses each JSON message body with the Standard Schema-compatible message schema, reports invalid messages as partial batch failures by default, and synthesizes Lambda event source mappings with `ReportBatchItemFailures` enabled.
+
+## Function Invocation
+
+Define invokable Functions with Standard Schema-compatible input/output contracts, group them in a Function Registry, and call them through `functions.invoke(...)`:
 
 ```ts
-import { createFunctionRegistry, createInvoker } from "voke";
+import { defineFunction, defineFunctions } from "voke";
+import type { StandardSchemaV1 } from "voke";
 
-const functions = createFunctionRegistry({ getUser });
-const call = createInvoker(functions);
+const userInput: StandardSchemaV1<{ id: string }, { id: string }> = {
+  "~standard": {
+    validate: (value) => ({ data: value, success: true }),
+    vendor: "example",
+    version: 1,
+  },
+};
 
-const user = await call("getUser", { id: "usr_1" });
+const getUser = defineFunction({
+  input: userInput,
+  output: userInput,
+  handler: async (payload) => ({ id: payload.id, name: "Victor" }),
+});
+
+const functions = defineFunctions({ getUser });
+
+const user = await functions.invoke("getUser", { id: "usr_1" });
 ```
 
-`invoke()` supports local and AWS runtimes, sync and async modes, payload validation hooks, tracing metadata, retries, and timeouts. The AWS runtime accepts an injectable transport, so applications can wire the AWS SDK Lambda client without making it a hard dependency of Voke core.
+`functions.invoke(...)` supports local and AWS runtimes, sync and async modes, Function Contract parsing, tracing metadata, retries, and timeouts. The optional `defineFunction({ name })` value is a deployed Lambda name override; the registry key remains the stable type-safe Function identity.
+
+## Gateway Routes
+
+Route-backed Functions can be called through the typed Route Builder path or as real HTTP requests:
+
+```ts
+const routeResult = await functions.route("GET", "/health");
+const response = await gateway.request("/health");
+```
+
+Use `functions.route(...)` for direct typed route calls and `gateway.request(...)` when a test should exercise HTTP method, path, headers, query strings, and response serialization.
 
 ## Local AWS With Floci
 
 Voke local AWS support targets [Floci](https://floci.io/), a local AWS emulator that runs on port `4566` and works with the standard AWS SDK/CLI endpoint variable `AWS_ENDPOINT_URL`.
 
-Start the local emulator:
-
 ```bash
 voke local start
-```
-
-Bootstrap a local CloudFormation stack against Floci:
-
-```bash
 voke local bootstrap --name hello-api --stage local
-```
-
-Stop or reset local AWS:
-
-```bash
 voke local stop
 voke local reset
 ```
@@ -202,8 +215,6 @@ const env = createLocalAwsEnvironment();
 const bindings = createLocalResourceBindings(template);
 ```
 
-The generated environment sets `AWS_ENDPOINT_URL`, `VOKE_AWS_ENDPOINT_URL`, dummy AWS credentials, region variables, and local invoke mode so AWS SDK clients and Voke resource bindings point at the same local services.
-
 ## Serverless Framework Migration
 
 Generate a Voke migration skeleton from an existing `serverless.yml`:
@@ -212,13 +223,13 @@ Generate a Voke migration skeleton from an existing `serverless.yml`:
 voke migrate serverless ./serverless.yml --out ./voke-migration
 ```
 
-The migrator detects service/provider settings, functions, HTTP API and REST API routes, SQS workers, EventBridge workers, environment variables, IAM statements, package patterns, and plugins. It writes route/function skeletons, a stack starter, `MIGRATION_REPORT.md`, and `SERVERLESS_COMPATIBILITY.md` so teams can move one function at a time and keep unsupported plugin/event behavior visible.
+The migrator detects service/provider settings, Functions, HTTP API and REST API routes, resolvable SQS Event Sources, EventBridge workers, safe native CloudFormation resources, environment variables, IAM statements, package patterns, and plugins. It writes Function-first route and worker skeletons, config-first resource declarations, and stable migration reports with confidence levels and risk-grouped manual work.
 
-See [docs/serverless-framework-migration.md](./docs/serverless-framework-migration.md) and [examples/serverless-migration](./examples/serverless-migration) for common migration shapes.
+See [docs/serverless-framework-migration.md](./docs/serverless-framework-migration.md) for common migration shapes.
 
 ## E2E Testing
 
-Voke includes helpers for first-class API and AWS integration tests:
+Voke includes helpers for first-class Function, Gateway, and AWS integration tests:
 
 ```ts
 import { createTestClient } from "voke";
@@ -228,33 +239,18 @@ const client = createTestClient(service);
 const response = await client.get("/health");
 ```
 
-Use `createTestClient()` for local Lambda/API Gateway semantics or deployed stack smoke tests, `createStackTestContext()` for CloudFormation outputs, local AWS resource bindings, and Floci seed plans, and `createInvokeTestClient()` for worker flows.
+Use `functions.invoke(...)` for invokable Functions, `functions.route(...)` for typed Route Builder calls, `gateway.request(...)` for Gateway HTTP requests, `createTestClient()` for Lambda/API Gateway semantics or deployed stack smoke tests, `createStackTestContext()` for CloudFormation outputs and Floci seed plans, and `createInvokeTestClient()` for worker flows.
 
 See [docs/e2e-testing.md](./docs/e2e-testing.md) and [examples/e2e](./examples/e2e).
 
 ## Common Commands
 
-To install dependencies:
-
 ```bash
 bun install
-```
-
-To run every workspace test:
-
-```bash
 bun test
-```
-
-To build every workspace:
-
-```bash
+bun run typecheck
+bun run release:check
 bun run build
-```
-
-To run the example API in watch mode:
-
-```bash
 bun run --filter @voke/hello-api dev
 ```
 
@@ -265,5 +261,3 @@ curl http://localhost:3000
 ```
 
 Bun starts the example from its default export because `api()` exposes a `fetch` handler.
-
-This project was created using `bun init` in bun v1.3.11. [Bun](https://bun.com) is a fast all-in-one JavaScript runtime.
