@@ -1353,10 +1353,16 @@ const evaluateLocalAuthorizer = async (
     return undefined;
   }
 
-  const hasIdentity = authorizer.identitySource.some((source) => {
+  const hasIdentity = authorizer.identitySource.every((source) => {
     const header = identityHeaderName(source);
 
-    return header !== undefined && headers.get(header) !== null;
+    if (header === undefined) {
+      return false;
+    }
+
+    const value = headers.get(header);
+
+    return value !== null && value.trim() !== "";
   });
 
   if (!hasIdentity) {
