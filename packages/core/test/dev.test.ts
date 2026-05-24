@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
-import { dynamodbTable, sqsQueue } from "../src/aws";
 import { runCli } from "../src/cli";
+import { dynamodbTable, sqsQueue } from "../src/cloudformation";
 import { defineConfig } from "../src/config";
 import { createDevPlan } from "../src/dev";
 import type { LocalProvider } from "../src/local";
@@ -186,7 +186,7 @@ test("dev CLI reads config by default and lets flags override one-off runs", asy
   await Bun.write(
     configPath,
     `import { defineConfig } from "${import.meta.dir}/../src/index";
-import { sqsQueue } from "${import.meta.dir}/../src/aws";
+import { sqsQueue } from "${import.meta.dir}/../src/cloudformation";
 
 export default defineConfig({
   name: "dev-api",

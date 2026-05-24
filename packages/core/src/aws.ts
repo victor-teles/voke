@@ -1,21 +1,12 @@
 import { createResourceBindingName } from "./bindings";
 import { VokeResourceBindingError } from "./errors";
 
+export { parameter, secret } from "./aws-runtime-variables";
+
 export interface AwsClientConfig {
   region: string;
   endpoint?: string;
 }
-
-export {
-  dynamodbTable,
-  eventBus,
-  s3Bucket,
-  secret,
-  snsTopic,
-  sqsQueue,
-  ssmParameter,
-  type StackResourceDefinition,
-} from "./cloudformation";
 
 export interface ResourceBinding<TValue extends string = string> {
   name: string;

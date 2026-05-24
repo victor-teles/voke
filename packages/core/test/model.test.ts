@@ -6,7 +6,13 @@ import {
   lambdaAuthorizer,
   requestAuthorizer,
 } from "../src/authorizers";
-import { dynamodbTable, sqsQueue } from "../src/aws";
+import { parameter, secret } from "../src/aws";
+import {
+  dynamodbTable,
+  secret as cloudFormationSecret,
+  sqsQueue,
+  ssmParameter,
+} from "../src/cloudformation";
 import { defineConfig } from "../src/config";
 import { VokeConfigError } from "../src/errors";
 import {
@@ -107,6 +113,7 @@ test("builds a small serializable model from normalized config", () => {
         invokable: false,
         routes: ["GET /orders", "POST /orders"],
         runtime: "nodejs22.x",
+        variables: {},
       },
     },
     local: {
@@ -290,6 +297,7 @@ test("maps explicit function definitions from config into the model", () => {
     invokable: true,
     routes: [],
     runtime: "nodejs24.x",
+    variables: {},
   });
 });
 
@@ -651,6 +659,55 @@ test("rejects SQS event source references to missing or non-SQS resources", () =
         },
         {
           path: "functions.processOrders.events.1.queue",
+        },
+      ],
+    });
+  }
+});
+
+test("rejects invalid AWS resource-key Runtime Variables during model creation", () => {
+  const checkout = defineFunction({
+    handler: () => "ok",
+    output: schema<string>(),
+    variables: {
+      missing: secret.fromResource("missingSecret"),
+      wrongParameter: parameter.fromResource("signingSecret"),
+      wrongSecret: secret.fromResource("publicConfig"),
+    },
+  });
+
+  expect(() =>
+    createInternalModel({
+      functions: defineFunctions({ checkout }),
+      name: "invalid-runtime-variables",
+      resources: {
+        publicConfig: ssmParameter({ value: "hello" }),
+        signingSecret: cloudFormationSecret(),
+      },
+    })
+  ).toThrow(VokeConfigError);
+
+  try {
+    createInternalModel({
+      functions: defineFunctions({ checkout }),
+      name: "invalid-runtime-variables",
+      resources: {
+        publicConfig: ssmParameter({ value: "hello" }),
+        signingSecret: cloudFormationSecret(),
+      },
+    });
+  } catch (error) {
+    expect(error).toBeInstanceOf(VokeConfigError);
+    expect(error).toMatchObject({
+      issues: [
+        {
+          path: "functions.checkout.variables.missing",
+        },
+        {
+          path: "functions.checkout.variables.wrongParameter",
+        },
+        {
+          path: "functions.checkout.variables.wrongSecret",
         },
       ],
     });

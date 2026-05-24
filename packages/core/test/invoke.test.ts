@@ -2,17 +2,19 @@ import { expect, test } from "bun:test";
 
 import { createGateway } from "../src/app";
 import type { GatewayOptions } from "../src/app";
-import { VokeConfigError } from "../src/errors";
+import { VokeConfigError, VokeRuntimeVariableError } from "../src/errors";
 import {
   createSqsEventHandler,
   defineFunction,
   defineFunctions,
+  http,
   InvokeError,
   sqsEventSource,
   sqsMessageBatch,
   withInvokeTrace,
 } from "../src/invoke";
 import type { InvokeTransport, StandardSchemaV1 } from "../src/invoke";
+import { createVariableProvider, createVariableSource } from "../src/variables";
 
 const passthroughSchema = <TValue>(): StandardSchemaV1<TValue, TValue> => ({
   "~standard": {
@@ -25,9 +27,10 @@ const passthroughSchema = <TValue>(): StandardSchemaV1<TValue, TValue> => ({
 const activateFunctions = <
   TFunctions extends NonNullable<GatewayOptions["functions"]>,
 >(
-  functions: TFunctions
+  functions: TFunctions,
+  options: Omit<GatewayOptions, "functions"> = {}
 ): TFunctions => {
-  createGateway({ functions });
+  createGateway({ ...options, functions });
 
   return functions;
 };
@@ -102,6 +105,260 @@ test("invokes registry functions with typed payloads and parsed results", async 
   const user = await functions.invoke("getUser", { id: "usr_1" });
 
   expect(user).toEqual({ id: "usr_1", name: "Victor" });
+});
+
+test("reads declared Runtime Variables during local Function invocation", async () => {
+  const provider = createVariableProvider({
+    id: "test",
+    load: ({ variableKey }) => ({
+      status: "found",
+      value: `loaded:${variableKey}`,
+    }),
+  });
+  const functions = activateFunctions(
+    defineFunctions({
+      readSecret: defineFunction({
+        handler: async (_payload, context) =>
+          await context.variables.apiKey.text(),
+        output: stringSchema,
+        variables: {
+          apiKey: createVariableSource("test", {
+            id: "api-key",
+            kind: "secret",
+          }),
+        },
+      }),
+    }),
+    { variables: { providers: [provider] } }
+  );
+
+  await expect(functions.invoke("readSecret")).resolves.toBe("loaded:apiKey");
+});
+
+test("uses Gateway Runtime Variable overrides during local Function invocation", async () => {
+  const provider = createVariableProvider({
+    id: "test",
+    load: () => ({ status: "found", value: "provider-value" }),
+  });
+  const functions = activateFunctions(
+    defineFunctions({
+      readSecret: defineFunction({
+        handler: async (_payload, context) =>
+          await context.variables.apiKey.text(),
+        output: stringSchema,
+        variables: {
+          apiKey: createVariableSource("test", {
+            id: "api-key",
+            kind: "secret",
+          }),
+        },
+      }),
+    }),
+    {
+      variables: {
+        overrides: {
+          functions: {
+            readSecret: { apiKey: "override-value" },
+          },
+        },
+        providers: [provider],
+      },
+    }
+  );
+
+  await expect(functions.invoke("readSecret")).resolves.toBe("override-value");
+});
+
+test("caches Runtime Variables by warm Function and variable key", async () => {
+  const calls: string[] = [];
+  const provider = createVariableProvider({
+    id: "test",
+    load: ({ functionKey, variableKey }) => {
+      calls.push(`${functionKey}:${variableKey}`);
+
+      return {
+        status: "found",
+        value: `${functionKey}:${variableKey}:${calls.length}`,
+      };
+    },
+  });
+  const sharedSource = createVariableSource("test", {
+    id: "shared",
+    kind: "secret",
+  });
+  const functions = activateFunctions(
+    defineFunctions({
+      first: defineFunction({
+        handler: async (_payload, context) =>
+          `${await context.variables.apiKey.text()}/${await context.variables.otherKey.text()}`,
+        output: stringSchema,
+        variables: {
+          apiKey: sharedSource,
+          otherKey: sharedSource,
+        },
+      }),
+      second: defineFunction({
+        handler: async (_payload, context) =>
+          await context.variables.apiKey.text(),
+        output: stringSchema,
+        variables: { apiKey: sharedSource },
+      }),
+    }),
+    { variables: { providers: [provider] } }
+  );
+
+  await expect(functions.invoke("first")).resolves.toBe(
+    "first:apiKey:1/first:otherKey:2"
+  );
+  await expect(functions.invoke("first")).resolves.toBe(
+    "first:apiKey:1/first:otherKey:2"
+  );
+  await expect(functions.invoke("second")).resolves.toBe("second:apiKey:3");
+  expect(calls).toEqual(["first:apiKey", "first:otherKey", "second:apiKey"]);
+});
+
+test("loads beforeHandler Runtime Variables in parallel before running handlers", async () => {
+  let handlerStarted = false;
+  const started: string[] = [];
+  const resolvers = new Map<string, PromiseWithResolvers<null>>();
+  const provider = createVariableProvider({
+    id: "test",
+    load: async ({ variableKey }) => {
+      const gate = Promise.withResolvers<null>();
+      started.push(variableKey);
+      resolvers.set(variableKey, gate);
+      await gate.promise;
+
+      return { status: "found", value: `loaded:${variableKey}` };
+    },
+  });
+  const functions = activateFunctions(
+    defineFunctions({
+      readSecret: defineFunction({
+        handler: async (_payload, context) => {
+          handlerStarted = true;
+
+          return `${await context.variables.first.text()}/${await context.variables.second.text()}`;
+        },
+        output: stringSchema,
+        variables: {
+          first: createVariableSource(
+            "test",
+            { id: "first", kind: "secret" },
+            { load: "beforeHandler" }
+          ),
+          second: createVariableSource(
+            "test",
+            { id: "second", kind: "secret" },
+            { load: "beforeHandler" }
+          ),
+        },
+      }),
+    }),
+    { variables: { providers: [provider] } }
+  );
+
+  const result = functions.invoke("readSecret");
+  await Promise.resolve();
+  expect(started.toSorted()).toEqual(["first", "second"]);
+  expect(handlerStarted).toBe(false);
+  resolvers.get("first")?.resolve(null);
+  resolvers.get("second")?.resolve(null);
+  await expect(result).resolves.toBe("loaded:first/loaded:second");
+  expect(handlerStarted).toBe(true);
+});
+
+test("blocks handlers on required beforeHandler Runtime Variable failures", async () => {
+  let handlerStarted = false;
+  const provider = createVariableProvider({
+    id: "test",
+    load: () => ({ status: "missing" }),
+  });
+  const functions = activateFunctions(
+    defineFunctions({
+      readSecret: defineFunction({
+        handler: () => {
+          handlerStarted = true;
+
+          return "handler";
+        },
+        output: stringSchema,
+        variables: {
+          apiKey: createVariableSource(
+            "test",
+            { id: "api-key", kind: "secret" },
+            { load: "beforeHandler" }
+          ),
+        },
+      }),
+    }),
+    { variables: { providers: [provider] } }
+  );
+
+  await expect(functions.invoke("readSecret")).rejects.toThrow(
+    VokeRuntimeVariableError
+  );
+  expect(handlerStarted).toBe(false);
+});
+
+test("reads declared Runtime Variables from route and SQS Function contexts", async () => {
+  const provider = createVariableProvider({
+    id: "test",
+    load: ({ variableKey }) => ({
+      status: "found",
+      value: `loaded:${variableKey}`,
+    }),
+  });
+  const functions = activateFunctions(
+    defineFunctions({
+      api: http({
+        routes: (route) =>
+          route.get("/secret", {
+            handler: async (_request, context) =>
+              await context.variables.apiKey.text(),
+          }),
+        variables: {
+          apiKey: createVariableSource("test", {
+            id: "api-key",
+            kind: "secret",
+          }),
+        },
+      }),
+      processMessage: defineFunction({
+        events: [sqsEventSource("events")],
+        handler: async (_batch, context) => {
+          const value = await context.variables.queueKey.text();
+
+          return { batchItemFailures: [{ itemIdentifier: value }] };
+        },
+        input: sqsMessageBatch(passthroughSchema<{ id: string }>()),
+        variables: {
+          queueKey: createVariableSource("test", {
+            id: "queue-key",
+            kind: "secret",
+          }),
+        },
+      }),
+    }),
+    { variables: { providers: [provider] } }
+  );
+
+  const routeValue = await (
+    functions.route as (
+      method: string,
+      path: string,
+      request: unknown
+    ) => Promise<unknown>
+  )("GET", "/secret", {});
+  expect(routeValue).toBe("loaded:apiKey");
+  await expect(
+    functions.sendEvent("processMessage", {
+      messages: [{ body: { id: "msg" }, id: "msg" }],
+      source: "sqs",
+    })
+  ).resolves.toEqual({
+    batchItemFailures: [{ itemIdentifier: "loaded:queueKey" }],
+  });
 });
 
 test("uses registry keys as stable function identities and keeps helpers non-enumerable", async () => {

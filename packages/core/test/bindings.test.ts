@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 
+import { bindResource } from "../src/aws";
+import { createResourceBindingName } from "../src/bindings";
 import {
-  bindResource,
   dynamodbTable,
   eventBus,
   s3Bucket,
@@ -9,9 +10,8 @@ import {
   snsTopic,
   sqsQueue,
   ssmParameter,
-} from "../src/aws";
-import { createResourceBindingName } from "../src/bindings";
-import { synthesizeCloudFormation } from "../src/cloudformation";
+  synthesizeCloudFormation,
+} from "../src/cloudformation";
 import { createLocalResourceBindings } from "../src/local";
 
 test("uses one stable binding naming convention everywhere", () => {
