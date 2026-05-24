@@ -1,4 +1,15 @@
 export {
+  createAuthorizers,
+  jwtAuthorizer,
+  lambdaAuthorizer,
+  requestAuthorizer,
+  type AuthorizerRegistry,
+  type AuthorizerRegistryInput,
+  type HttpAuthorizerDefinition,
+  type JwtAuthorizerDefinition,
+  type LambdaAuthorizerDefinition,
+} from "./authorizers";
+export {
   voke,
   type GatewayRuntime,
   type Middleware,

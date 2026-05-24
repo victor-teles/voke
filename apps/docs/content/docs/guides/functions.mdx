@@ -124,6 +124,60 @@ export const functions = createFunctions({
 export const gateway = voke(functions);
 ```
 
+## HTTP API Authorizers
+
+Use an Authorizer Registry when route-backed Functions should be protected by AWS API Gateway HTTP API v2 authorizers:
+
+```ts
+import {
+  createAuthorizers,
+  createFunctions,
+  http,
+  jwtAuthorizer,
+  lambdaAuthorizer,
+  requestAuthorizer,
+  route,
+  voke,
+} from "voke";
+
+const authorizers = createAuthorizers({
+  session: lambdaAuthorizer({ function: "authorizeSession" }),
+  userJwt: jwtAuthorizer({
+    audience: "users-api",
+    issuer: "https://auth.example.com",
+  }),
+});
+
+export const functions = createFunctions({
+  authorizeSession: requestAuthorizer({
+    handler: async (request) => ({
+      authorized: request.headers.get("authorization") === "Bearer dev",
+      context: { userId: "usr_1" },
+    }),
+  }),
+  users: http({
+    authorizer: "userJwt",
+    authorizers,
+    routes: [
+      route.get("/me", {
+        authorizer: "session",
+        handler: (request) => ({ userId: request.auth.context.userId }),
+      }),
+      route.get("/health", {
+        authorizer: "none",
+        handler: () => ({ ok: true }),
+      }),
+    ],
+  }),
+});
+
+export const gateway = voke(functions);
+```
+
+The `http(...)` default authorizer protects routes that do not specify an override. A route uses `authorizer: "none"` when it is intentionally public. Merely defining an Authorizer Registry does not protect routes until the default or a route override references an authorizer.
+
+JWT and Lambda Authorizers default to the `Authorization` header. Lambda Authorizers can set `cacheTtlSeconds`, which defaults to `0`, and can target a local Request Authorizer Function, an external deployed Lambda name, or a Lambda ARN. ARN targets are preferred for external authorizers because account and region ownership are explicit. External targets are bring-your-own-permission in v1.
+
 ## SQS Event Source Functions
 
 SQS Event Source Functions are invoked by a queue and tested through `functions.sendEvent(...)`. They do not declare an output schema because Voke owns the SQS batch result contract:

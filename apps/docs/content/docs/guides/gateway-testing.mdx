@@ -21,6 +21,17 @@ Use `functions.route(...)` when the behavior belongs to a typed Route Builder pa
 const result = await functions.route("GET", "/health");
 ```
 
+For handler-focused tests on protected routes, direct route calls can inject Route Auth Context:
+
+```ts
+const result = await functions.route("GET", "/me", {
+  auth: {
+    context: { userId: "usr_1" },
+    source: "lambda",
+  },
+});
+```
+
 ## Gateway HTTP requests
 
 Use `gateway.request(...)` when a test should exercise method, path, headers, query strings, and serialized HTTP responses:
@@ -29,6 +40,8 @@ Use `gateway.request(...)` when a test should exercise method, path, headers, qu
 const response = await gateway.request("/health");
 const body = await response.json();
 ```
+
+`gateway.request(...)` runs local Request Authorizer Functions before protected route handlers. Missing identity values return Unauthorized, denied authorizer results return Forbidden, and invalid authorizer execution is treated as an internal route failure. JWT Authorizers are not fully cryptographically validated locally by default; use injected Route Auth Context when the test only needs to exercise route logic.
 
 ## Lambda/API Gateway semantics
 

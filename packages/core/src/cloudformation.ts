@@ -4,6 +4,7 @@ import { createInternalModel } from "./model";
 import type {
   VokeModel,
   VokeModelAwsResourceProvider,
+  VokeModelHttpAuthorizer,
   VokeModelResource,
   VokeModelSqsEventSource,
   VokeResourceKind,
@@ -180,6 +181,9 @@ const toLogicalId = (value: string): string => {
     .map((word) => `${word[0]?.toUpperCase() ?? ""}${word.slice(1)}`)
     .join("");
 };
+
+const authorizerLogicalId = (name: string): string =>
+  `${toLogicalId(name)}Authorizer`;
 
 const resourceSynthesisByKind: Record<
   Exclude<VokeResourceKind, "awsResource">,
@@ -396,6 +400,202 @@ const toSqsEventSourceMappingResource = (options: {
   ];
 };
 
+const toAuthorizerFunctionArn = (
+  authorizer: Extract<VokeModelHttpAuthorizer, { type: "lambda" }>,
+  apiFunctionName: string
+): string => {
+  if (typeof authorizer.function === "string") {
+    return `\${${functionLogicalId(authorizer.function, apiFunctionName)}.Arn}`;
+  }
+
+  if ("arn" in authorizer.function) {
+    return authorizer.function.arn;
+  }
+
+  return `arn:aws:lambda:\${AWS::Region}:\${AWS::AccountId}:function:${authorizer.function.deployedName}`;
+};
+
+const toHttpAuthorizerResource = (
+  name: string,
+  authorizer: VokeModelHttpAuthorizer,
+  apiFunctionName: string
+): CloudFormationResource => {
+  if (authorizer.type === "lambda") {
+    const authorizerFunctionArn = toAuthorizerFunctionArn(
+      authorizer,
+      apiFunctionName
+    );
+
+    return {
+      Properties: {
+        ApiId: { Ref: "Api" },
+        AuthorizerPayloadFormatVersion: "2.0",
+        AuthorizerResultTtlInSeconds: authorizer.cacheTtlSeconds,
+        AuthorizerType: "REQUEST",
+        AuthorizerUri: {
+          "Fn::Sub": `arn:aws:apigateway:\${AWS::Region}:lambda:path/2015-03-31/functions/${authorizerFunctionArn}/invocations`,
+        },
+        EnableSimpleResponses: true,
+        IdentitySource: [...authorizer.identitySource],
+        Name: name,
+      },
+      Type: "AWS::ApiGatewayV2::Authorizer",
+    };
+  }
+
+  return {
+    Properties: {
+      ApiId: { Ref: "Api" },
+      AuthorizerType: "JWT",
+      IdentitySource: [...authorizer.identitySource],
+      JwtConfiguration: {
+        Audience: [...authorizer.audience],
+        Issuer: authorizer.issuer,
+      },
+      Name: name,
+    },
+    Type: "AWS::ApiGatewayV2::Authorizer",
+  };
+};
+
+const toHttpRouteResource = (options: {
+  apiRoute: VokeModel["apis"][string]["routes"][number];
+  authorizer?: VokeModelHttpAuthorizer;
+  integrationLogicalId: string;
+}): CloudFormationResource => {
+  const { apiRoute, authorizer, integrationLogicalId } = options;
+  const routeProperties: Record<string, CloudFormationValue> = {
+    ApiId: { Ref: "Api" },
+    RouteKey: apiRoute.route,
+    Target: { "Fn::Sub": `integrations/\${${integrationLogicalId}}` },
+  };
+
+  if (apiRoute.authorizer !== undefined && authorizer !== undefined) {
+    routeProperties.AuthorizationType =
+      authorizer.type === "lambda" ? "CUSTOM" : "JWT";
+    routeProperties.AuthorizerId = {
+      Ref: authorizerLogicalId(apiRoute.authorizer),
+    };
+  }
+
+  return {
+    Properties: routeProperties,
+    Type: "AWS::ApiGatewayV2::Route",
+  };
+};
+
+const toHttpIntegrationResource = (
+  apiFunctionName: string,
+  apiRoute: VokeModel["apis"][string]["routes"][number]
+): CloudFormationResource => ({
+  Properties: {
+    ApiId: { Ref: "Api" },
+    IntegrationType: "AWS_PROXY",
+    IntegrationUri: {
+      "Fn::GetAtt": [
+        functionLogicalId(apiRoute.function, apiFunctionName),
+        "Arn",
+      ],
+    },
+    PayloadFormatVersion: "2.0",
+  },
+  Type: "AWS::ApiGatewayV2::Integration",
+});
+
+const toApiGatewayPermissionResource = (
+  functionName: string,
+  apiFunctionName: string
+): CloudFormationResource => ({
+  Properties: {
+    Action: "lambda:InvokeFunction",
+    FunctionName: {
+      Ref: functionLogicalId(functionName, apiFunctionName),
+    },
+    Principal: "apigateway.amazonaws.com",
+    SourceArn: {
+      "Fn::Sub": `arn:aws:execute-api:\${AWS::Region}:\${AWS::AccountId}:\${Api}/*/*`,
+    },
+  },
+  Type: "AWS::Lambda::Permission",
+});
+
+const addHttpApiResources = (options: {
+  apiFunctionName: string;
+  apiRoutes: VokeModel["apis"][string]["routes"];
+  model: VokeModel;
+  templateResources: Record<string, CloudFormationResource>;
+}): void => {
+  const { apiFunctionName, apiRoutes, model, templateResources } = options;
+
+  templateResources.Api = {
+    Properties: {
+      Name: `${model.service.name}-${model.service.stage}`,
+      ProtocolType: "HTTP",
+    },
+    Type: "AWS::ApiGatewayV2::Api",
+  };
+
+  for (const [name, authorizer] of Object.entries(
+    model.apis.http?.authorizers ?? {}
+  )) {
+    templateResources[authorizerLogicalId(name)] = toHttpAuthorizerResource(
+      name,
+      authorizer,
+      apiFunctionName
+    );
+
+    if (
+      authorizer.type === "lambda" &&
+      typeof authorizer.function === "string" &&
+      model.functions[authorizer.function] !== undefined
+    ) {
+      templateResources[`${authorizerLogicalId(name)}Permission`] =
+        toApiGatewayPermissionResource(authorizer.function, apiFunctionName);
+    }
+  }
+
+  for (const [index, apiRoute] of apiRoutes.entries()) {
+    const suffix =
+      index === 0 ? "" : toLogicalId(`${apiRoute.function}-${apiRoute.route}`);
+    const integrationLogicalId = `${suffix}Integration`;
+    const routeLogicalId = `${suffix}Route`;
+
+    templateResources[integrationLogicalId] = toHttpIntegrationResource(
+      apiFunctionName,
+      apiRoute
+    );
+    templateResources[routeLogicalId] = toHttpRouteResource({
+      apiRoute,
+      authorizer:
+        apiRoute.authorizer === undefined
+          ? undefined
+          : model.apis.http?.authorizers?.[apiRoute.authorizer],
+      integrationLogicalId,
+    });
+  }
+
+  templateResources.Stage = {
+    Properties: {
+      ApiId: { Ref: "Api" },
+      AutoDeploy: true,
+      StageName: model.service.stage,
+    },
+    Type: "AWS::ApiGatewayV2::Stage",
+  };
+
+  for (const functionName of new Set(
+    apiRoutes.map((route) => route.function)
+  )) {
+    const suffix =
+      functionName === apiFunctionName ? "" : toLogicalId(functionName);
+
+    templateResources[`${suffix}Permission`] = toApiGatewayPermissionResource(
+      functionName,
+      apiFunctionName
+    );
+  }
+};
+
 const outputName = (
   model: VokeModel,
   key: string,
@@ -586,74 +786,12 @@ export const synthesizeCloudFormationFromModel = (
     }
   }
   if (apiRoutes.length > 0) {
-    templateResources.Api = {
-      Properties: {
-        Name: `${model.service.name}-${model.service.stage}`,
-        ProtocolType: "HTTP",
-      },
-      Type: "AWS::ApiGatewayV2::Api",
-    };
-
-    for (const [index, apiRoute] of apiRoutes.entries()) {
-      const suffix =
-        index === 0
-          ? ""
-          : toLogicalId(`${apiRoute.function}-${apiRoute.route}`);
-      const integrationLogicalId = `${suffix}Integration`;
-      const routeLogicalId = `${suffix}Route`;
-
-      templateResources[integrationLogicalId] = {
-        Properties: {
-          ApiId: { Ref: "Api" },
-          IntegrationType: "AWS_PROXY",
-          IntegrationUri: {
-            "Fn::GetAtt": [
-              functionLogicalId(apiRoute.function, apiFunctionName),
-              "Arn",
-            ],
-          },
-          PayloadFormatVersion: "2.0",
-        },
-        Type: "AWS::ApiGatewayV2::Integration",
-      };
-      templateResources[routeLogicalId] = {
-        Properties: {
-          ApiId: { Ref: "Api" },
-          RouteKey: apiRoute.route,
-          Target: { "Fn::Sub": `integrations/\${${integrationLogicalId}}` },
-        },
-        Type: "AWS::ApiGatewayV2::Route",
-      };
-    }
-
-    templateResources.Stage = {
-      Properties: {
-        ApiId: { Ref: "Api" },
-        AutoDeploy: true,
-        StageName: model.service.stage,
-      },
-      Type: "AWS::ApiGatewayV2::Stage",
-    };
-    for (const functionName of new Set(
-      apiRoutes.map((route) => route.function)
-    )) {
-      const suffix =
-        functionName === apiFunctionName ? "" : toLogicalId(functionName);
-
-      templateResources[`${suffix}Permission`] = {
-        Properties: {
-          Action: "lambda:InvokeFunction",
-          FunctionName: {
-            Ref: functionLogicalId(functionName, apiFunctionName),
-          },
-          Principal: "apigateway.amazonaws.com",
-          SourceArn: {
-            "Fn::Sub": `arn:aws:execute-api:\${AWS::Region}:\${AWS::AccountId}:\${Api}/*/*`,
-          },
-        },
-        Type: "AWS::Lambda::Permission",
-      };
-    }
+    addHttpApiResources({
+      apiFunctionName,
+      apiRoutes,
+      model,
+      templateResources,
+    });
   }
   for (const [key, output] of Object.entries(model.outputs)) {
     outputs[outputName(model, key, output, apiFunctionName)] = {

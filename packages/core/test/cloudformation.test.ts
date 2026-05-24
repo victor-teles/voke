@@ -1,6 +1,12 @@
 import { expect, test } from "bun:test";
 
 import {
+  createAuthorizers,
+  jwtAuthorizer,
+  lambdaAuthorizer,
+  requestAuthorizer,
+} from "../src/authorizers";
+import {
   dynamodbTable,
   eventBus,
   s3Bucket,
@@ -17,6 +23,7 @@ import { VokeModelError } from "../src/errors";
 import {
   defineFunctions,
   defineFunction,
+  http,
   sqsEventSource,
   sqsMessageBatch,
   sqs,
@@ -49,6 +56,23 @@ const resourceAccessPolicyStatements = (
         };
       }[]
     | undefined;
+};
+
+const routeResource = (
+  template: ReturnType<typeof synthesizeCloudFormation>,
+  routeKey: string
+) => {
+  const route = Object.values(template.Resources).find(
+    (resource) =>
+      resource.Type === "AWS::ApiGatewayV2::Route" &&
+      resource.Properties.RouteKey === routeKey
+  );
+
+  if (route === undefined) {
+    throw new Error(`Expected route resource for ${routeKey}`);
+  }
+
+  return route;
 };
 
 test("matches the CloudFormation snapshot for an API stack with resources", async () => {
@@ -226,6 +250,208 @@ test("synthesizes route-backed, invokable, and mixed functions from the Function
       Value: { Ref: "SendReceiptFunction" },
     },
   });
+});
+
+test("synthesizes JWT Authorizers for protected HTTP API routes", () => {
+  const app = new Voke();
+  const authorizers = createAuthorizers({
+    userJwt: jwtAuthorizer({
+      audience: "users-api",
+      identitySource: "$request.header.X-Access-Token",
+      issuer: "https://auth.example.com",
+    }),
+  });
+  const template = synthesizeCloudFormation({
+    functions: defineFunctions({
+      users: http({
+        authorizer: "userJwt",
+        authorizers,
+        routes: app.get("/users/me", {
+          handler: () => ({ id: "usr_1" }),
+        }),
+      }),
+    }),
+    name: "users-api",
+    stage: "prod",
+  });
+
+  expect(template.Resources.UserJwtAuthorizer).toEqual({
+    Properties: {
+      ApiId: { Ref: "Api" },
+      AuthorizerType: "JWT",
+      IdentitySource: ["$request.header.X-Access-Token"],
+      JwtConfiguration: {
+        Audience: ["users-api"],
+        Issuer: "https://auth.example.com",
+      },
+      Name: "userJwt",
+    },
+    Type: "AWS::ApiGatewayV2::Authorizer",
+  });
+  expect(template.Resources.Route).toMatchObject({
+    Properties: {
+      AuthorizationType: "JWT",
+      AuthorizerId: { Ref: "UserJwtAuthorizer" },
+      RouteKey: "GET /users/me",
+    },
+  });
+});
+
+test("synthesizes route authorizer overrides and explicit public routes", () => {
+  const app = new Voke();
+  const authorizers = createAuthorizers({
+    adminJwt: jwtAuthorizer({
+      audience: "admin-api",
+      issuer: "https://admin.example.com",
+    }),
+    userJwt: jwtAuthorizer({
+      audience: "users-api",
+      issuer: "https://auth.example.com",
+    }),
+  });
+  const template = synthesizeCloudFormation({
+    functions: defineFunctions({
+      users: http({
+        authorizer: "userJwt",
+        authorizers,
+        routes: [
+          app.get("/users/me", {
+            handler: () => ({ id: "usr_1" }),
+          }),
+          app.get("/admin", {
+            authorizer: "adminJwt",
+            handler: () => ({ ok: true }),
+          }),
+          app.get("/health", {
+            authorizer: "none",
+            handler: () => ({ ok: true }),
+          }),
+        ],
+      }),
+    }),
+    name: "users-api",
+  });
+
+  expect(routeResource(template, "GET /users/me").Properties).toMatchObject({
+    AuthorizationType: "JWT",
+    AuthorizerId: { Ref: "UserJwtAuthorizer" },
+  });
+  expect(routeResource(template, "GET /admin").Properties).toMatchObject({
+    AuthorizationType: "JWT",
+    AuthorizerId: { Ref: "AdminJwtAuthorizer" },
+  });
+  expect(routeResource(template, "GET /health").Properties).not.toContainKeys([
+    "AuthorizationType",
+    "AuthorizerId",
+  ]);
+});
+
+test("synthesizes Lambda Authorizers for local Request Authorizer Functions", () => {
+  const app = new Voke();
+  const authorizers = createAuthorizers({
+    session: lambdaAuthorizer({
+      cacheTtlSeconds: 60,
+      function: "authorizeSession",
+      identitySource: "$request.header.X-Session",
+    }),
+  });
+  const template = synthesizeCloudFormation({
+    functions: defineFunctions({
+      authorizeSession: requestAuthorizer({
+        handler: () => ({ authorized: true }),
+      }),
+      users: http({
+        authorizer: "session",
+        authorizers,
+        routes: app.get("/me", {
+          handler: () => ({ ok: true }),
+        }),
+      }),
+    }),
+    name: "users-api",
+    stage: "prod",
+  });
+
+  expect(template.Resources.SessionAuthorizer).toEqual({
+    Properties: {
+      ApiId: { Ref: "Api" },
+      AuthorizerPayloadFormatVersion: "2.0",
+      AuthorizerResultTtlInSeconds: 60,
+      AuthorizerType: "REQUEST",
+      AuthorizerUri: {
+        "Fn::Sub": `arn:aws:apigateway:\${AWS::Region}:lambda:path/2015-03-31/functions/\${AuthorizeSessionFunction.Arn}/invocations`,
+      },
+      EnableSimpleResponses: true,
+      IdentitySource: ["$request.header.X-Session"],
+      Name: "session",
+    },
+    Type: "AWS::ApiGatewayV2::Authorizer",
+  });
+  expect(template.Resources.Route).toMatchObject({
+    Properties: {
+      AuthorizationType: "CUSTOM",
+      AuthorizerId: { Ref: "SessionAuthorizer" },
+    },
+  });
+  expect(template.Resources.SessionAuthorizerPermission).toMatchObject({
+    Properties: {
+      Action: "lambda:InvokeFunction",
+      FunctionName: { Ref: "AuthorizeSessionFunction" },
+      Principal: "apigateway.amazonaws.com",
+    },
+    Type: "AWS::Lambda::Permission",
+  });
+});
+
+test("synthesizes external Lambda Authorizer targets without permissions", () => {
+  const app = new Voke();
+  const authorizers = createAuthorizers({
+    externalArn: lambdaAuthorizer({
+      function: {
+        arn: "arn:aws:lambda:us-east-1:123456789012:function:shared-auth",
+      },
+    }),
+    externalName: lambdaAuthorizer({
+      function: {
+        deployedName: "shared-auth",
+      },
+    }),
+  });
+  const template = synthesizeCloudFormation({
+    functions: defineFunctions({
+      users: http({
+        authorizers,
+        routes: [
+          app.get("/name", {
+            authorizer: "externalName",
+            handler: () => ({ ok: true }),
+          }),
+          app.get("/arn", {
+            authorizer: "externalArn",
+            handler: () => ({ ok: true }),
+          }),
+        ],
+      }),
+    }),
+    name: "users-api",
+  });
+
+  expect(template.Resources.ExternalNameAuthorizer).toMatchObject({
+    Properties: {
+      AuthorizerUri: {
+        "Fn::Sub": `arn:aws:apigateway:\${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:\${AWS::Region}:\${AWS::AccountId}:function:shared-auth/invocations`,
+      },
+    },
+  });
+  expect(template.Resources.ExternalArnAuthorizer).toMatchObject({
+    Properties: {
+      AuthorizerUri: {
+        "Fn::Sub": `arn:aws:apigateway:\${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:123456789012:function:shared-auth/invocations`,
+      },
+    },
+  });
+  expect(template.Resources.ExternalNameAuthorizerPermission).toBeUndefined();
+  expect(template.Resources.ExternalArnAuthorizerPermission).toBeUndefined();
 });
 
 test("omits the inline resource access policy when no resources are configured", () => {

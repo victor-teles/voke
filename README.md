@@ -180,6 +180,70 @@ const response = await gateway.request("/health");
 
 Use `functions.route(...)` for direct typed route calls and `gateway.request(...)` when a test should exercise HTTP method, path, headers, query strings, and response serialization.
 
+## HTTP API Authorizers
+
+Route-backed Functions can protect HTTP API routes with named authorizers:
+
+```ts
+import {
+  createAuthorizers,
+  createFunctions,
+  http,
+  jwtAuthorizer,
+  lambdaAuthorizer,
+  requestAuthorizer,
+  route,
+  voke,
+} from "voke";
+
+const authorizers = createAuthorizers({
+  session: lambdaAuthorizer({ function: "authorizeSession" }),
+  userJwt: jwtAuthorizer({
+    audience: "users-api",
+    issuer: "https://auth.example.com",
+  }),
+});
+
+const functions = createFunctions({
+  authorizeSession: requestAuthorizer({
+    handler: async (request) => ({
+      authorized: request.headers.get("authorization") === "Bearer dev",
+      context: { userId: "usr_1" },
+    }),
+  }),
+  users: http({
+    authorizer: "userJwt",
+    authorizers,
+    routes: [
+      route.get("/me", {
+        authorizer: "session",
+        handler: (request) => ({ userId: request.auth.context.userId }),
+      }),
+      route.get("/health", {
+        authorizer: "none",
+        handler: () => ({ ok: true }),
+      }),
+    ],
+  }),
+});
+
+export default voke(functions);
+```
+
+An omitted route authorizer inherits the `http(...)` default. Use `authorizer: "none"` for an intentionally public route. JWT and Lambda Authorizers default to the `Authorization` header and accept explicit identity source overrides. Local `gateway.request(...)` runs local Request Authorizer Functions; JWT Authorizers are not fully cryptographically validated locally by default, so tests can use `functions.route(...)` with injected Route Auth Context for handler-focused checks.
+
+Lambda Authorizers can also target an external deployed Lambda by name or ARN:
+
+```ts
+lambdaAuthorizer({
+  function: {
+    arn: "arn:aws:lambda:us-east-1:123456789012:function:shared-auth",
+  },
+});
+```
+
+ARN targets are preferred because they make account and region ownership explicit. External Lambda Authorizer targets are bring-your-own-permission in v1; Voke only synthesizes API Gateway invoke permission for local Request Authorizer Functions owned by the same stack.
+
 ## Local AWS With Floci
 
 Voke local AWS support targets [Floci](https://floci.io/), a local AWS emulator that runs on port `4566` and works with the standard AWS SDK/CLI endpoint variable `AWS_ENDPOINT_URL`.
