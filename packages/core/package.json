@@ -21,7 +21,8 @@
     "./response": "./src/response.ts",
     "./schema": "./src/schema.ts",
     "./serverless-migration": "./src/serverless-migration.ts",
-    "./testing": "./src/e2e.ts"
+    "./testing": "./src/e2e.ts",
+    "./variables": "./src/variables.ts"
   },
   "scripts": {
     "build": "bun build ./src/index.ts ./src/cli.ts --outdir ./dist --target bun",
@@ -30,7 +31,9 @@
     "clean": "rm -rf dist coverage"
   },
   "dependencies": {
-    "@aws-sdk/client-lambda": "^3.1050.0"
+    "@aws-sdk/client-lambda": "^3.1050.0",
+    "@aws-sdk/client-secrets-manager": "^3.1053.0",
+    "@aws-sdk/client-ssm": "^3.1053.0"
   },
   "devDependencies": {
     "@types/bun": "latest",

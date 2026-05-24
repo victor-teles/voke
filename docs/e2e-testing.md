@@ -99,7 +99,7 @@ const client = createTestClient({ baseUrl: Bun.env.VOKE_E2E_API_URL! });
 ```ts
 import { synthesizeCloudFormation } from "voke/cloudformation";
 import { createStackTestContext } from "voke/testing";
-import { dynamodbTable } from "voke/aws";
+import { dynamodbTable } from "voke/cloudformation";
 
 const template = synthesizeCloudFormation({
   name: "orders-api",

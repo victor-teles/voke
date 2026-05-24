@@ -33,6 +33,71 @@ const functions = createFunctions({ getUser });
 const user = await functions.invoke("getUser", { id: "usr_1" });
 ```
 
+## Runtime Variables
+
+Runtime Variables are per-Function implementation dependencies for values loaded at runtime. They do not change a Function Contract, and they are not exposed to generated remote clients.
+
+Use provider-specific builders for app code. The first-party AWS builders live on `voke/aws`:
+
+```ts
+import { createFunctions, fn, voke } from "voke";
+import { parameter, secret } from "voke/aws";
+
+export const functions = createFunctions({
+  checkout: fn({
+    input: checkoutInput,
+    output: checkoutOutput,
+    variables: {
+      flags: parameter("/prod/checkout/flags", { decrypt: false }),
+      stripeKey: secret("/prod/stripe/key", {
+        cache: { ttlSeconds: 60 },
+        load: "beforeHandler",
+      }),
+    },
+    handler: async (payload, context) => {
+      const stripeKey = await context.variables.stripeKey.text();
+      const flags = await context.variables.flags.json(flagsSchema);
+
+      return checkout(payload, { flags, stripeKey });
+    },
+  }),
+});
+
+export const gateway = voke(functions, {
+  variables: {
+    overrides: {
+      defaults: {
+        flags: '{"enabled":true}',
+      },
+      functions: {
+        checkout: {
+          stripeKey: "sk_test_local",
+        },
+      },
+    },
+  },
+});
+```
+
+Direct `secret(...)` and `parameter(...)` calls reference external AWS names or ARNs. Use `.fromResource(...)` for Voke-managed CloudFormation resource keys:
+
+```ts
+import { parameter, secret } from "voke/aws";
+
+const variables = {
+  publicConfig: parameter.fromResource("publicConfig"),
+  signingSecret: secret.fromResource("signingSecret"),
+};
+```
+
+Runtime Variables are required by default. Add `{ optional: true }` when absence is allowed. `text()` and `json(schema?)` return `undefined` for missing optional values, but invalid JSON, schema failures, AWS access failures, and provider failures still throw `VokeRuntimeVariableError`.
+
+Values cache by warm Function runtime and Runtime Variable key. Use `cache: false` to reload after each completed read, `cache: { ttlSeconds }` for time-based reuse, and `await context.variables.key.refresh()` to rerun overrides, environment fallback, and provider loading.
+
+Local and test resolution checks Function-scoped overrides, project defaults, `VOKE_VARIABLE_<FUNCTION>_<KEY>`, `VOKE_VARIABLE_<KEY>`, then the provider. Override values are strings so `text()` and `json(schema?)` behave the same across overrides, environment fallback, and providers.
+
+Provider authors can use `voke/variables` to create provider objects and provider-specific builders. Providers are registered at the Gateway/test/runtime boundary, and unknown third-party providers fail before handler execution when Voke has enough context.
+
 ## Remote Function Registries
 
 Use a **Remote Function Registry** when one Voke Project needs to invoke Functions exposed by another Voke Project during local development.

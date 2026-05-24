@@ -4,8 +4,12 @@ import { Hono } from "hono";
 
 import { api } from "../src/api";
 import { createGateway } from "../src/app";
-import { bindResource, dynamodbTable, sqsQueue } from "../src/aws";
-import { synthesizeCloudFormation } from "../src/cloudformation";
+import { bindResource } from "../src/aws";
+import {
+  dynamodbTable,
+  sqsQueue,
+  synthesizeCloudFormation,
+} from "../src/cloudformation";
 import { awsContext, awsEvent, requestId } from "../src/context";
 import type { VokeEnv } from "../src/context";
 import {

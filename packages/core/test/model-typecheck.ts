@@ -1,4 +1,4 @@
-import { sqsQueue } from "../src/aws";
+import { sqsQueue } from "../src/cloudformation";
 import { defineConfig } from "../src/config";
 import {
   defineFunction,

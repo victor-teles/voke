@@ -2,12 +2,14 @@ import { expect, test } from "bun:test";
 
 import packageJson from "../package.json";
 import * as aws from "../src/aws";
+import * as cloudformation from "../src/cloudformation";
 import * as testing from "../src/e2e";
 import * as voke from "../src/index";
 import * as local from "../src/local";
 import * as remote from "../src/remote";
 import * as responseHelpers from "../src/response";
 import * as schemaHelpers from "../src/schema";
+import * as variables from "../src/variables";
 
 const documentationFiles = [
   "../../../README.md",
@@ -67,22 +69,29 @@ test("keeps the stable root runtime surface intentional", () => {
   ]);
 });
 
-test("keeps AWS resource authoring on the voke/aws subpath", () => {
+test("keeps AWS runtime helpers on the voke/aws subpath", () => {
   expect(Object.keys(aws).toSorted()).toEqual([
     "bindResource",
     "createAwsClientConfig",
     "createResourceBindingName",
-    "dynamodbTable",
-    "eventBus",
-    "s3Bucket",
+    "parameter",
     "secret",
-    "snsTopic",
-    "sqsQueue",
-    "ssmParameter",
     "toEnvKey",
   ]);
   expect("dynamodbTable" in voke).toBe(false);
   expect("sqsQueue" in voke).toBe(false);
+});
+
+test("keeps AWS resource authoring on the voke/cloudformation subpath", () => {
+  expect(Object.keys(cloudformation)).toContain("dynamodbTable");
+  expect(Object.keys(cloudformation)).toContain("eventBus");
+  expect(Object.keys(cloudformation)).toContain("s3Bucket");
+  expect(Object.keys(cloudformation)).toContain("secret");
+  expect(Object.keys(cloudformation)).toContain("snsTopic");
+  expect(Object.keys(cloudformation)).toContain("sqsQueue");
+  expect(Object.keys(cloudformation)).toContain("ssmParameter");
+  expect("dynamodbTable" in aws).toBe(false);
+  expect("ssmParameter" in aws).toBe(false);
 });
 
 test("publishes only stable package subpaths", () => {
@@ -102,6 +111,18 @@ test("publishes only stable package subpaths", () => {
     "./schema",
     "./serverless-migration",
     "./testing",
+    "./variables",
+  ]);
+});
+
+test("publishes Runtime Variable extension helpers on voke/variables", () => {
+  expect(Object.keys(variables).toSorted()).toEqual([
+    "VokeRuntimeVariableError",
+    "createRuntimeVariableCache",
+    "createRuntimeVariables",
+    "createVariableProvider",
+    "createVariableSource",
+    "loadRuntimeVariablesBeforeHandler",
   ]);
 });
 

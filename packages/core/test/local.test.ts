@@ -1,13 +1,13 @@
 import { expect, test } from "bun:test";
 
+import { createAwsClientConfig } from "../src/aws";
+import { runCli } from "../src/cli";
 import {
-  createAwsClientConfig,
   dynamodbTable,
   s3Bucket,
   sqsQueue,
-} from "../src/aws";
-import { runCli } from "../src/cli";
-import { synthesizeCloudFormation } from "../src/cloudformation";
+  synthesizeCloudFormation,
+} from "../src/cloudformation";
 import { defineConfig } from "../src/config";
 import {
   createFlociComposeConfig,
@@ -411,7 +411,7 @@ test("creates a local bootstrap plan by loading voke.config.ts", async () => {
   await Bun.write(
     configPath,
     `import { defineConfig } from "${import.meta.dir}/../src/index.ts";
-import { sqsQueue } from "${import.meta.dir}/../src/aws.ts";
+import { sqsQueue } from "${import.meta.dir}/../src/cloudformation.ts";
 
 export default defineConfig({
   name: "jobs-api",

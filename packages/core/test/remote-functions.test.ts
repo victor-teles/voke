@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 
 import { createGateway } from "../src/app";
+import { secret } from "../src/aws";
 import { defineConfig } from "../src/config";
 import type { StandardSchemaV1 } from "../src/invoke";
 import { defineFunction, defineFunctions } from "../src/invoke";
@@ -146,6 +147,89 @@ test("invokes a remote Function through another voke dev server", async () => {
       requestId: "req_remote",
     });
   });
+});
+
+test("excludes Runtime Variables from contracts and generated remotes", async () => {
+  Bun.env.VOKE_DEV_SUMMARY = "1";
+  console.info = () => {};
+  const getUserBase = defineFunction({
+    handler: (payload: { id: string }) => ({ id: payload.id }),
+    input: schema<{ id: string }>({
+      properties: { id: { type: "string" } },
+      required: ["id"],
+      type: "object",
+    }),
+    output: schema<{ id: string }>({
+      properties: { id: { type: "string" } },
+      required: ["id"],
+      type: "object",
+    }),
+  });
+  const getUserWithVariables = defineFunction({
+    handler: (payload: { id: string }) => ({ id: payload.id }),
+    input: schema<{ id: string }>({
+      properties: { id: { type: "string" } },
+      required: ["id"],
+      type: "object",
+    }),
+    output: schema<{ id: string }>({
+      properties: { id: { type: "string" } },
+      required: ["id"],
+      type: "object",
+    }),
+    variables: {
+      stripeKey: secret("/prod/stripe/key"),
+    },
+  });
+  const baseGateway = createGateway({
+    config: { name: "users" },
+    functions: defineFunctions({ getUser: getUserBase }),
+  });
+  const variableGateway = createGateway({
+    config: { name: "users" },
+    functions: defineFunctions({ getUser: getUserWithVariables }),
+  });
+  const baseResponse = await baseGateway.request("/_voke/contract");
+  const variableResponse = await variableGateway.request("/_voke/contract");
+  const baseArtifact = await baseResponse.json();
+  const variableArtifact = await variableResponse.json();
+  const artifact = variableArtifact.data as FunctionContractArtifact<{
+    getUser: FunctionContractMetadata;
+  }>;
+  const generated: Record<string, string> = {};
+
+  await generateRemoteModules(
+    defineConfig({
+      name: "wallet",
+      remotes: {
+        users: {
+          targets: { local: "http://users.local" },
+        },
+      },
+    }),
+    {
+      fetch: Object.assign(
+        () => Promise.resolve(Response.json({ data: artifact })),
+        { preconnect: fetch.preconnect }
+      ) as typeof fetch,
+      write: (path, text) => {
+        generated[path] = text;
+
+        return Promise.resolve();
+      },
+    }
+  );
+
+  expect(variableArtifact.data).toEqual(baseArtifact.data);
+  expect(JSON.stringify(variableArtifact.data)).not.toContain("stripeKey");
+  expect(JSON.stringify(variableArtifact.data)).not.toContain(
+    "/prod/stripe/key"
+  );
+  expect(JSON.stringify(variableArtifact.data)).not.toContain("aws");
+  expect(generated["src/voke/remotes/users.ts"]).not.toContain("stripeKey");
+  expect(generated["src/voke/remotes/users.ts"]).not.toContain(
+    "/prod/stripe/key"
+  );
 });
 
 test("fails remote invocation clearly when the generated contract fingerprint is stale", async () => {

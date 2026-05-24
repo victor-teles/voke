@@ -1,5 +1,5 @@
 import { defineConfig } from "voke";
-import { dynamodbTable, sqsQueue } from "voke/aws";
+import { dynamodbTable, sqsQueue } from "voke/cloudformation";
 
 export default defineConfig({
   cloudFormation: {

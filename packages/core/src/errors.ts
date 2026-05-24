@@ -6,6 +6,10 @@ export {
   type VokeResourceBindingErrorOptions,
 } from "./errors/resource-binding";
 export {
+  VokeRuntimeVariableError,
+  type VokeRuntimeVariableErrorOptions,
+} from "./errors/runtime-variable";
+export {
   formatIssues,
   type VokeErrorCode,
   type VokeErrorOptions,

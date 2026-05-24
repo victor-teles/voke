@@ -762,7 +762,7 @@ test("reports expanded event coverage and unknown fields deterministically", () 
     migration.files["./voke-advanced/SERVERLESS_COMPATIBILITY.md"]
   ).toContain("Inventory only");
   expect(migration.files["./voke-advanced/voke.config.ts"]).toContain(
-    'import { dynamodbTable } from "voke/aws";'
+    'import { dynamodbTable } from "voke/cloudformation";'
   );
   expect(migration.files["./voke-advanced/voke.config.ts"]).toContain(
     '"UsersTable": dynamodbTable()'
@@ -792,7 +792,7 @@ test("generates config-first resources and preserves unsafe resources as manual 
   const report = migration.files["./voke-resources/MIGRATION_REPORT.md"];
 
   expect(config).toContain(
-    'import { dynamodbTable, eventBus, s3Bucket, secret, sqsQueue, ssmParameter } from "voke/aws";'
+    'import { dynamodbTable, eventBus, s3Bucket, secret, sqsQueue, ssmParameter } from "voke/cloudformation";'
   );
   expect(config).toContain(
     '"OrdersTable": dynamodbTable({ partitionKey: "tenantId", sortKey: "orderId", billingMode: "PAY_PER_REQUEST" })'

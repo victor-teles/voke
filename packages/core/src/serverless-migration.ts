@@ -2119,7 +2119,7 @@ const createConfigTemplate = (service: ServerlessService): string => {
       ? ""
       : `\nimport { ${[...new Set(resources.map((resource) => resource.helper))]
           .toSorted()
-          .join(", ")} } from "voke/aws";`;
+          .join(", ")} } from "voke/cloudformation";`;
   const resourceEntries = resources.map(
     (resource) => `      ${tsString(resource.name)}: ${resource.expression},`
   );

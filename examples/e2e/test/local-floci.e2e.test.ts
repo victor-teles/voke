@@ -1,7 +1,10 @@
 import { expect, test } from "bun:test";
 
-import { dynamodbTable, sqsQueue } from "voke/aws";
-import { synthesizeCloudFormation } from "voke/cloudformation";
+import {
+  dynamodbTable,
+  sqsQueue,
+  synthesizeCloudFormation,
+} from "voke/cloudformation";
 import { createStackTestContext } from "voke/testing";
 
 test("prepares a Local Floci E2E context and seed plan", () => {

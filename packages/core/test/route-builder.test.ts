@@ -8,6 +8,7 @@ import {
   lambdaAuthorizer,
   requestAuthorizer,
 } from "../src/authorizers";
+import { secret } from "../src/aws";
 import type { VokeEnv } from "../src/context";
 import { VokeConfigError } from "../src/errors";
 import {
@@ -19,6 +20,7 @@ import {
 } from "../src/invoke";
 import type { InvokeError, StandardSchemaV1 } from "../src/invoke";
 import { Voke } from "../src/route-builder";
+import { createVariableProvider, createVariableSource } from "../src/variables";
 
 const schema = <TInput, TOutput = TInput>(
   validate: (value: TInput) => TOutput
@@ -146,15 +148,27 @@ test("executes route-backed functions through typed route calls and gateway requ
 
 test("runs local Request Authorizer Functions before protected routes", async () => {
   const app = new Voke();
+  const provider = createVariableProvider({
+    id: "test",
+    load: () => ({ status: "found", value: "Bearer valid" }),
+  });
   const authorizers = createAuthorizers({
     session: lambdaAuthorizer({ function: "authorizeSession" }),
   });
   const functions = defineFunctions({
     authorizeSession: requestAuthorizer({
-      handler: (request) => ({
-        authorized: request.headers.get("authorization") === "Bearer valid",
+      handler: async (request, context) => ({
+        authorized:
+          request.headers.get("authorization") ===
+          (await context.variables.expectedToken.text()),
         context: { userId: "usr_1" },
       }),
+      variables: {
+        expectedToken: createVariableSource("test", {
+          id: "expected-token",
+          kind: "secret",
+        }),
+      },
     }),
     users: http({
       authorizer: "session",
@@ -166,7 +180,10 @@ test("runs local Request Authorizer Functions before protected routes", async ()
       }),
     }),
   });
-  const gateway = createGateway({ functions });
+  const gateway = createGateway({
+    functions,
+    variables: { providers: [provider] },
+  });
 
   const response = await gateway.request("/me", {
     headers: { authorization: "Bearer valid" },
@@ -298,6 +315,9 @@ test("prints a human function summary automatically under voke dev", () => {
       getUser: defineFunction({
         handler: () => ({ id: "usr_1" }),
         output: schema<unknown, { id: string }>(() => ({ id: "usr_1" })),
+        variables: {
+          userSecret: secret("/prod/users/secret"),
+        },
       }),
       processOrders: defineFunction({
         events: [
@@ -310,6 +330,9 @@ test("prints a human function summary automatically under voke dev", () => {
         input: sqsMessageBatch(
           schema<unknown, { id: string }>(() => ({ id: "ord_1" }))
         ),
+        variables: {
+          orderSecret: secret("/prod/orders/secret"),
+        },
       }),
       routes: defineFunction({
         routes: [
@@ -317,6 +340,9 @@ test("prints a human function summary automatically under voke dev", () => {
             handler: () => ({ ok: true }),
           }),
         ],
+        variables: {
+          routeSecret: secret("/prod/routes/secret"),
+        },
       }),
     });
 
@@ -346,6 +372,10 @@ ${ansi.cyan}${ansi.bold}Event Functions${ansi.reset}
   ${ansi.bold}processOrders${ansi.reset}
     ${ansi.green}SQS${ansi.reset} ${ansi.bold}ordersQueue${ansi.reset} ${ansi.dim}batchSize=10 maxBatchingWindowSeconds=5 enabled=true${ansi.reset}`,
   ]);
+  expect(logs.join("\n")).not.toContain("userSecret");
+  expect(logs.join("\n")).not.toContain("orderSecret");
+  expect(logs.join("\n")).not.toContain("routeSecret");
+  expect(logs.join("\n")).not.toContain("/prod/");
 });
 
 test("returns a stable Voke error envelope when route body validation fails through gateway requests", async () => {
