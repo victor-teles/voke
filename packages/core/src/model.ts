@@ -1,3 +1,7 @@
+import type {
+  HttpAuthorizerDefinition,
+  LambdaAuthorizerTarget,
+} from "./authorizers";
 import { createResourceBindingDefinition } from "./bindings";
 import { createHandlerNameFromEntrypoint, defineConfig } from "./config";
 import type { VokeConfig, VokeConfigInput, VokeNodeRuntime } from "./config";
@@ -49,14 +53,34 @@ export interface VokeModelBuild {
 }
 
 export interface VokeModelApi {
+  authorizers?: Record<string, VokeModelHttpAuthorizer>;
   name: string;
   protocol: "http";
   routes: VokeModelApiRoute[];
 }
 
 export interface VokeModelApiRoute {
+  authorizer?: string;
   function: string;
   route: string;
+}
+
+export type VokeModelHttpAuthorizer =
+  | VokeModelJwtAuthorizer
+  | VokeModelLambdaAuthorizer;
+
+export interface VokeModelJwtAuthorizer {
+  audience: readonly string[];
+  identitySource: readonly string[];
+  issuer: string;
+  type: "jwt";
+}
+
+export interface VokeModelLambdaAuthorizer {
+  cacheTtlSeconds: number;
+  function: LambdaAuthorizerTarget;
+  identitySource: readonly string[];
+  type: "lambda";
 }
 
 export interface VokeModelFunction {
@@ -183,6 +207,95 @@ const toFunctionHandler = (
 const toRouteKey = (
   route: NonNullable<AnyFunctionDefinition["routes"]>[number]
 ): string => `${route.method} ${route.path}`;
+
+const toRouteAuthorizer = (
+  route: NonNullable<AnyFunctionDefinition["routes"]>[number],
+  definition: AnyFunctionDefinition
+): string | undefined => {
+  const authorizer = route.authorizer ?? definition.authorizer;
+
+  return authorizer === "none" ? undefined : authorizer;
+};
+
+const toModelAuthorizer = (
+  authorizer: HttpAuthorizerDefinition
+): VokeModelHttpAuthorizer => {
+  if (authorizer.kind === "lambda") {
+    return {
+      cacheTtlSeconds: authorizer.cacheTtlSeconds,
+      function: authorizer.function,
+      identitySource: [...authorizer.identitySource],
+      type: "lambda",
+    };
+  }
+
+  return {
+    audience: [...authorizer.audience],
+    identitySource: [...authorizer.identitySource],
+    issuer: authorizer.issuer,
+    type: "jwt",
+  };
+};
+
+const stableStringify = (value: unknown): string => {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(",")}]`;
+  }
+
+  if (value !== null && typeof value === "object") {
+    return `{${Object.entries(value)
+      .toSorted(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`)
+      .join(",")}}`;
+  }
+
+  return JSON.stringify(value);
+};
+
+const collectHttpAuthorizers = (
+  registryEntries: readonly [string, AnyFunctionDefinition][]
+): Record<string, VokeModelHttpAuthorizer> => {
+  const authorizers: Record<string, VokeModelHttpAuthorizer> = {};
+
+  for (const [, definition] of registryEntries) {
+    for (const [name, authorizer] of Object.entries(
+      definition.authorizers ?? {}
+    )) {
+      const modelAuthorizer = toModelAuthorizer(authorizer);
+      const existing = authorizers[name];
+
+      if (
+        existing !== undefined &&
+        stableStringify(existing) !== stableStringify(modelAuthorizer)
+      ) {
+        throw new VokeConfigError(
+          `HTTP Authorizer "${name}" has conflicting definitions`
+        );
+      }
+
+      authorizers[name] = modelAuthorizer;
+    }
+  }
+
+  return authorizers;
+};
+
+const assertHttpAuthorizerReference = (
+  authorizer: string | undefined,
+  availableAuthorizers: Record<string, unknown>,
+  route: string
+): void => {
+  if (
+    authorizer === undefined ||
+    availableAuthorizers[authorizer] !== undefined
+  ) {
+    return;
+  }
+
+  throw new VokeConfigError(
+    `Route ${route} references unknown HTTP Authorizer "${authorizer}"`
+  );
+};
 
 const toModelResource = (
   name: string,
@@ -414,11 +527,24 @@ export const createInternalModel = (
       toModelFunction(name, definition),
     ])
   );
-  const apiRoutes = Object.entries(functions).flatMap(([name, definition]) =>
-    definition.routes.map((route) => ({
-      function: name,
-      route,
-    }))
+  const apiAuthorizers = collectHttpAuthorizers(registryEntries);
+  const apiRoutes = registryEntries.flatMap(([name, definition]) =>
+    (definition.routes ?? []).map((route) => {
+      const authorizer = toRouteAuthorizer(route, definition);
+      const routeKey = toRouteKey(route);
+
+      assertHttpAuthorizerReference(
+        authorizer,
+        definition.authorizers ?? {},
+        routeKey
+      );
+
+      return {
+        ...(authorizer === undefined ? {} : { authorizer }),
+        function: name,
+        route: routeKey,
+      };
+    })
   );
   const legacyApiRoutes =
     apiRoutes.length === 0 && !hasRegistryFunctions
@@ -460,6 +586,7 @@ export const createInternalModel = (
     ])
   );
   const hasHttpApi = apiRoutes.length > 0 || legacyApiRoutes.length > 0;
+  const hasApiAuthorizers = Object.keys(apiAuthorizers).length > 0;
   const apiOutputs: Record<string, VokeModelOutput> = hasHttpApi
     ? {
         apiUrl: {
@@ -476,6 +603,7 @@ export const createInternalModel = (
     apis: hasHttpApi
       ? {
           http: {
+            ...(hasApiAuthorizers ? { authorizers: apiAuthorizers } : {}),
             name: config.api.name,
             protocol: config.api.protocol,
             routes: apiRoutes.length > 0 ? apiRoutes : legacyApiRoutes,

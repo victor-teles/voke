@@ -1,11 +1,16 @@
 import type { Context, Hono, MiddlewareHandler } from "hono";
 
 import packageJson from "../package.json";
+import type {
+  AuthorizerRegistryInput,
+  RequestAuthorizerFunctionDefinition,
+  RequestAuthorizerHandler,
+} from "./authorizers";
 import { createAwsLambdaInvokeTransport } from "./aws-lambda-invoke-transport";
 import type { VokeNodeRuntime } from "./config";
 import type { VokeEnv } from "./context";
 import { VokeConfigError } from "./errors";
-import { json } from "./http";
+import { json, jsonError } from "./http";
 
 export type InvokeMode = "sync" | "async";
 export type InvokeRuntime = "local" | "aws";
@@ -243,7 +248,13 @@ export interface SqsMessageBatchSchema<
   readonly source: "sqs";
 }
 
-type FunctionKind = "event" | "invokable" | "route";
+type FunctionKind = "authorizer" | "event" | "invokable" | "route";
+export type RouteAuthorizerReference = "none" | string;
+
+export interface RouteAuthContext {
+  readonly context: Record<string, unknown>;
+  readonly source: "lambda";
+}
 
 export type RouteMethod =
   | "DELETE"
@@ -266,6 +277,7 @@ export interface RouteRequest<
   TQuery = URLSearchParams,
   THeaders = Headers,
 > {
+  readonly auth: RouteAuthContext;
   readonly body: TBody;
   readonly headers: THeaders;
   readonly params: TParams;
@@ -300,6 +312,7 @@ export interface RouteDefinitionInput<
   TOutputSchema extends AnyStandardSchema | undefined,
   TResult,
 > {
+  readonly authorizer?: RouteAuthorizerReference;
   readonly body?: TBodySchema;
   readonly handler: RouteHandler<
     RouteSchemaOutput<TBodySchema, undefined>,
@@ -366,6 +379,7 @@ type AnyRouteDefinition = Omit<
 };
 
 export interface RouteInvocationInput<TRoute> {
+  readonly auth?: RouteAuthContext;
   readonly body?: TRoute extends { readonly body?: infer TSchema }
     ? RouteSchemaInput<TSchema, undefined>
     : undefined;
@@ -496,6 +510,8 @@ export type RouteFunctionDefinition<
   TKey extends string = string,
   TRoutes extends readonly AnyRouteDefinition[] = readonly AnyRouteDefinition[],
 > = BaseFunctionDefinition<TKey, "route"> & {
+  readonly authorizer?: string;
+  readonly authorizers?: AuthorizerRegistryInput;
   readonly routes: TRoutes;
 };
 
@@ -518,13 +534,19 @@ export type FunctionDefinition<
     | undefined,
   TOutputSchema extends AnyStandardSchema = AnyStandardSchema,
 > =
+  | RequestAuthorizerFunctionDefinition<TKey>
   | EventFunctionDefinition<TKey>
   | InvokableFunctionDefinition<TKey, TInputSchema, TOutputSchema>
   | RouteFunctionDefinition<TKey>;
 
 export type AnyFunctionDefinition = BaseFunctionDefinition<string> & {
+  readonly authorizer?: string;
+  readonly authorizers?: AuthorizerRegistryInput;
+  readonly context?: AnyStandardSchema;
   readonly events?: readonly EventSourceDefinition[];
-  readonly handler?: FunctionHandler<never, unknown>;
+  readonly handler?:
+    | FunctionHandler<never, unknown>
+    | ((payload: never) => unknown);
   readonly input?: AnyStandardSchema;
   readonly output?: AnyStandardSchema;
   readonly routes?: readonly AnyRouteDefinition[];
@@ -575,6 +597,8 @@ type RouteInputList<
 export interface HttpFunctionDefinitionInput<
   TRoutes extends AnyRouteDefinition | readonly AnyRouteDefinition[],
 > extends Omit<FunctionDefinitionInputBase, "routes"> {
+  readonly authorizer?: string;
+  readonly authorizers?: AuthorizerRegistryInput;
   readonly routes: TRoutes;
 }
 
@@ -617,36 +641,40 @@ type FunctionDefinitionWithKey<
   TDefinition,
   TKey extends string,
 > = TDefinition extends {
-  readonly events: readonly EventSourceDefinition[];
-  readonly input: infer TInputSchema;
-  readonly kind: "event";
+  readonly kind: "authorizer";
 }
-  ? TInputSchema extends SqsMessageBatchSchema<
-      AnyStandardSchema,
-      SqsInvalidMessageBodyMode
-    >
-    ? EventFunctionDefinition<TKey, TInputSchema>
-    : never
+  ? RequestAuthorizerFunctionDefinition<TKey>
   : TDefinition extends {
+        readonly events: readonly EventSourceDefinition[];
         readonly input: infer TInputSchema;
-        readonly kind: "invokable";
-        readonly output: infer TOutputSchema;
+        readonly kind: "event";
       }
-    ? TInputSchema extends AnyStandardSchema
-      ? TOutputSchema extends AnyStandardSchema
-        ? InvokableFunctionDefinition<TKey, TInputSchema, TOutputSchema>
-        : never
+    ? TInputSchema extends SqsMessageBatchSchema<
+        AnyStandardSchema,
+        SqsInvalidMessageBodyMode
+      >
+      ? EventFunctionDefinition<TKey, TInputSchema>
       : never
     : TDefinition extends {
+          readonly input: infer TInputSchema;
           readonly kind: "invokable";
           readonly output: infer TOutputSchema;
         }
-      ? TOutputSchema extends AnyStandardSchema
-        ? InvokableFunctionDefinition<TKey, undefined, TOutputSchema>
+      ? TInputSchema extends AnyStandardSchema
+        ? TOutputSchema extends AnyStandardSchema
+          ? InvokableFunctionDefinition<TKey, TInputSchema, TOutputSchema>
+          : never
         : never
-      : TDefinition extends RouteFunctionDefinition<string, infer TRoutes>
-        ? RouteFunctionDefinition<TKey, TRoutes>
-        : never;
+      : TDefinition extends {
+            readonly kind: "invokable";
+            readonly output: infer TOutputSchema;
+          }
+        ? TOutputSchema extends AnyStandardSchema
+          ? InvokableFunctionDefinition<TKey, undefined, TOutputSchema>
+          : never
+        : TDefinition extends RouteFunctionDefinition<string, infer TRoutes>
+          ? RouteFunctionDefinition<TKey, TRoutes>
+          : never;
 
 export type FunctionRegistry<
   TRegistry extends FunctionRegistryInput = Record<never, never>,
@@ -1232,6 +1260,7 @@ const createRouteRequest = async (
   );
 
   return {
+    auth: input.auth ?? { context: {}, source: "lambda" },
     body: parsedBody,
     headers: parsedHeaders,
     params: parsedParams,
@@ -1290,19 +1319,148 @@ const routeResponse = async (
 const contextHeaders = (context: Context<VokeEnv>): Headers =>
   new Headers(context.req.raw.headers);
 
-const mountRoute = (app: Hono<VokeEnv>, route: AnyRouteDefinition): void => {
-  app.on(
-    [route.method],
-    [route.path],
-    ...route.middleware,
-    async (context) =>
-      await routeResponse(route, {
-        headers: contextHeaders(context),
-        params: context.req.param(),
-        query: searchParamsFromUrl(context.req.url),
-        request: context.req.raw,
-      })
-  );
+const identityHeaderName = (identitySource: string): string | undefined => {
+  const match = /^\$request\.header\.([^.\s]+)$/iu.exec(identitySource);
+
+  return match?.[1];
+};
+
+const routeAuthorizerName = (
+  route: AnyRouteDefinition,
+  definition: AnyFunctionDefinition
+): string | undefined => {
+  const authorizer = route.authorizer ?? definition.authorizer;
+
+  return authorizer === "none" ? undefined : authorizer;
+};
+
+const evaluateLocalAuthorizer = async (
+  route: AnyRouteDefinition,
+  definition: AnyFunctionDefinition,
+  registry: FunctionRegistry | FunctionRegistryInput,
+  request: Request,
+  headers: Headers
+): Promise<Response | RouteAuthContext | undefined> => {
+  const authorizerName = routeAuthorizerName(route, definition);
+
+  if (authorizerName === undefined) {
+    return undefined;
+  }
+
+  const authorizer = definition.authorizers?.[authorizerName];
+
+  if (authorizer?.kind !== "lambda") {
+    return undefined;
+  }
+
+  const hasIdentity = authorizer.identitySource.every((source) => {
+    const header = identityHeaderName(source);
+
+    if (header === undefined) {
+      return false;
+    }
+
+    const value = headers.get(header);
+
+    return value !== null && value.trim() !== "";
+  });
+
+  if (!hasIdentity) {
+    return jsonError("Unauthorized", { code: "UNAUTHORIZED", status: 401 });
+  }
+
+  if (typeof authorizer.function !== "string") {
+    return jsonError("External authorizers are not available locally", {
+      code: "INTERNAL_SERVER_ERROR",
+      status: 500,
+    });
+  }
+
+  const target = (registry as FunctionRegistryInput)[authorizer.function];
+
+  if (target?.kind !== "authorizer" || target.handler === undefined) {
+    return jsonError("Authorizer not found", {
+      code: "INTERNAL_SERVER_ERROR",
+      status: 500,
+    });
+  }
+
+  try {
+    const handler = target.handler as RequestAuthorizerHandler;
+    const result = await handler({
+      headers,
+      raw: request,
+      request,
+    });
+
+    if (typeof result.authorized !== "boolean") {
+      return jsonError("Invalid authorizer result", {
+        code: "INTERNAL_SERVER_ERROR",
+        status: 500,
+      });
+    }
+
+    if (result.authorized !== true) {
+      return jsonError("Forbidden", { code: "FORBIDDEN", status: 403 });
+    }
+
+    const context =
+      target.context === undefined
+        ? (result.context ?? {})
+        : await parseWithSchema(
+            target.context as StandardSchemaV1<
+              unknown,
+              Record<string, unknown>
+            >,
+            result.context,
+            (message, cause, issues) =>
+              new InvokeError(`Invalid authorizer context: ${message}`, {
+                cause,
+                code: "INVALID_RESULT",
+                issues,
+              })
+          );
+
+    return {
+      context,
+      source: "lambda",
+    };
+  } catch (error) {
+    return jsonError(
+      error instanceof Error ? error.message : "Authorizer failed",
+      { code: "INTERNAL_SERVER_ERROR", status: 500 }
+    );
+  }
+};
+
+const mountRoute = (
+  app: Hono<VokeEnv>,
+  route: AnyRouteDefinition,
+  definition: AnyFunctionDefinition,
+  registry: FunctionRegistry | FunctionRegistryInput
+): void => {
+  app.on([route.method], [route.path], ...route.middleware, async (context) => {
+    const headers = contextHeaders(context);
+    const auth = await evaluateLocalAuthorizer(
+      route,
+      definition,
+      registry,
+      context.req.raw,
+      headers
+    );
+
+    if (auth instanceof Response) {
+      return auth;
+    }
+
+    return await routeResponse(route, {
+      auth,
+      headers: contextHeaders(context),
+      params: context.req.param(),
+      query: searchParamsFromUrl(context.req.url),
+      request: context.req.raw,
+    });
+  });
 };
 
 const sleepAndThrow = async (
@@ -1705,6 +1863,8 @@ export const http = <
     : [definition.routes]) as unknown as RouteInputList<TRoutes>;
 
   return Object.freeze({
+    authorizer: definition.authorizer,
+    authorizers: definition.authorizers,
     key: "",
     kind: "route",
     name: definition.name,
@@ -1813,7 +1973,7 @@ export const mountFunctionRoutes = (
     }
 
     for (const route of definition.routes) {
-      mountRoute(app, route);
+      mountRoute(app, route, definition, registry);
     }
   }
 };

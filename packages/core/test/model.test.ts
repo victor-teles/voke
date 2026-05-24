@@ -1,11 +1,18 @@
 import { expect, test } from "bun:test";
 
+import {
+  createAuthorizers,
+  jwtAuthorizer,
+  lambdaAuthorizer,
+  requestAuthorizer,
+} from "../src/authorizers";
 import { dynamodbTable, sqsQueue } from "../src/aws";
 import { defineConfig } from "../src/config";
 import { VokeConfigError } from "../src/errors";
 import {
   defineFunction,
   defineFunctions,
+  http,
   sqs,
   sqsEventSource,
   sqsMessageBatch,
@@ -386,6 +393,179 @@ test("models endpoint, CRUD group, use case, and mixed functions consistently", 
     invokable: true,
     routes: ["GET /orders/:id"],
   });
+});
+
+test("models JWT Authorizers for route-backed Functions", () => {
+  const app = new Voke();
+  const authorizers = createAuthorizers({
+    userJwt: jwtAuthorizer({
+      audience: ["users-api"],
+      issuer: "https://auth.example.com",
+    }),
+  });
+  const model = createInternalModel({
+    functions: defineFunctions({
+      users: http({
+        authorizer: "userJwt",
+        authorizers,
+        routes: app.get("/users/me", {
+          handler: () => ({ id: "usr_1" }),
+        }),
+      }),
+    }),
+    name: "users-api",
+    stage: "prod",
+  });
+
+  expect(model.apis.http?.authorizers).toEqual({
+    userJwt: {
+      audience: ["users-api"],
+      identitySource: ["$request.header.Authorization"],
+      issuer: "https://auth.example.com",
+      type: "jwt",
+    },
+  });
+  expect(model.apis.http?.routes).toEqual([
+    {
+      authorizer: "userJwt",
+      function: "users",
+      route: "GET /users/me",
+    },
+  ]);
+});
+
+test("models route authorizer inheritance, overrides, and explicit public routes", () => {
+  const app = new Voke();
+  const authorizers = createAuthorizers({
+    adminJwt: jwtAuthorizer({
+      audience: "admin-api",
+      issuer: "https://admin.example.com",
+    }),
+    userJwt: jwtAuthorizer({
+      audience: "users-api",
+      issuer: "https://auth.example.com",
+    }),
+  });
+  const model = createInternalModel({
+    functions: defineFunctions({
+      users: http({
+        authorizer: "userJwt",
+        authorizers,
+        routes: [
+          app.get("/users/me", {
+            handler: () => ({ id: "usr_1" }),
+          }),
+          app.get("/admin", {
+            authorizer: "adminJwt",
+            handler: () => ({ ok: true }),
+          }),
+          app.get("/health", {
+            authorizer: "none",
+            handler: () => ({ ok: true }),
+          }),
+        ],
+      }),
+    }),
+    name: "users-api",
+  });
+
+  expect(model.apis.http?.routes).toEqual([
+    {
+      authorizer: "userJwt",
+      function: "users",
+      route: "GET /users/me",
+    },
+    {
+      authorizer: "adminJwt",
+      function: "users",
+      route: "GET /admin",
+    },
+    {
+      function: "users",
+      route: "GET /health",
+    },
+  ]);
+});
+
+test("models Lambda Authorizers with local Request Authorizer Function targets", () => {
+  const app = new Voke();
+  const authorizers = createAuthorizers({
+    session: lambdaAuthorizer({ function: "authorizeSession" }),
+  });
+  const model = createInternalModel({
+    functions: defineFunctions({
+      authorizeSession: requestAuthorizer({
+        handler: () => ({ authorized: true }),
+      }),
+      users: http({
+        authorizer: "session",
+        authorizers,
+        routes: app.get("/me", {
+          handler: () => ({ ok: true }),
+        }),
+      }),
+    }),
+    name: "users-api",
+  });
+
+  expect(model.apis.http?.authorizers).toEqual({
+    session: {
+      cacheTtlSeconds: 0,
+      function: "authorizeSession",
+      identitySource: ["$request.header.Authorization"],
+      type: "lambda",
+    },
+  });
+});
+
+test("rejects invalid HTTP Authorizer references and duplicate names", () => {
+  const app = new Voke();
+  const userAuthorizers = createAuthorizers({
+    userJwt: jwtAuthorizer({
+      audience: "users-api",
+      issuer: "https://auth.example.com",
+    }),
+  });
+
+  expect(() =>
+    createInternalModel({
+      functions: defineFunctions({
+        users: http({
+          authorizers: userAuthorizers,
+          routes: app.get("/admin", {
+            authorizer: "adminJwt",
+            handler: () => ({ ok: true }),
+          }),
+        }),
+      }),
+      name: "users-api",
+    })
+  ).toThrow('Route GET /admin references unknown HTTP Authorizer "adminJwt"');
+
+  expect(() =>
+    createInternalModel({
+      functions: defineFunctions({
+        admin: http({
+          authorizers: createAuthorizers({
+            userJwt: jwtAuthorizer({
+              audience: "admin-api",
+              issuer: "https://auth.example.com",
+            }),
+          }),
+          routes: app.get("/admin", {
+            handler: () => ({ ok: true }),
+          }),
+        }),
+        users: http({
+          authorizers: userAuthorizers,
+          routes: app.get("/users/me", {
+            handler: () => ({ id: "usr_1" }),
+          }),
+        }),
+      }),
+      name: "users-api",
+    })
+  ).toThrow('HTTP Authorizer "userJwt" has conflicting definitions');
 });
 
 test("models SQS event sources attached to Function definitions", () => {

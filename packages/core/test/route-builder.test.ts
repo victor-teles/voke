@@ -3,11 +3,17 @@ import { expect, test } from "bun:test";
 import type { MiddlewareHandler } from "hono";
 
 import { createGateway } from "../src/app";
+import {
+  createAuthorizers,
+  lambdaAuthorizer,
+  requestAuthorizer,
+} from "../src/authorizers";
 import type { VokeEnv } from "../src/context";
 import { VokeConfigError } from "../src/errors";
 import {
   defineFunction,
   defineFunctions,
+  http,
   sqsEventSource,
   sqsMessageBatch,
 } from "../src/invoke";
@@ -136,6 +142,140 @@ test("executes route-backed functions through typed route calls and gateway requ
 
   expect(postResponse.status).toBe(201);
   expect(await postResponse.text()).toBe("usr_3:Victor");
+});
+
+test("runs local Request Authorizer Functions before protected routes", async () => {
+  const app = new Voke();
+  const authorizers = createAuthorizers({
+    session: lambdaAuthorizer({ function: "authorizeSession" }),
+  });
+  const functions = defineFunctions({
+    authorizeSession: requestAuthorizer({
+      handler: (request) => ({
+        authorized: request.headers.get("authorization") === "Bearer valid",
+        context: { userId: "usr_1" },
+      }),
+    }),
+    users: http({
+      authorizer: "session",
+      authorizers,
+      routes: app.get("/me", {
+        handler: (request) => ({
+          userId: request.auth.context.userId,
+        }),
+      }),
+    }),
+  });
+  const gateway = createGateway({ functions });
+
+  const response = await gateway.request("/me", {
+    headers: { authorization: "Bearer valid" },
+  });
+
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({
+    data: {
+      userId: "usr_1",
+    },
+  });
+});
+
+test("supports injected Route Auth Context for direct route calls", async () => {
+  const app = new Voke();
+  const functions = defineFunctions({
+    users: http({
+      routes: app.get("/me", {
+        handler: (request) => ({
+          userId: request.auth.context.userId,
+        }),
+      }),
+    }),
+  });
+
+  const result = await functions.route("GET", "/me", {
+    auth: {
+      context: { userId: "usr_2" },
+      source: "lambda",
+    },
+  });
+
+  expect(result).toEqual({ userId: "usr_2" });
+});
+
+test("returns stable local authorizer failures", async () => {
+  const app = new Voke();
+  const authorizers = createAuthorizers({
+    session: lambdaAuthorizer({ function: "authorizeSession" }),
+  });
+  const functions = defineFunctions({
+    authorizeSession: requestAuthorizer({
+      handler: (request) => ({
+        authorized: request.headers.get("authorization") === "Bearer valid",
+      }),
+    }),
+    brokenAuthorizer: requestAuthorizer({
+      handler: () => ({ context: { userId: "usr_1" } }) as never,
+    }),
+    invalidContextAuthorizer: requestAuthorizer({
+      context: failingSchema("context is invalid"),
+      handler: () => ({
+        authorized: true,
+        context: { userId: "usr_1" },
+      }),
+    }),
+    users: http({
+      authorizer: "session",
+      authorizers: createAuthorizers({
+        broken: lambdaAuthorizer({ function: "brokenAuthorizer" }),
+        invalidContext: lambdaAuthorizer({
+          function: "invalidContextAuthorizer",
+        }),
+        ...authorizers,
+      }),
+      routes: [
+        app.get("/me", {
+          handler: () => ({ ok: true }),
+        }),
+        app.get("/broken", {
+          authorizer: "broken",
+          handler: () => ({ ok: true }),
+        }),
+        app.get("/invalid-context", {
+          authorizer: "invalidContext",
+          handler: () => ({ ok: true }),
+        }),
+      ],
+    }),
+  });
+  const gateway = createGateway({ functions });
+
+  const missing = await gateway.request("/me");
+  const denied = await gateway.request("/me", {
+    headers: { authorization: "Bearer invalid" },
+  });
+  const broken = await gateway.request("/broken", {
+    headers: { authorization: "Bearer valid" },
+  });
+  const invalidContext = await gateway.request("/invalid-context", {
+    headers: { authorization: "Bearer valid" },
+  });
+
+  expect(missing.status).toBe(401);
+  expect(await missing.json()).toMatchObject({
+    error: { code: "UNAUTHORIZED" },
+  });
+  expect(denied.status).toBe(403);
+  expect(await denied.json()).toMatchObject({
+    error: { code: "FORBIDDEN" },
+  });
+  expect(broken.status).toBe(500);
+  expect(await broken.json()).toMatchObject({
+    error: { code: "INTERNAL_SERVER_ERROR" },
+  });
+  expect(invalidContext.status).toBe(500);
+  expect(await invalidContext.json()).toMatchObject({
+    error: { code: "INTERNAL_SERVER_ERROR" },
+  });
 });
 
 test("prints a human function summary automatically under voke dev", () => {

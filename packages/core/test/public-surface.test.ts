@@ -53,10 +53,14 @@ const readPackageFile = async (path: string): Promise<string> =>
 
 test("keeps the stable root runtime surface intentional", () => {
   expect(Object.keys(voke).toSorted()).toEqual([
+    "createAuthorizers",
     "createFunctions",
     "defineConfig",
     "fn",
     "http",
+    "jwtAuthorizer",
+    "lambdaAuthorizer",
+    "requestAuthorizer",
     "route",
     "sqs",
     "voke",
