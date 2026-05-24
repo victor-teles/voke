@@ -11,11 +11,17 @@
     "./aws": "./src/aws.ts",
     "./build": "./src/build.ts",
     "./cloudformation": "./src/cloudformation.ts",
+    "./config": "./src/config.ts",
+    "./context": "./src/context.ts",
     "./dev": "./src/dev.ts",
-    "./e2e": "./src/e2e.ts",
     "./invoke": "./src/invoke.ts",
     "./local": "./src/local.ts",
-    "./serverless-migration": "./src/serverless-migration.ts"
+    "./model": "./src/model.ts",
+    "./remote": "./src/remote.ts",
+    "./response": "./src/response.ts",
+    "./schema": "./src/schema.ts",
+    "./serverless-migration": "./src/serverless-migration.ts",
+    "./testing": "./src/e2e.ts"
   },
   "scripts": {
     "build": "bun build ./src/index.ts ./src/cli.ts --outdir ./dist --target bun",

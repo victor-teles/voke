@@ -1,6 +1,6 @@
 import { expect, mock, test } from "bun:test";
 
-import type { StandardSchemaV1 } from "../src/index";
+import type { StandardSchemaV1 } from "../src/invoke";
 
 const sdkCalls: unknown[] = [];
 let sdkResponse: unknown;
@@ -76,7 +76,7 @@ test("default AWS runtime invokes Lambda with parsed payload and trace metadata"
   };
 
   const { defineFunction, defineFunctions, withInvokeTrace } =
-    await import("../src/index");
+    await import("../src/invoke");
   const functions = defineFunctions({
     getUser: defineFunction({
       handler: (payload) => ({
@@ -122,7 +122,7 @@ test("default AWS runtime returns accepted shape for async Lambda invokes", asyn
     StatusCode: 202,
   };
 
-  const { defineFunction, defineFunctions } = await import("../src/index");
+  const { defineFunction, defineFunctions } = await import("../src/invoke");
   const functions = defineFunctions({
     getUser: defineFunction({
       handler: (payload) => ({
@@ -169,7 +169,7 @@ test("default AWS runtime uses registry key when no deployed name is configured"
     StatusCode: 200,
   };
 
-  const { defineFunction, defineFunctions } = await import("../src/index");
+  const { defineFunction, defineFunctions } = await import("../src/invoke");
   const functions = defineFunctions({
     getUser: defineFunction({
       handler: (payload) => ({
@@ -199,7 +199,7 @@ test("default AWS runtime uses registry key when no deployed name is configured"
 });
 
 test("default AWS runtime converts SDK and Lambda failures into invoke errors", async () => {
-  const { defineFunction, defineFunctions } = await import("../src/index");
+  const { defineFunction, defineFunctions } = await import("../src/invoke");
   const functions = defineFunctions({
     getUser: defineFunction({
       handler: (payload) => ({
@@ -241,7 +241,7 @@ test("default AWS runtime converts SDK and Lambda failures into invoke errors", 
 });
 
 test("default AWS runtime converts SDK timeouts into invoke errors", async () => {
-  const { defineFunction, defineFunctions } = await import("../src/index");
+  const { defineFunction, defineFunctions } = await import("../src/invoke");
   const functions = defineFunctions({
     getUser: defineFunction({
       handler: (payload) => ({

@@ -132,13 +132,13 @@ test("creates a config-first API starter with stable files", async () => {
   expect(config).toContain('name: "orders-api"');
   expect(config).toContain('entrypoint: "./src/index.ts"');
   expect(config).toContain('out: "./dist/cloudformation.json"');
-  expect(index).toContain("new Voke");
-  expect(index).toContain("defineFunctions");
-  expect(index).toContain("createGateway");
+  expect(index).toContain("createFunctions");
+  expect(index).toContain("http");
+  expect(index).toContain("voke");
   expect(index).toContain("config");
   expect(index).not.toContain("Bun.serve");
-  expect(healthRoute).toContain("createHealthRoute");
-  expect(healthRoute).toContain('app.get("/health"');
+  expect(healthRoute).toContain("healthRoute");
+  expect(healthRoute).toContain('route.get("/health"');
   expect(testFile).toContain("createTestClient");
   expect(testFile).toContain('await client.get("/health")');
 });

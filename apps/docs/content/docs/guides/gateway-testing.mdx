@@ -35,7 +35,7 @@ const body = await response.json();
 Use `createTestClient()` when tests should run through the exported service shape:
 
 ```ts
-import { createTestClient } from "voke";
+import { createTestClient } from "voke/testing";
 import service from "../src/index";
 
 const client = createTestClient(service);

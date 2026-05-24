@@ -4,7 +4,7 @@ const pillars = [
   {
     body: "Define Functions, collect them in a typed registry, and expose only route-backed work through the Gateway.",
     href: "/docs/guides/functions",
-    title: "Function-first authoring",
+    title: "TypeScript-first authoring",
   },
   {
     body: "Develop, test, build, and synthesize without hiding serverless behavior behind a generated app.",
@@ -31,9 +31,9 @@ export default function HomePage() {
               Voke functions
             </h1>
             <p className="mt-6 max-w-2xl text-lg leading-8 text-fd-muted-foreground">
-              Learn the Function-first model, build Hono-compatible APIs, run
-              local Gateway tests, synthesize CloudFormation, and migrate
-              existing Serverless services with a clear review trail.
+              Learn the Function model, build route-backed APIs, run local
+              Gateway tests, synthesize CloudFormation, and migrate existing
+              Serverless services with a clear review trail.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Link

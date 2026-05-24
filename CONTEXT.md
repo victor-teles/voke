@@ -1,6 +1,6 @@
 # Voke
 
-Voke is a framework for creating, testing, building, and synthesizing Hono APIs and related serverless functions from a config-first project model.
+Voke is a TypeScript-first AWS Lambda framework for creating, testing, building, and synthesizing Function-first serverless APIs from a config-first project model.
 
 ## Language
 
@@ -48,9 +48,69 @@ _Avoid_: Runtime-only contract fetching, implicit boot-time type discovery
 The API Gateway-facing assembly that exposes HTTP-backed **Functions**.
 _Avoid_: API app, route module as primary API
 
+**HTTP API**:
+The AWS API Gateway HTTP API v2 resource synthesized from route-backed **Functions** in a **Gateway**.
+_Avoid_: REST API, generic AWS gateway
+
+**HTTP Authorizer**:
+An authorization rule that an **HTTP API** applies before invoking a route-backed **Function**.
+_Avoid_: Middleware, handler guard, function contract
+
+**JWT Authorizer**:
+An **HTTP Authorizer** that lets the **HTTP API** validate bearer tokens from a trusted issuer and audience before invoking a route-backed **Function**.
+_Avoid_: Handler token validation, middleware auth
+
+**Lambda Request Authorizer**:
+An **HTTP Authorizer** backed by a **Function** that decides whether an HTTP request can invoke a route-backed **Function**.
+_Avoid_: Route handler, invokable function, middleware auth
+
+**Lambda Authorizer Target**:
+The local, deployed, or remote Lambda-compatible function used by a **Lambda Request Authorizer**.
+_Avoid_: Middleware callback, route handler reference
+
+**Request Authorizer Function**:
+A **Function** authored specifically to serve as a **Lambda Request Authorizer**.
+_Avoid_: Invokable function, route-backed function, middleware function
+
+**Authorizer Result**:
+The decision returned by a **Request Authorizer Function**, including whether the request is authorized and optional context for the route-backed **Function**.
+_Avoid_: IAM policy document, raw provider response
+
+**Authorizer Identity Source**:
+The request location an **HTTP Authorizer** reads to identify the caller.
+_Avoid_: Auth header only, credential parser
+
+**Lambda Authorizer Cache TTL**:
+The explicit amount of time an **HTTP API** may cache a **Lambda Request Authorizer** result.
+_Avoid_: Session duration, JWT expiration
+
+**Route Auth Context**:
+The normalized authorizer data available to a route-backed **Function** after an **HTTP Authorizer** allows the request.
+_Avoid_: Raw API Gateway request context, parsed auth header
+
+**Authorizer Context Schema**:
+An optional schema for the context returned by a **Request Authorizer Function**.
+_Avoid_: JWT claims schema, route body schema
+
+**Local Authorizer Evaluation**:
+The local testing behavior where Voke evaluates authorizer behavior before a route-backed **Function** runs.
+_Avoid_: Production identity provider emulation, handler-only auth test
+
+**Authorizer Registry**:
+The named catalog of **HTTP Authorizers** available to an **HTTP API**.
+_Avoid_: Inline authorizer list, auth middleware stack
+
+**Default HTTP Authorizer**:
+The **HTTP Authorizer** applied to route-backed **Functions** unless a route chooses a different authorizer behavior.
+_Avoid_: Global middleware, project auth, API-wide default auth
+
+**Route Authorizer Override**:
+A route-level choice to require a different **HTTP Authorizer** or no **HTTP Authorizer** instead of the **Default HTTP Authorizer**.
+_Avoid_: Middleware skip, public flag
+
 **Route Builder**:
 The JavaScript-friendly builder used to define HTTP routes for a **Function**.
-_Avoid_: Hono app as primary API, route module as primary API
+_Avoid_: App, Hono app as primary API, route module as primary API
 
 **Event Source**:
 A trigger relationship where an external event provider invokes a **Function**.
@@ -63,6 +123,10 @@ _Avoid_: SQS route, SQS worker, queue resource
 **SQS Message Batch**:
 The normalized input delivered to a **Function** by an **SQS Event Source**, where each message exposes a parsed body plus raw provider metadata.
 _Avoid_: Raw SQS event as primary contract, queue payload
+
+**SQS Message Schema**:
+The schema for one application message body delivered through an **SQS Message Batch**.
+_Avoid_: Batch schema, raw SQS body schema
 
 **SQS Batch Result**:
 The handler result that tells an **SQS Event Source** which messages failed while allowing successful messages in the same batch to stay acknowledged.
@@ -79,6 +143,10 @@ _Avoid_: Inspect API, machine-readable manifest, config summary
 ## Relationships
 
 - A **Voke Project** has exactly one `voke.config.ts` as its project source of truth.
+- A **Voke Project** keeps `voke.config.ts` explicit even when most project settings use defaults.
+- A **Voke Project** uses **Functions** as the primary authoring model for serverless work.
+- A **Voke Project** keeps **Function Registry** composition in runtime source code, not inside `voke.config.ts`.
+- A **Voke Project** can auto-load `voke.config.ts` when composing a **Gateway** from source code.
 - A **Project Starter** creates one **Voke Project**.
 - A **Voke Project** can define one or more **Functions**.
 - A **Voke Project** can have exactly one **Function Registry**.
@@ -96,7 +164,7 @@ _Avoid_: Inspect API, machine-readable manifest, config summary
 - `voke remote generate <name>` runs **Remote Code Generation** for one configured remote.
 - A consuming **Voke Project** should be able to typecheck and run tests from generated remote-function code without the provider dev server running.
 - **Remote Code Generation** produces checked-in generated modules in the consuming **Voke Project**.
-- A generated remote module exports a ready-to-import **Remote Function Registry** created with `defineRemoteFunctions`.
+- A generated remote module exports a ready-to-import **Remote Function Registry** created with `createRemoteFunctions`.
 - The default generated remote module path is `src/voke/remotes/<remote>.ts`.
 - A configured remote can override its generated module path with `out`.
 - A generated remote module embeds the provider **Function Contract Artifact** fingerprint it was generated from.
@@ -121,18 +189,68 @@ _Avoid_: Inspect API, machine-readable manifest, config summary
 - A Function with **Event Sources** does not mix HTTP routes or invokable handlers in v1.
 - An **SQS Event Source** is attached to a **Function**.
 - An **SQS Event Source** delivers an **SQS Message Batch** to its **Function**.
+- An **SQS Message Schema** describes one message body, while an **SQS Message Batch** is the handler input.
 - An **SQS Event Source** uses partial batch failure reporting by default.
 - An SQS Function can have one or more **SQS Event Sources**.
 - Project code primarily invokes **Functions** through its imported **Function Registry**.
 - A **Function Registry** is activated for local invocation by a **Gateway**.
 - A **Gateway** accepts a **Function Registry** as top-level app composition.
+- A **Gateway** treats config as project metadata around its **Function Registry**, not as the primary place where Functions are composed.
+- A **Gateway** is the default exportable runtime for a **Voke Project** API.
+- A **Gateway** exposes local HTTP testing and AWS Lambda handling for its **Function Registry**.
 - A **Gateway** is the runtime source of truth for dev-visible **Function** and **Event Source** details.
+- A **Gateway** can synthesize an **HTTP API** when it contains route-backed **Functions**.
+- An **HTTP API** can have an **Authorizer Registry**.
+- An **Authorizer Registry** contains zero or more named **HTTP Authorizers**.
+- **HTTP Authorizer** names are scoped to the **HTTP API**.
+- An **HTTP API** cannot contain two different **HTTP Authorizers** with the same name.
+- An **Authorizer Registry** does not protect routes unless a **Default HTTP Authorizer** or **Route Authorizer Override** references one of its **HTTP Authorizers**.
+- An **HTTP API** can have a **Default HTTP Authorizer**.
+- A **Default HTTP Authorizer** is scoped to the route-backed **Function** that declares it.
+- An **HTTP Authorizer** can be a **JWT Authorizer** or a **Lambda Request Authorizer**.
+- An **HTTP Authorizer** has an **Authorizer Identity Source**.
+- The default **Authorizer Identity Source** is the Authorization header.
+- An **HTTP Authorizer** can override its **Authorizer Identity Source**.
+- A **Lambda Request Authorizer** uses a **Lambda Authorizer Target**.
+- A **Lambda Authorizer Target** can be a **Request Authorizer Function**, a deployed function, or a remote function.
+- A local **Lambda Authorizer Target** is referenced by Function Registry key.
+- A v1 **Lambda Authorizer Target** can be a local Function Registry key or a deployed Lambda name or ARN.
+- A remote-function **Lambda Authorizer Target** is deferred until deployed remote invocation is settled.
+- A **Lambda Request Authorizer** can define a **Lambda Authorizer Cache TTL**.
+- The default **Lambda Authorizer Cache TTL** is zero.
+- A **Request Authorizer Function** is a distinct Function entrypoint kind.
+- A **Request Authorizer Function** can use resource bindings and synthesis configuration.
+- A **Request Authorizer Function** does not mix HTTP routes, Event Sources, or invokable handlers in v1.
+- A **Request Authorizer Function** returns an **Authorizer Result**.
+- A **Request Authorizer Function** can define an **Authorizer Context Schema**.
+- **Route Auth Context** from a **Lambda Request Authorizer** can be typed by an **Authorizer Context Schema**.
+- **Route Auth Context** from a **JWT Authorizer** keeps JWT claims loose in v1.
+- A **Default HTTP Authorizer** references an **HTTP Authorizer** from the **Authorizer Registry**.
+- A route-backed **Function** can use the **Default HTTP Authorizer** or a **Route Authorizer Override**.
+- A **Route Authorizer Override** can choose another **HTTP Authorizer** from the **Authorizer Registry** or no **HTTP Authorizer**.
+- A route without a **Route Authorizer Override** inherits the **Default HTTP Authorizer** when one exists.
+- A route uses no **HTTP Authorizer** only when no **Default HTTP Authorizer** exists or when its **Route Authorizer Override** explicitly chooses no **HTTP Authorizer**.
+- A v1 **Route Authorizer Override** can reference only an **HTTP Authorizer** in the same route-backed **Function**'s **Authorizer Registry**.
+- A route-backed **Function** can read **Route Auth Context** when its route uses an **HTTP Authorizer**.
+- **Local Authorizer Evaluation** runs **Request Authorizer Functions** locally.
+- **Local Authorizer Evaluation** can inject **Route Auth Context** for tests.
+- **Local Authorizer Evaluation** does not fully validate **JWT Authorizers** by default.
+- **Local Authorizer Evaluation** returns Unauthorized when an authorizer identity value is missing.
+- **Local Authorizer Evaluation** returns Forbidden when a **Request Authorizer Function** denies a request.
+- **Local Authorizer Evaluation** treats invalid or failed **Request Authorizer Function** execution as an internal route failure.
 - A **Dev Function Summary** is produced from the runtime **Gateway** assembly.
 - A **Dev Function Summary** is emitted automatically under `voke dev` and remains silent outside `voke dev`.
 - A **Dev Function Summary** lists every **Function** in the runtime **Gateway** assembly grouped by entrypoint kind.
 - A **Dev Function Summary** shows HTTP route URLs for route-backed **Functions** so local routes can be opened in an external browser.
 - **Functions** are internal and invokable unless they define an HTTP route.
 - A **Function Registry** can perform **Event Invocation** for Event Source Functions.
+- A **Function Registry** can perform typed route invocation for route-backed **Functions**, while a **Gateway** performs HTTP request testing.
+
+## Flagged ambiguities
+
+- "app" was used to mean both the overall HTTP runtime and the **Route Builder** — resolved: the exportable runtime is the **Gateway**, and route declarations use the **Route Builder** concept.
+- "Bun-first" was used ambiguously between repository tooling and product positioning — resolved: Voke's product model is not Bun-first, even if this repository uses Bun for development workflows.
+- "Hono-compatible" was used as top-level positioning — resolved: Hono belongs in compatibility details, while Voke's top-level model is TypeScript-first AWS Lambda with Functions and Gateways.
 
 ## Example dialogue
 
@@ -147,6 +265,24 @@ _Avoid_: Inspect API, machine-readable manifest, config summary
 >
 > **Dev:** "Can a **Function Registry** run local calls before the **Gateway** exists?"
 > **Domain expert:** "No, the **Gateway** activates the **Function Registry** for local invocation."
+>
+> **Dev:** "Do I hide the **Function Registry** inside config to create a **Gateway**?"
+> **Domain expert:** "No, the **Gateway** receives the **Function Registry** directly; config is supporting project metadata."
+>
+> **Dev:** "Does the public helper name have to be `createGateway`?"
+> **Domain expert:** "No, the public helper can be `voke(...)`; the concept it creates remains the **Gateway**."
+>
+> **Dev:** "Should `voke.config.ts` import my **Function Registry**?"
+> **Domain expert:** "No, runtime source code composes the **Function Registry** into the **Gateway**; config remains project metadata."
+>
+> **Dev:** "Do I pass config into every `voke(...)` call?"
+> **Domain expert:** "No, source code can compose the **Gateway** with auto-loaded project config; explicit config remains an override."
+>
+> **Dev:** "Do I wrap the **Gateway** in another API object before exporting?"
+> **Domain expert:** "No, the **Gateway** is the default exportable runtime; lower-level adapters are compatibility helpers."
+>
+> **Dev:** "Do I need a separate object for local HTTP tests or Lambda handling?"
+> **Domain expert:** "No, the **Gateway** owns both local HTTP testing and AWS Lambda handling for its **Function Registry**."
 >
 > **Dev:** "What if local code invokes a **Function Registry** before activation?"
 > **Domain expert:** "Voke should fail with a clear configuration error instead of silently falling back."
@@ -165,6 +301,9 @@ _Avoid_: Inspect API, machine-readable manifest, config summary
 >
 > **Dev:** "Does an SQS Function receive the raw AWS SQS event?"
 > **Domain expert:** "No, the primary contract is an **SQS Message Batch** with parsed message bodies; raw provider records remain available inside each message."
+>
+> **Dev:** "When authoring an SQS **Function**, do I provide a batch schema?"
+> **Domain expert:** "No, provide the **SQS Message Schema** for one message body; Voke constructs the **SQS Message Batch** contract."
 >
 > **Dev:** "If one SQS message fails, should Voke retry the whole batch?"
 > **Domain expert:** "No, **SQS Event Sources** use partial batch failure reporting by default so successful messages are not retried."
@@ -202,11 +341,35 @@ _Avoid_: Inspect API, machine-readable manifest, config summary
 > **Dev:** "Do local SQS tests have to build full AWS records?"
 > **Domain expert:** "No, local **Event Invocation** accepts minimal messages with a body and lets Voke synthesize SQS metadata."
 >
+> **Dev:** "Should HTTP behavior tests call the **Function Registry** or the **Gateway**?"
+> **Domain expert:** "Use the **Gateway** for HTTP request behavior; use the **Function Registry** only when the test needs direct typed route invocation."
+>
 > **Dev:** "Do users write the deployed AWS SQS adapter?"
 > **Domain expert:** "No, Voke owns SQS event normalization, handler execution, and Lambda batch response conversion."
 >
 > **Dev:** "Do I write Hono directly for the default HTTP path?"
 > **Domain expert:** "No, the primary HTTP path uses a **Route Builder**; Hono is the implicit implementation detail."
+>
+> **Dev:** "Do I import Hono types to write ordinary Voke middleware?"
+> **Domain expert:** "No, first-party middleware should use Voke's public middleware type; Hono remains a compatibility detail."
+>
+> **Dev:** "Should route examples create an app just to call `get()`?"
+> **Domain expert:** "No, route examples should use the **Route Builder** directly so **Gateway** remains the app/runtime concept."
+>
+> **Dev:** "Is a route-only helper a separate concept from a **Function**?"
+> **Domain expert:** "No, it is only shorthand for defining a route-backed **Function**."
+>
+> **Dev:** "Should first-party examples use the old generic Function helper for routes?"
+> **Domain expert:** "No, route-backed **Functions** use entrypoint-specific HTTP authoring helpers."
+>
+> **Dev:** "Should one generic helper define every kind of **Function**?"
+> **Domain expert:** "No, first-party authoring helpers should make the Function entrypoint kind visible."
+>
+> **Dev:** "Did we rename the concept from **Function** to `fn`, `http`, or `sqs`?"
+> **Domain expert:** "No, those are authoring helpers; the domain concept remains **Function**."
+>
+> **Dev:** "What should examples call a generic route-backed **Function**?"
+> **Domain expert:** "Use `http` when the **Function** is just the project's HTTP entrypoint; use a domain-specific key when it represents a narrower capability."
 >
 > **Dev:** "Is a route handler the same entrypoint as a Function's invokable handler?"
 > **Domain expert:** "No, they are separate entrypoints that can share the same deployed **Function**."
@@ -236,7 +399,7 @@ _Avoid_: Inspect API, machine-readable manifest, config summary
 > **Domain expert:** "No, remote invocation should fail clearly on contract fingerprint drift and tell the caller project to regenerate its remote code."
 >
 > **Dev:** "Should app code hand-write Remote Function Registries after generation?"
-> **Domain expert:** "No, **Remote Code Generation** produces a checked-in generated module that exports a ready-to-import `defineRemoteFunctions` registry."
+> **Domain expert:** "No, **Remote Code Generation** produces a checked-in generated module that exports a ready-to-import `createRemoteFunctions` registry."
 >
 > **Dev:** "Where should generated Remote Function Registries live?"
 > **Domain expert:** "By default in `src/voke/remotes/<remote>.ts`, with a per-remote `out` override when a project needs a different generated-code layout."
@@ -284,7 +447,7 @@ _Avoid_: Inspect API, machine-readable manifest, config summary
 
 - "Project creation" means creating a **Project Starter** through `voke create api`, not migrating an existing Serverless project.
 - "function" can mean a generic TypeScript function or a Voke **Function**; use **Function** only for the named serverless compute unit.
-- In `defineFunction`, "name" means an optional deployed AWS Lambda name, not the local registry key.
+- In `fn`, `http`, and `sqs`, "name" means an optional deployed AWS Lambda name, not the local registry key.
 - A **Function Registry** key is the stable project identity used for type-safe invocation.
 - A **Function Registry** belongs either to top-level API app composition or config input for a given app, not both.
 - **Functions** use explicit input and output schemas as their primary contract.
@@ -295,7 +458,7 @@ _Avoid_: Inspect API, machine-readable manifest, config summary
 - Remote invocation should fail loudly on contract fingerprint drift instead of silently invoking with stale generated code.
 - **Remote Code Generation** is explicit and happens before runtime; provider contract metadata is exposed at runtime for generation, not fetched implicitly on every consumer boot.
 - `voke remote generate` defaults to every configured remote; passing a remote name narrows generation to that remote.
-- Generated remote modules are checked into the consuming project and export ready-to-import **Remote Function Registries** using `defineRemoteFunctions`.
+- Generated remote modules are checked into the consuming project and export ready-to-import **Remote Function Registries** using `createRemoteFunctions`.
 - Generated remote modules default to `src/voke/remotes/<remote>.ts`, with `out` available for per-remote path overrides.
 - A **Remote Function Registry** must not be reduced to an HTTP route client; it preserves Function invocation semantics across project boundaries.
 - Remote runtime targets belong in the consuming project's `voke.config.ts`, keyed by provider project name, rather than inline in invocation callsites.

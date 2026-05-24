@@ -1,6 +1,6 @@
 import type { MiddlewareHandler } from "hono";
-import type { VokeEnv } from "voke";
-import { requestId } from "voke";
+import { requestId } from "voke/context";
+import type { VokeEnv } from "voke/context";
 
 export const requestInfo: MiddlewareHandler<VokeEnv> = async (c, next) => {
   await next();

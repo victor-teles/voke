@@ -2,24 +2,25 @@ import { expect, test } from "bun:test";
 
 import { Hono } from "hono";
 
+import { api } from "../src/api";
+import { createGateway } from "../src/app";
 import { bindResource, dynamodbTable, sqsQueue } from "../src/aws";
+import { synthesizeCloudFormation } from "../src/cloudformation";
+import { awsContext, awsEvent, requestId } from "../src/context";
+import type { VokeEnv } from "../src/context";
 import {
-  api,
-  awsContext,
-  awsEvent,
-  createGateway,
   createHttpApiEvent,
   createInvokeTestClient,
   createStackTestContext,
   createTestClient,
+} from "../src/e2e";
+import {
   defineFunctions,
   defineFunction,
-  json,
-  requestId,
   withInvokeTrace,
-  synthesizeCloudFormation,
-} from "../src/index";
-import type { StandardSchemaV1, VokeEnv } from "../src/index";
+} from "../src/invoke";
+import type { StandardSchemaV1 } from "../src/invoke";
+import { ok as json } from "../src/response";
 
 interface TestHttpApiEvent {
   rawPath: string;

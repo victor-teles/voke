@@ -1,12 +1,6 @@
-import {
-  api,
-  createGateway,
-  defineFunction,
-  defineFunctions,
-  jsonError,
-  Voke,
-} from "voke";
-import type { StandardSchemaV1 } from "voke";
+import { createFunctions, http, route, voke } from "voke";
+import { created, error } from "voke/response";
+import { schema } from "voke/schema";
 
 import config from "../voke.config";
 import { requestInfo } from "./middleware/request-info";
@@ -20,57 +14,39 @@ const users = new Map<string, User>([
   ["usr_1", { id: "usr_1", name: "Victor" }],
 ]);
 
-const schema = <TInput, TOutput = TInput>(
-  validate: (value: TInput) => TOutput
-): StandardSchemaV1<TInput, TOutput> => ({
-  "~standard": {
-    validate: (value) => ({ data: validate(value), success: true }),
-    vendor: "voke-example",
-    version: 1,
-  },
+const userParams = schema.object({
+  id: schema.string(),
 });
 
-const userParams = schema<{ id: string }>((params) => params);
-const createUserBody = schema<unknown, { name: string }>((value) => {
-  if (
-    typeof value === "object" &&
-    value !== null &&
-    "name" in value &&
-    typeof value.name === "string"
-  ) {
-    return { name: value.name.trim() };
-  }
-
-  return { name: "" };
+const createUserBody = schema.object({
+  name: schema.string(),
 });
 
-const app = new Voke();
-
-const functions = defineFunctions({
-  routes: defineFunction({
+const functions = createFunctions({
+  http: http({
     routes: [
-      app.get("/", {
+      route.get("/", {
         handler: () => ({ message: "Hello from Voke" }),
       }),
-      app.get("/health", {
+      route.get("/health", {
         handler: () => ({
           ok: true,
           service: config.name,
           stage: config.stage,
         }),
       }),
-      app.get("/typed", {
+      route.get("/typed", {
         handler: () => ({ message: "Typed route response" }),
       }),
-      app.get("/users", {
+      route.get("/users", {
         handler: () => [...users.values()],
       }),
-      app.get("/users/:id", {
+      route.get("/users/:id", {
         handler: (req) => {
           const user = users.get(req.params.id);
 
           if (user === undefined) {
-            return jsonError("User not found", {
+            return error("User not found", {
               code: "USER_NOT_FOUND",
               status: 404,
             });
@@ -80,11 +56,13 @@ const functions = defineFunctions({
         },
         params: userParams,
       }),
-      app.post("/users", {
+      route.post("/users", {
         body: createUserBody,
         handler: (req) => {
-          if (req.body.name.length === 0) {
-            return jsonError("User name is required", {
+          const name = req.body.name.trim();
+
+          if (name.length === 0) {
+            return error("User name is required", {
               code: "USER_NAME_REQUIRED",
               status: 400,
             });
@@ -92,21 +70,21 @@ const functions = defineFunctions({
 
           const user = {
             id: `usr_${users.size + 1}`,
-            name: req.body.name,
+            name,
           };
 
           users.set(user.id, user);
 
-          return Response.json({ data: user }, { status: 201 });
+          return created(user);
         },
       }),
     ],
   }),
 });
 
-const gateway = createGateway({
-  config: { ...config, functions },
+const gateway = voke(functions, {
+  config,
   middleware: [requestInfo],
 });
 
-export default api(gateway, { config });
+export default gateway;

@@ -1,14 +1,15 @@
 import {
   defineFunction,
   defineFunctions,
+  sqs,
   sqsEventSource,
   sqsMessageBatch,
-} from "../src/index";
+} from "../src/invoke";
 import type {
   AsyncInvokeResult,
   SqsBatchResult,
   StandardSchemaV1,
-} from "../src/index";
+} from "../src/invoke";
 
 const schema = <TInput, TOutput = TInput>(): StandardSchemaV1<
   TInput,
@@ -37,17 +38,16 @@ const functions = defineFunctions({
     handler: () => ({ ok: true }),
     output: schema<{ ok: boolean }>(),
   }),
-  processOrder: defineFunction({
-    events: [sqsEventSource("ordersQueue")],
+  processOrder: sqs({
     handler: (event) => {
       const _orderId: string = event.messages[0]?.body.orderId ?? "";
 
       return event.ok();
     },
-    input: sqsMessageBatch(schema<{ orderId: string }>()),
+    message: schema<{ orderId: string }>(),
+    queue: "ordersQueue",
   }),
-  processOrderWithInvalidMessages: defineFunction({
-    events: [sqsEventSource("ordersQueue")],
+  processOrderWithInvalidMessages: sqs({
     handler: (event) => {
       for (const message of event.messages) {
         if (message.valid) {
@@ -60,9 +60,9 @@ const functions = defineFunctions({
 
       return event.ok();
     },
-    input: sqsMessageBatch(schema<{ orderId: string }>(), {
-      invalidMessageBody: "include",
-    }),
+    invalidMessageBody: "include",
+    message: schema<{ orderId: string }>(),
+    queues: [{ batchSize: 1, queue: "ordersQueue" }, "priorityQueue"],
   }),
   publicRoute: defineFunction({
     synthesis: {
@@ -118,6 +118,14 @@ void functions.sendEvent("getUser", { messages: [{ body: { id: "usr_1" } }] });
 
 // @ts-expect-error event source functions are not invokable.
 void functions.invoke("processOrder", { orderId: "ord_1" });
+
+sqs({
+  handler: (event) => event.ok(),
+  message: schema<{ id: string }>(),
+  // @ts-expect-error partial batch failure reporting is always enabled in v1.
+  partialBatchFailure: false,
+  queue: "ordersQueue",
+});
 
 defineFunction({
   // @ts-expect-error invokable functions require an output schema.

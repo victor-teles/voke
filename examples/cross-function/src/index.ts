@@ -1,26 +1,12 @@
-import {
-  api,
-  createGateway,
-  defineFunction,
-  defineFunctions,
-  Voke,
-  withInvokeTrace,
-} from "voke";
-import type { StandardSchemaV1 } from "voke";
+import { createFunctions, http, route, voke } from "voke";
+import { withInvokeTrace } from "voke/invoke";
+import { schema } from "voke/schema";
 
 import { getUser } from "./functions";
 
-const schema = <TInput, TOutput = TInput>(
-  validate: (value: TInput) => TOutput
-): StandardSchemaV1<TInput, TOutput> => ({
-  "~standard": {
-    validate: (value) => ({ data: validate(value), success: true }),
-    vendor: "voke-example",
-    version: 1,
-  },
+const userParams = schema.object({
+  id: schema.string(),
 });
-
-const app = new Voke();
 
 interface UserFunctions {
   invoke: (
@@ -36,14 +22,14 @@ interface UserFunctions {
 const functionRuntime: { current?: unknown } = {};
 
 const getUserRoute = async (req: {
-  headers: { "x-request-id": string | undefined };
   params: { id: string };
+  requestId: string | undefined;
 }): Promise<{
   id: string;
   name: string;
   requestId: string | number | boolean | undefined;
 }> =>
-  await withInvokeTrace({ requestId: req.headers["x-request-id"] }, () => {
+  await withInvokeTrace({ requestId: req.requestId }, () => {
     const functions = functionRuntime.current as UserFunctions | undefined;
 
     if (functions === undefined) {
@@ -53,27 +39,25 @@ const getUserRoute = async (req: {
     return functions.invoke("getUser", { id: req.params.id });
   });
 
-const registry = defineFunctions({
+const registry = createFunctions({
   getUser,
-  routes: defineFunction({
+  http: http({
     routes: [
-      app.get("/users/:id", {
-        handler: getUserRoute,
-        headers: schema<Headers, { "x-request-id": string | undefined }>(
-          (headers) => ({
-            "x-request-id": headers.get("x-request-id") ?? undefined,
-          })
-        ),
-        params: schema<{ id: string }>((params) => params),
+      route.get("/users/:id", {
+        handler: (req) =>
+          getUserRoute({
+            params: req.params,
+            requestId: req.raw.headers.get("x-request-id") ?? undefined,
+          }),
+        params: userParams,
       }),
     ],
   }),
 });
 functionRuntime.current = registry;
 
-const gateway = createGateway({
+const gateway = voke(registry, {
   config: { name: "cross-function-api" },
-  functions: registry,
 });
 
-export default api(gateway, { name: "cross-function-api" });
+export default gateway;

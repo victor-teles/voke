@@ -6,7 +6,7 @@ import "./global.css";
 
 export const metadata: Metadata = {
   description:
-    "Function-first AWS Lambda framework for Bun, Hono APIs, and typed serverless workflows.",
+    "TypeScript-first AWS Lambda framework for typed serverless workflows.",
   title: {
     default: "Voke Docs",
     template: "%s | Voke",

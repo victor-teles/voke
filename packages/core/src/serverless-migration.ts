@@ -1225,7 +1225,7 @@ const createGeneratedFiles = (
     {
       confidence: "high",
       path: `${outDirectory}/package.json`,
-      purpose: "Bun-first project scripts and dependencies.",
+      purpose: "Project scripts and dependencies.",
     },
     {
       confidence: "high",
@@ -1240,7 +1240,7 @@ const createGeneratedFiles = (
     {
       confidence: "high",
       path: `${outDirectory}/src/index.ts`,
-      purpose: "Generated Function-first Gateway entrypoint.",
+      purpose: "Generated Gateway entrypoint.",
     },
     {
       confidence: "high",
@@ -1915,7 +1915,7 @@ ${markdownList(
 ${createEventInventoryMarkdown(service)}
 `;
 
-const sqsEventSourceExpression = (
+const sqsQueueExpression = (
   event: Extract<ServerlessFunctionEvent, { type: "sqs" }>,
   queue: string
 ): string => {
@@ -1928,8 +1928,8 @@ const sqsEventSourceExpression = (
   ].filter((option): option is string => option !== undefined);
 
   return options.length === 0
-    ? `sqsEventSource(${tsString(queue)})`
-    : `sqsEventSource(${tsString(queue)}, { ${options.join(", ")} })`;
+    ? tsString(queue)
+    : `{ queue: ${tsString(queue)}, ${options.join(", ")} }`;
 };
 
 const createSqsFunctionTemplate = (
@@ -1959,12 +1959,13 @@ const createSqsFunctionTemplate = (
       throw new Error(`Expected resolved SQS event for ${fn.name}`);
     }
 
-    return sqsEventSourceExpression(event, queue);
+    return sqsQueueExpression(event, queue);
   });
 
-  return `import { defineFunction, sqsEventSource, sqsMessageBatch } from "voke";
+  return `import { sqs } from "voke";
+import type { StandardSchemaV1 } from "voke/schema";
 
-const messageSchema = {
+const messageSchema: StandardSchemaV1<unknown, unknown> = {
   "~standard": {
     validate: (value: unknown) => ({ data: value, success: true }),
     vendor: "voke-migration",
@@ -1973,14 +1974,14 @@ const messageSchema = {
 } as const;
 
 // Original Serverless handler: ${fn.handler ?? "not specified"}
-export const ${exportName} = defineFunction({
+export const ${exportName} = sqs({
   name: ${tsString(fn.name)},
   synthesis: {
     entrypoint: ${tsString(`./src/functions/${kebabCase(fn.name)}.ts`)},
     handler: ${tsString(`${exportName}.handler`)},${runtimeLine}
   },
-  events: [${eventSources.join(", ")}],
-  input: sqsMessageBatch(messageSchema),
+  message: messageSchema,
+  ${eventSources.length === 1 ? `queue: ${eventSources[0] ?? '""'}` : `queues: [${eventSources.join(", ")}]`},
   handler: async (payload) => {
     return payload.ok();
   },
@@ -2010,10 +2011,19 @@ const createFunctionTemplate = (
     .filter((event) => event.type === "sqs" || event.type === "eventBridge")
     .map((event) => event.type);
 
-  return `import { defineFunction } from "voke";
+  return `import { fn } from "voke";
+import type { StandardSchemaV1 } from "voke/schema";
+
+const outputSchema: StandardSchemaV1<unknown, unknown> = {
+  "~standard": {
+    validate: (value: unknown) => ({ data: value, success: true }),
+    vendor: "voke-migration",
+    version: 1,
+  },
+};
 
 // Original Serverless handler: ${fn.handler ?? "not specified"}
-export const ${exportName} = defineFunction({
+export const ${exportName} = fn({
   name: ${tsString(fn.name)},
   synthesis: {
     entrypoint: ${tsString(`./src/functions/${kebabCase(fn.name)}.ts`)},
@@ -2030,6 +2040,7 @@ export const ${exportName} = defineFunction({
       },
     };
   },
+  output: outputSchema,
 });
 `;
 };
@@ -2046,10 +2057,10 @@ const createFunctionsTemplate = (functions: ServerlessFunction[]): string => {
     return `  ${tsString(fn.name)}: ${exportName},`;
   });
 
-  return `import { defineFunctions } from "voke";
+  return `import { createFunctions } from "voke";
 ${imports.join("\n")}
 
-export const functions = defineFunctions({
+export const functions = createFunctions({
 ${registryEntries.join("\n")}
 });
 `;
@@ -2063,7 +2074,7 @@ const createRouteTemplate = (fn: ServerlessFunction): string => {
       const method = event.method.toLowerCase();
       const routePath = honoPath(event.path);
 
-      return `app.${method}(${tsString(routePath)}, {
+      return `route.${method}(${tsString(routePath)}, {
     handler: () => ({
     functionName: ${tsString(fn.name)},
     method: ${tsString(event.method)},
@@ -2074,9 +2085,9 @@ const createRouteTemplate = (fn: ServerlessFunction): string => {
   })`;
     });
 
-  return `import type { Voke } from "voke";
+  return `import { route } from "voke";
 
-export const ${exportName} = (app: Voke) => [
+export const ${exportName} = () => [
   ${routes.join(",\n  ")},
 ] as const;
 `;
@@ -2149,7 +2160,7 @@ const createIndexTemplate = (service: ServerlessService): string => {
     routeImports.push(
       `import { ${exportName} } from "./routes/${kebabCase(fn.name)}";`
     );
-    routeCalls.push(`    ...${exportName}(app),`);
+    routeCalls.push(`      ...${exportName}(),`);
   }
 
   const functionImport =
@@ -2159,26 +2170,21 @@ const createIndexTemplate = (service: ServerlessService): string => {
   const routeFunctionBlock =
     routeCalls.length === 0
       ? ""
-      : `  routes: defineFunction({
+      : `  http: http({
     routes: [
 ${routeCalls.join("\n")}
     ],
   }),\n`;
 
-  return `import { api, createGateway, defineFunction, defineFunctions, Voke } from "voke";
+  return `import { createFunctions, http, voke } from "voke";
 import config from "../voke.config";
 ${functionImport}${routeImports.join("\n")}
 
-const app = new Voke();
-const functions = defineFunctions({
+const functions = createFunctions({
   ...${workerFunctions.length === 0 ? "{}" : "workerFunctions"},
 ${routeFunctionBlock}});
 
-const gateway = createGateway({
-  config: { ...config, functions },
-});
-
-const service = api(gateway, { config });
+const service = voke(functions, { config });
 
 export const handler = service.handler;
 export default service;

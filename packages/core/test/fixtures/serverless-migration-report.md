@@ -14,10 +14,10 @@
 
 | Path                                           | Purpose                                                  | Confidence |
 | ---------------------------------------------- | -------------------------------------------------------- | ---------- |
-| `./voke-orders/package.json`                   | Bun-first project scripts and dependencies.              | high       |
+| `./voke-orders/package.json`                   | Project scripts and dependencies.                        | high       |
 | `./voke-orders/tsconfig.json`                  | TypeScript project configuration.                        | high       |
 | `./voke-orders/voke.config.ts`                 | Config-first Voke application and resource declarations. | high       |
-| `./voke-orders/src/index.ts`                   | Generated Function-first Gateway entrypoint.             | high       |
+| `./voke-orders/src/index.ts`                   | Generated Gateway entrypoint.                            | high       |
 | `./voke-orders/MIGRATION_REPORT.md`            | Actionable migration report.                             | high       |
 | `./voke-orders/SERVERLESS_COMPATIBILITY.md`    | Stable compatibility matrix.                             | high       |
 | `./voke-orders/src/functions/index.ts`         | Generated worker Function Registry.                      | high       |

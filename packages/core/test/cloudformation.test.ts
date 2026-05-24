@@ -10,17 +10,20 @@ import {
   ssmParameter,
 } from "../src/aws";
 import {
+  synthesizeCloudFormation,
+  synthesizeCloudFormationFromModel,
+} from "../src/cloudformation";
+import { VokeModelError } from "../src/errors";
+import {
   defineFunctions,
   defineFunction,
   sqsEventSource,
   sqsMessageBatch,
-  synthesizeCloudFormation,
-  synthesizeCloudFormationFromModel,
-  VokeModelError,
-  Voke,
-} from "../src/index";
-import type { SqsMessageBatch, StandardSchemaV1 } from "../src/index";
+  sqs,
+} from "../src/invoke";
+import type { SqsMessageBatch, StandardSchemaV1 } from "../src/invoke";
 import { createInternalModel } from "../src/model";
+import { Voke } from "../src/route-builder";
 
 const schema = <TValue>(): StandardSchemaV1<TValue, TValue> => ({
   "~standard": {
@@ -110,17 +113,18 @@ test("matches the CloudFormation snapshot for an API stack with explicit functio
 });
 
 test("matches the CloudFormation snapshot for SQS event source mappings", async () => {
-  const processOrders = defineFunction({
-    events: [
-      sqsEventSource("ordersQueue"),
-      sqsEventSource("priorityQueue", {
+  const processOrders = sqs({
+    handler: (batch: SqsMessageBatch<{ orderId: string }>) => batch.ok(),
+    message: schema<{ orderId: string }>(),
+    queues: [
+      "ordersQueue",
+      {
         batchSize: 5,
         enabled: false,
         maxBatchingWindowSeconds: 30,
-      }),
+        queue: "priorityQueue",
+      },
     ],
-    handler: (batch: SqsMessageBatch<{ orderId: string }>) => batch.ok(),
-    input: sqsMessageBatch(schema<{ orderId: string }>()),
     synthesis: {
       entrypoint: "./src/functions/process-orders.ts",
     },
@@ -145,7 +149,7 @@ test("synthesizes route-backed, invokable, and mixed functions from the Function
   const app = new Voke();
   const functions = defineFunctions({
     sendReceipt: defineFunction({
-      handler: (payload) => ({
+      handler: (payload: { orderId: string }) => ({
         sent: true,
         to: payload.orderId,
       }),
@@ -156,7 +160,7 @@ test("synthesizes route-backed, invokable, and mixed functions from the Function
       },
     }),
     users: defineFunction({
-      handler: (payload) => ({
+      handler: (payload: { id: string }) => ({
         id: payload.id,
       }),
       input: schema<{ id: string }>(),

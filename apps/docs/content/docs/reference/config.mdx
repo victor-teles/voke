@@ -35,7 +35,7 @@ export default defineConfig({
 CloudFormation resources can be bound into runtime code:
 
 ```ts
-import { bindResource, createAwsClientConfig } from "voke";
+import { bindResource, createAwsClientConfig } from "voke/aws";
 
 const usersTable = bindResource("usersTable", "name");
 const dynamoConfig = createAwsClientConfig();

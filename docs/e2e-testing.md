@@ -4,14 +4,14 @@ Voke ships test helpers for Function invocation, Route Builder calls, Gateway HT
 
 ## Function Invocation Tests
 
-Use a Function Registry from `defineFunctions(...)` when a test should exercise an invokable Function Contract.
+Use a Function Registry from `createFunctions(...)` when a test should exercise an invokable Function Contract.
 
 ```ts
 import { expect, test } from "bun:test";
-import { defineFunction, defineFunctions } from "voke";
+import { createFunctions, fn } from "voke";
 
-const functions = defineFunctions({
-  sendWelcomeEmail: defineFunction({
+const functions = createFunctions({
+  sendWelcomeEmail: fn({
     output: emailOutput,
     input: emailInput,
     handler: (payload) => ({ ...payload, queued: true }),
@@ -32,16 +32,15 @@ test("queues welcome emails", async () => {
 
 ## Route Builder Tests
 
-Use `new Voke()` to define route-backed Functions, then call `functions.route(...)` when a test should stay typed and bypass HTTP serialization.
+Use `route` and `http({ routes })` to define route-backed Functions, then call `functions.route(...)` when a test should stay typed and bypass HTTP serialization.
 
 ```ts
-import { defineFunction, defineFunctions, Voke } from "voke";
+import { createFunctions, http, route } from "voke";
 
-const app = new Voke();
-const functions = defineFunctions({
-  routes: defineFunction({
+const functions = createFunctions({
+  http: http({
     routes: [
-      app.get("/users/:id", {
+      route.get("/users/:id", {
         params: userParams,
         output: userOutput,
         handler: (req) => ({ id: req.params.id, name: "Victor" }),
@@ -59,12 +58,12 @@ const user = await functions.route("GET", "/users/:id", {
 
 ## Gateway Request Tests
 
-Use `createGateway({ functions })` when a test should exercise the Gateway as HTTP.
+Use `voke(functions, { config })` when a test should exercise the Gateway as HTTP.
 
 ```ts
-import { createGateway } from "voke";
+import { voke } from "voke";
 
-const gateway = createGateway({ functions });
+const gateway = voke(functions, { config: { name: "users-api" } });
 const response = await gateway.request("/users/usr_1");
 
 expect(response.status).toBe(200);
@@ -80,7 +79,7 @@ expect(await response.json()).toEqual({
 Use `createTestClient(app)` or `createTestClient(service)` when a test should run through Lambda HTTP API event conversion.
 
 ```ts
-import { createTestClient } from "voke";
+import { createTestClient } from "voke/testing";
 import service from "../src/index";
 
 const client = createTestClient(service);
@@ -98,7 +97,8 @@ const client = createTestClient({ baseUrl: Bun.env.VOKE_E2E_API_URL! });
 `createStackTestContext()` prepares local AWS environment variables, resource bindings, CloudFormation output helpers, and deterministic seed commands.
 
 ```ts
-import { createStackTestContext, synthesizeCloudFormation } from "voke";
+import { synthesizeCloudFormation } from "voke/cloudformation";
+import { createStackTestContext } from "voke/testing";
 import { dynamodbTable } from "voke/aws";
 
 const template = synthesizeCloudFormation({

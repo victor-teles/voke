@@ -1,3 +1,5 @@
+import { error, ok } from "./response";
+
 export interface JsonBody<TData> {
   data: TData;
 }
@@ -22,7 +24,7 @@ const defaultErrorCode = (status: number): string => {
 };
 
 export const json = <TData>(data: TData, init?: ResponseInit): Response =>
-  Response.json({ data } satisfies JsonBody<TData>, init);
+  ok(data, init);
 
 export const jsonError = (
   message: string,
@@ -30,16 +32,9 @@ export const jsonError = (
 ): Response => {
   const status = init.status ?? 500;
 
-  return Response.json(
-    {
-      error: {
-        code: init.code ?? defaultErrorCode(status),
-        message,
-      },
-    } satisfies JsonErrorBody,
-    {
-      ...init,
-      status,
-    }
-  );
+  return error(message, {
+    ...init,
+    code: init.code ?? defaultErrorCode(status),
+    status,
+  });
 };

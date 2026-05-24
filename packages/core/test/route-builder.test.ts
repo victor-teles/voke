@@ -2,16 +2,17 @@ import { expect, test } from "bun:test";
 
 import type { MiddlewareHandler } from "hono";
 
+import { createGateway } from "../src/app";
+import type { VokeEnv } from "../src/context";
+import { VokeConfigError } from "../src/errors";
 import {
-  createGateway,
   defineFunction,
   defineFunctions,
   sqsEventSource,
   sqsMessageBatch,
-  VokeConfigError,
-  Voke,
-} from "../src/index";
-import type { InvokeError, StandardSchemaV1, VokeEnv } from "../src/index";
+} from "../src/invoke";
+import type { InvokeError, StandardSchemaV1 } from "../src/invoke";
+import { Voke } from "../src/route-builder";
 
 const schema = <TInput, TOutput = TInput>(
   validate: (value: TInput) => TOutput
@@ -44,14 +45,12 @@ const ansi = {
 } as const;
 
 test("executes route-backed functions through typed route calls and gateway requests", async () => {
-  const app = new Voke();
   let middlewareCalls = 0;
   const middleware: MiddlewareHandler<VokeEnv> = async (c, next) => {
     middlewareCalls += 1;
     await next();
   };
-
-  app.use(middleware);
+  const app = new Voke().use(middleware);
 
   const functions = defineFunctions({
     users: defineFunction({
@@ -232,8 +231,8 @@ test("returns a stable Voke error envelope when route body validation fails thro
   expect(response.status).toBe(400);
   expect(await response.json()).toEqual({
     error: {
-      code: "BAD_REQUEST",
-      message: "Invalid body for POST /users",
+      issues: [{ message: "name is required", path: ["body"] }],
+      message: "Invalid body",
     },
   });
 });
@@ -267,22 +266,22 @@ test("returns stable Voke error envelopes when route params, query, or headers v
   expect(paramsResponse.status).toBe(400);
   expect(await paramsResponse.json()).toEqual({
     error: {
-      code: "BAD_REQUEST",
-      message: "Invalid params for GET /params/:id",
+      issues: [{ message: "id is invalid", path: ["params"] }],
+      message: "Invalid params",
     },
   });
   expect(queryResponse.status).toBe(400);
   expect(await queryResponse.json()).toEqual({
     error: {
-      code: "BAD_REQUEST",
-      message: "Invalid query for GET /query",
+      issues: [{ message: "page is invalid", path: ["query"] }],
+      message: "Invalid query",
     },
   });
   expect(headersResponse.status).toBe(400);
   expect(await headersResponse.json()).toEqual({
     error: {
-      code: "BAD_REQUEST",
-      message: "Invalid headers for GET /headers",
+      issues: [{ message: "authorization is required", path: ["headers"] }],
+      message: "Invalid headers",
     },
   });
 });
@@ -306,8 +305,8 @@ test("returns a stable Voke error envelope when route output validation fails th
   expect(response.status).toBe(500);
   expect(await response.json()).toEqual({
     error: {
-      code: "INTERNAL_SERVER_ERROR",
-      message: "Invalid result for GET /users/:id",
+      issues: [{ message: "id is required", path: ["result"] }],
+      message: "Invalid result",
     },
   });
 });
@@ -374,8 +373,8 @@ test("uses the same route validation classification for typed route calls and ga
   expect(response.status).toBe(400);
   expect(await response.json()).toEqual({
     error: {
-      code: "BAD_REQUEST",
-      message: "Invalid params for GET /users/:id",
+      issues: [{ message: "id is invalid", path: ["params"] }],
+      message: "Invalid params",
     },
   });
 });

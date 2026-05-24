@@ -1,11 +1,12 @@
 import { expect, test } from "bun:test";
 
-import { createInvokeTestClient, defineFunctions } from "voke";
+import { createFunctions } from "voke";
+import { createInvokeTestClient } from "voke/testing";
 
 import { sendWelcomeEmail } from "../src/functions";
 
 test("runs worker E2E flows through invoke helpers", async () => {
-  const client = createInvokeTestClient(defineFunctions({ sendWelcomeEmail }));
+  const client = createInvokeTestClient(createFunctions({ sendWelcomeEmail }));
 
   const result = await client.invoke("sendWelcomeEmail", {
     email: "victor@example.com",

@@ -11,12 +11,14 @@ import type {
 type AnyStandardSchema = StandardSchemaV1<unknown, unknown>;
 
 export class Voke {
-  readonly #middleware: MiddlewareHandler<VokeEnv>[] = [];
+  readonly #middleware: readonly MiddlewareHandler<VokeEnv>[];
 
-  use(middleware: MiddlewareHandler<VokeEnv>): this {
-    this.#middleware.push(middleware);
+  constructor(middleware: readonly MiddlewareHandler<VokeEnv>[] = []) {
+    this.#middleware = Object.freeze([...middleware]);
+  }
 
-    return this;
+  use(middleware: MiddlewareHandler<VokeEnv>): Voke {
+    return new Voke([...this.#middleware, middleware]);
   }
 
   delete<
@@ -282,11 +284,23 @@ export class Voke {
     TOutputSchema,
     TResult
   > {
+    if (
+      (method === "GET" || method === "HEAD") &&
+      definition.body !== undefined
+    ) {
+      throw new Error(`${method} ${path} cannot define a body schema`);
+    }
+
     return {
       ...definition,
       method,
-      middleware: [...this.#middleware],
+      middleware: Object.freeze([
+        ...this.#middleware,
+        ...(definition.middleware ?? []),
+      ]),
       path,
     };
   }
 }
+
+export const route = Object.freeze(new Voke());

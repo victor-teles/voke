@@ -2,16 +2,17 @@ import { expect, test } from "bun:test";
 
 import { dynamodbTable, sqsQueue } from "../src/aws";
 import { defineConfig } from "../src/config";
+import { VokeConfigError } from "../src/errors";
 import {
   defineFunction,
   defineFunctions,
+  sqs,
   sqsEventSource,
   sqsMessageBatch,
-  VokeConfigError,
-  Voke,
-} from "../src/index";
+} from "../src/invoke";
 import type { SqsMessageBatch, StandardSchemaV1 } from "../src/invoke";
 import { createInternalModel } from "../src/model";
+import { Voke } from "../src/route-builder";
 
 const schema = <TValue>(): StandardSchemaV1<TValue, TValue> => ({
   "~standard": {
@@ -308,7 +309,7 @@ test("models endpoint, CRUD group, use case, and mixed functions consistently", 
         },
       }),
       orders: defineFunction({
-        handler: (payload) => ({ id: payload.id }),
+        handler: (payload: { id: string }) => ({ id: payload.id }),
         input: schema<{ id: string }>(),
         output: schema<{ id: string }>(),
         routes: [
@@ -388,17 +389,19 @@ test("models endpoint, CRUD group, use case, and mixed functions consistently", 
 });
 
 test("models SQS event sources attached to Function definitions", () => {
-  const processOrders = defineFunction({
-    events: [
-      sqsEventSource("ordersQueue"),
-      sqsEventSource("priorityQueue", {
+  const processOrders = sqs({
+    handler: (batch: SqsMessageBatch<{ orderId: string }>) => batch.ok(),
+    message: schema<{ orderId: string }>(),
+    name: "orders-consumer",
+    queues: [
+      "ordersQueue",
+      {
         batchSize: 5,
         enabled: false,
         maxBatchingWindowSeconds: 30,
-      }),
+        queue: "priorityQueue",
+      },
     ],
-    handler: (batch: SqsMessageBatch<{ orderId: string }>) => batch.ok(),
-    input: sqsMessageBatch(schema<{ orderId: string }>()),
     synthesis: {
       entrypoint: "./src/functions/process-orders.ts",
     },
@@ -413,9 +416,12 @@ test("models SQS event sources attached to Function definitions", () => {
     stage: "prod",
   });
 
+  expect(model.functions.processOrders?.deployedName).toBe("orders-consumer");
+  expect(model.functions.processOrders?.handler).toBe("process-orders.handler");
+  expect(model.functions.processOrders?.invokable).toBe(false);
   expect(model.functions.processOrders?.eventSources).toEqual([
     {
-      batchSize: undefined,
+      batchSize: 10,
       enabled: undefined,
       maxBatchingWindowSeconds: undefined,
       queue: "ordersQueue",

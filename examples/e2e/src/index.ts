@@ -1,42 +1,13 @@
-import {
-  api,
-  createGateway,
-  defineFunction,
-  defineFunctions,
-  Voke,
-} from "voke";
-import type { StandardSchemaV1 } from "voke";
+import { createFunctions, http, route, voke } from "voke";
+import { created } from "voke/response";
+import { schema } from "voke/schema";
 
 import { sendWelcomeEmail } from "./functions";
 
-const schema = <TInput, TOutput = TInput>(
-  validate: (value: TInput) => TOutput
-): StandardSchemaV1<TInput, TOutput> => ({
-  "~standard": {
-    validate: (value) => ({ data: validate(value), success: true }),
-    vendor: "voke-example",
-    version: 1,
-  },
+const createUserBody = schema.object({
+  email: schema.string(),
+  id: schema.string(),
 });
-
-const createUserBody = schema<unknown, { id: string; email: string }>(
-  (value) => {
-    if (
-      typeof value === "object" &&
-      value !== null &&
-      "id" in value &&
-      "email" in value &&
-      typeof value.id === "string" &&
-      typeof value.email === "string"
-    ) {
-      return { email: value.email, id: value.id };
-    }
-
-    return { email: "", id: "" };
-  }
-);
-
-const app = new Voke();
 
 interface EmailFunctions {
   invoke: (
@@ -61,24 +32,19 @@ const createUser = async (req: {
     userId: req.body.id,
   });
 
-  return Response.json(
-    {
-      data: {
-        id: req.body.id,
-        welcome,
-      },
-    },
-    { status: 201 }
-  );
+  return created({
+    id: req.body.id,
+    welcome,
+  });
 };
 
-const registry = defineFunctions({
-  routes: defineFunction({
+const registry = createFunctions({
+  http: http({
     routes: [
-      app.get("/health", {
+      route.get("/health", {
         handler: () => ({ ok: true }),
       }),
-      app.post("/users", {
+      route.post("/users", {
         body: createUserBody,
         handler: createUser,
       }),
@@ -88,9 +54,8 @@ const registry = defineFunctions({
 });
 functionRuntime.current = registry;
 
-const gateway = createGateway({
+const gateway = voke(registry, {
   config: { name: "e2e-api" },
-  functions: registry,
 });
 
-export default api(gateway, { name: "e2e-api" });
+export default gateway;

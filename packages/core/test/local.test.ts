@@ -1,17 +1,22 @@
 import { expect, test } from "bun:test";
 
-import { dynamodbTable, s3Bucket, sqsQueue } from "../src/aws";
-import { runCli } from "../src/cli";
 import {
   createAwsClientConfig,
+  dynamodbTable,
+  s3Bucket,
+  sqsQueue,
+} from "../src/aws";
+import { runCli } from "../src/cli";
+import { synthesizeCloudFormation } from "../src/cloudformation";
+import { defineConfig } from "../src/config";
+import {
   createFlociComposeConfig,
+  createFlociLocalProvider,
   createLocalAwsEnvironment,
   createLocalBootstrapPlan,
   createLocalResourceBindings,
-  defineConfig,
-  synthesizeCloudFormation,
-} from "../src/index";
-import { createFlociLocalProvider, LocalProviderError } from "../src/local";
+  LocalProviderError,
+} from "../src/local";
 import type { LocalProvider } from "../src/local";
 
 const restoreEnv = (name: string, value?: string): void => {

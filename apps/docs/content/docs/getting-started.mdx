@@ -36,33 +36,25 @@ export default defineConfig({
 Create route-backed Functions and mount them in a Gateway:
 
 ```ts
-import {
-  api,
-  createGateway,
-  defineFunction,
-  defineFunctions,
-  Voke,
-} from "voke";
+import { createFunctions, http, route, voke } from "voke";
 import config from "../voke.config";
 
-const app = new Voke();
-
-const functions = defineFunctions({
-  routes: defineFunction({
+const functions = createFunctions({
+  http: http({
     routes: [
-      app.get("/", {
+      route.get("/", {
         handler: () => ({ message: "Hello from Voke" }),
       }),
-      app.get("/health", {
+      route.get("/health", {
         handler: () => ({ ok: true, service: config.name }),
       }),
     ],
   }),
 });
 
-const gateway = createGateway({ config: { ...config, functions } });
+const gateway = voke(functions, { config });
 
-export default api(gateway, { config });
+export default gateway;
 ```
 
 ## Run local checks

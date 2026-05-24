@@ -305,7 +305,7 @@ const runLocalProviderCommand = async (options: {
 
 const createTestTemplate =
   (): string => `import { expect, test } from "bun:test";
-import { createTestClient } from "voke";
+import { createTestClient } from "voke/testing";
 
 import service from "../src/index";
 
@@ -318,11 +318,9 @@ test("responds to health checks", async () => {
 });
 `;
 
-const createHealthRouteTemplate =
-  (): string => `import type { Voke } from "voke";
+const createHealthRouteTemplate = (): string => `import { route } from "voke";
 
-export const createHealthRoute = (app: Voke) =>
-  app.get("/health", {
+export const healthRoute = route.get("/health", {
     handler: () => ({ ok: true }),
   });
 `;
@@ -344,22 +342,17 @@ export default defineConfig({
 `;
 
 const createIndexTemplate =
-  (): string => `import { api, createGateway, defineFunction, defineFunctions, Voke } from "voke";
+  (): string => `import { createFunctions, http, voke } from "voke";
 import config from "../voke.config";
-import { createHealthRoute } from "./routes/health";
+import { healthRoute } from "./routes/health";
 
-const app = new Voke();
-const functions = defineFunctions({
-  routes: defineFunction({
-    routes: [createHealthRoute(app)],
+const functions = createFunctions({
+  http: http({
+    routes: [healthRoute],
   }),
 });
 
-const gateway = createGateway({
-  config: { ...config, functions },
-});
-
-export default api(gateway, { config });
+export default voke(functions, { config });
 `;
 
 const createTsconfig = (): Record<string, unknown> => ({

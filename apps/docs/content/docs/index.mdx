@@ -1,9 +1,9 @@
 ---
 title: Introduction
-description: Understand Voke's Function-first model for Bun, Hono-compatible APIs, and AWS Lambda deployment.
+description: Understand Voke's TypeScript-first Function model and AWS Lambda deployment.
 ---
 
-Voke is a framework for creating, testing, building, and synthesizing Hono-compatible APIs and related serverless Functions from a config-first project model.
+Voke is a TypeScript-first AWS Lambda framework for creating, testing, building, and synthesizing route-backed APIs and related serverless Functions from a config-first project model.
 
 The core idea is simple: describe work as **Functions**, collect them in a **Function Registry**, expose route-backed Functions through a **Gateway**, and keep deployment settings in `voke.config.ts`.
 
@@ -12,37 +12,29 @@ The core idea is simple: describe work as **Functions**, collect them in a **Fun
 Serverless projects often drift across framework config, handler files, local test harnesses, and deployment templates. Voke keeps those decisions explicit:
 
 - `voke.config.ts` is the project source of truth.
-- `defineFunction()` declares a named serverless compute unit.
-- `defineFunctions()` creates the typed registry used by project code.
-- `createGateway()` exposes route-backed Functions over HTTP.
+- `fn()` declares an invokable serverless compute unit.
+- `http()` declares a route-backed Function from Route Builder routes.
+- `createFunctions()` creates the typed registry used by project code.
+- `voke(functions)` exposes route-backed Functions over HTTP.
 - `voke synth` produces a direct CloudFormation template.
 
 ## The mental model
 
 ```ts
-import {
-  api,
-  createGateway,
-  defineFunction,
-  defineFunctions,
-  Voke,
-} from "voke";
+import { createFunctions, http, route, voke } from "voke";
 import config from "../voke.config";
 
-const app = new Voke();
-
-const functions = defineFunctions({
-  routes: defineFunction({
+const functions = createFunctions({
+  http: http({
     routes: [
-      app.get("/health", {
+      route.get("/health", {
         handler: () => ({ ok: true, service: config.name }),
       }),
     ],
   }),
 });
 
-const gateway = createGateway({ config: { ...config, functions } });
-export default api(gateway, { config });
+export default voke(functions, { config });
 ```
 
 ## Next steps

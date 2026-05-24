@@ -1,6 +1,6 @@
 # voke
 
-Voke is a Function-first AWS Lambda framework for Bun. You describe work as Functions, collect them in a Function Registry, expose route-backed Functions through a Gateway, and use the Route Builder when a Function should also be an HTTP route.
+Voke is a TypeScript-first AWS Lambda framework. You describe work as Functions, collect them in a Function Registry, expose route-backed Functions through a Gateway, and use the Route Builder when a Function should also be an HTTP route.
 
 ## Quickstart
 
@@ -27,33 +27,25 @@ export default defineConfig({
 Then create Functions with explicit Function Contracts and mount them in a Gateway:
 
 ```ts
-import {
-  api,
-  createGateway,
-  defineFunction,
-  defineFunctions,
-  Voke,
-} from "voke";
+import { createFunctions, http, route, voke } from "voke";
 import config from "../voke.config";
 
-const app = new Voke();
-
-const functions = defineFunctions({
-  routes: defineFunction({
+const functions = createFunctions({
+  http: http({
     routes: [
-      app.get("/", {
+      route.get("/", {
         handler: () => ({ message: "Hello from Voke" }),
       }),
-      app.get("/health", {
+      route.get("/health", {
         handler: () => ({ ok: true, service: config.name }),
       }),
     ],
   }),
 });
 
-const gateway = createGateway({ config: { ...config, functions } });
+const gateway = voke(functions, { config });
 
-export default api(gateway, { config });
+export default gateway;
 ```
 
 The default export has an constant `handler` accepts AWS Lambda HTTP API v2 events. For local tests, call the Gateway directly:
@@ -62,22 +54,22 @@ The default export has an constant `handler` accepts AWS Lambda HTTP API v2 even
 const response = await gateway.request("/health");
 ```
 
-Voke still uses Hono-compatible HTTP primitives under the hood, but the first-party authoring model is Function-first: `defineFunction`, `defineFunctions`, `new Voke()`, and `createGateway`.
+Voke still uses Hono-compatible HTTP primitives under the hood, but the first-party authoring model is the Voke Function API: `createFunctions`, `fn`, `http`, `route`, `sqs`, and `voke`.
 
 ## Vocabulary
 
 - **Function**: a unit of Lambda work. It can be invokable, route-backed, or both.
 - **Function Contract**: Standard Schema-compatible input, output, params, query, headers, and body types that validate Function boundaries.
-- **Function Registry**: the `defineFunctions({ ... })` collection that gives Functions stable typed names.
-- **Route Builder**: the `new Voke().get(...)`, `.post(...)`, and `.route(...)` API for declaring typed HTTP routes.
-- **Gateway**: the `createGateway({ functions })` HTTP surface that activates local Function invocation and mounts route-backed Functions.
+- **Function Registry**: the `createFunctions({ ... })` collection that gives Functions stable typed names.
+- **Route Builder**: the `route.get(...)`, `.post(...)`, and `.route(...)` API for declaring typed HTTP routes.
+- **Gateway**: the `voke(functions)` runtime that activates local Function invocation and mounts route-backed Functions.
 
 ## Monorepo
 
 This repository uses Bun workspaces and Turborepo.
 
 - `packages/core` contains the framework package.
-- `examples/hello-api` contains a small Function-first Gateway example.
+- `examples/hello-api` contains a small TypeScript-first Gateway example.
 - `examples/e2e` contains local API, Function invoke, Gateway request, and deployed smoke examples.
 
 ## CLI
@@ -106,7 +98,7 @@ voke local bootstrap
 Runtime code can read the generated environment bindings and pass consistent config into AWS SDK clients:
 
 ```ts
-import { bindResource, createAwsClientConfig } from "voke";
+import { bindResource, createAwsClientConfig } from "voke/aws";
 
 const usersTable = bindResource("usersTable", "name");
 
@@ -121,17 +113,11 @@ Resource helpers are included for DynamoDB, SQS, SNS, EventBridge, S3, Secrets M
 SQS Event Source Functions use the same Function Registry model, but receive normalized message batches instead of direct `functions.invoke(...)` payloads:
 
 ```ts
-import {
-  createSqsEventHandler,
-  defineFunction,
-  defineFunctions,
-  sqsEventSource,
-  sqsMessageBatch,
-} from "voke";
+import { createFunctions, sqs } from "voke";
+import { createSqsEventHandler } from "voke/invoke";
 
-const processOrder = defineFunction({
-  events: [sqsEventSource("ordersQueue", { batchSize: 10 })],
-  input: sqsMessageBatch(orderMessageSchema),
+const processOrder = sqs({
+  batchSize: 10,
   handler: async (batch) => {
     for (const message of batch.messages) {
       await processOrderMessage(message.body);
@@ -139,9 +125,11 @@ const processOrder = defineFunction({
 
     return batch.ok();
   },
+  message: orderMessageSchema,
+  queue: "ordersQueue",
 });
 
-export const functions = defineFunctions({ processOrder });
+export const functions = createFunctions({ processOrder });
 export const handler = createSqsEventHandler({
   function: "processOrder",
   functions,
@@ -150,15 +138,15 @@ export const handler = createSqsEventHandler({
 
 Use `functions.sendEvent("processOrder", { messages: [...] })` in local tests. Voke parses each JSON message body with the Standard Schema-compatible message schema, reports invalid messages as partial batch failures by default, and synthesizes Lambda event source mappings with `ReportBatchItemFailures` enabled.
 
-`sqsQueue()` defines the AWS queue resource; `sqsEventSource("ordersQueue")` attaches that queue to a Function. Local tests may pass minimal `{ body }` messages and optionally `source: "sqs"`. SQS Event Source Functions cannot mix with HTTP routes or invokable output contracts in v1, and queue DLQ/redrive settings stay with future queue resource lifecycle work.
+`sqsQueue()` defines the AWS queue resource; `sqs({ queue: "ordersQueue" })` attaches that queue to a Function. Local tests may pass minimal `{ body }` messages and optionally `source: "sqs"`. SQS Event Source Functions cannot mix with HTTP routes or invokable output contracts in v1, and queue DLQ/redrive settings stay with future queue resource lifecycle work.
 
 ## Function Invocation
 
 Define invokable Functions with Standard Schema-compatible input/output contracts, group them in a Function Registry, and call them through `functions.invoke(...)`:
 
 ```ts
-import { defineFunction, defineFunctions } from "voke";
-import type { StandardSchemaV1 } from "voke";
+import { createFunctions, fn } from "voke";
+import type { StandardSchemaV1 } from "voke/schema";
 
 const userInput: StandardSchemaV1<{ id: string }, { id: string }> = {
   "~standard": {
@@ -168,18 +156,18 @@ const userInput: StandardSchemaV1<{ id: string }, { id: string }> = {
   },
 };
 
-const getUser = defineFunction({
+const getUser = fn({
   input: userInput,
   output: userInput,
   handler: async (payload) => ({ id: payload.id, name: "Victor" }),
 });
 
-const functions = defineFunctions({ getUser });
+const functions = createFunctions({ getUser });
 
 const user = await functions.invoke("getUser", { id: "usr_1" });
 ```
 
-`functions.invoke(...)` supports local and AWS runtimes, sync and async modes, Function Contract parsing, tracing metadata, retries, and timeouts. The optional `defineFunction({ name })` value is a deployed Lambda name override; the registry key remains the stable type-safe Function identity.
+`functions.invoke(...)` supports local and AWS runtimes, sync and async modes, Function Contract parsing, tracing metadata, retries, and timeouts. The optional `fn({ name })` value is a deployed Lambda name override; the registry key remains the stable type-safe Function identity.
 
 ## Gateway Routes
 
@@ -210,7 +198,7 @@ import {
   createFlociComposeConfig,
   createLocalAwsEnvironment,
   createLocalResourceBindings,
-} from "voke";
+} from "voke/local";
 
 const compose = createFlociComposeConfig();
 const env = createLocalAwsEnvironment();
@@ -234,7 +222,7 @@ See [docs/serverless-framework-migration.md](./docs/serverless-framework-migrati
 Voke includes helpers for first-class Function, Gateway, and AWS integration tests:
 
 ```ts
-import { createTestClient } from "voke";
+import { createTestClient } from "voke/testing";
 import service from "../src/index";
 
 const client = createTestClient(service);
@@ -262,4 +250,4 @@ Then open:
 curl http://localhost:3000
 ```
 
-Bun starts the example from its default export because `api()` exposes a `fetch` handler.
+Bun starts the example from its default exported Gateway because `voke(functions)` exposes a `fetch` handler.

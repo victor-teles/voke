@@ -101,7 +101,7 @@
         "VokeDeployedName": "orders-worker-prod-processOrders",
         "VokeEntrypoint": "./src/functions/process-orders.ts",
         "VokeFunction": "processOrders",
-        "VokeInvokable": true,
+        "VokeInvokable": false,
         "VokeRoutes": []
       },
       "Properties": {

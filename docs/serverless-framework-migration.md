@@ -37,22 +37,22 @@ Move one function at a time:
 
 ## Compatibility Matrix
 
-| Serverless Framework pattern       | Migration status                                                   | Voke output                                                                |
-| ---------------------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------- |
-| `service`                          | Supported                                                          | App and package names.                                                     |
-| `provider.stage`                   | Supported                                                          | App config and stack stage.                                                |
-| `provider.region`                  | Supported                                                          | App config and stack region.                                               |
-| `provider.environment`             | Supported                                                          | Stack environment starter.                                                 |
-| `provider.iamRoleStatements`       | Reported                                                           | Manual CloudFormation review item.                                         |
-| `package.patterns`                 | Reported                                                           | Manual Bun build review item.                                              |
-| `plugins`                          | Reported                                                           | Unsupported plugins are listed in the report.                              |
-| `functions.*.events[].httpApi`     | Supported                                                          | Route Builder skeleton mounted in a Gateway.                               |
-| `functions.*.events[].http`        | Supported                                                          | Route Builder skeleton mounted in a Gateway.                               |
-| `functions.*.events[].sqs`         | Supported when the queue maps to a generated `sqsQueue()` resource | SQS Event Source Function with `sqsEventSource()` and `sqsMessageBatch()`. |
-| `functions.*.events[].eventBridge` | Supported skeleton                                                 | Voke Function skeleton.                                                    |
-| Native CloudFormation resources    | Supported skeleton                                                 | Config-first `voke.config.ts` declarations.                                |
-| Other events                       | Manual migration                                                   | Unsupported event report item.                                             |
-| Unsafe custom resources            | Manual migration                                                   | Manual step with the concrete resource type.                               |
+| Serverless Framework pattern       | Migration status                                                   | Voke output                                                        |
+| ---------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------ |
+| `service`                          | Supported                                                          | App and package names.                                             |
+| `provider.stage`                   | Supported                                                          | App config and stack stage.                                        |
+| `provider.region`                  | Supported                                                          | App config and stack region.                                       |
+| `provider.environment`             | Supported                                                          | Stack environment starter.                                         |
+| `provider.iamRoleStatements`       | Reported                                                           | Manual CloudFormation review item.                                 |
+| `package.patterns`                 | Reported                                                           | Manual Bun build review item.                                      |
+| `plugins`                          | Reported                                                           | Unsupported plugins are listed in the report.                      |
+| `functions.*.events[].httpApi`     | Supported                                                          | Route Builder skeleton mounted in a Gateway.                       |
+| `functions.*.events[].http`        | Supported                                                          | Route Builder skeleton mounted in a Gateway.                       |
+| `functions.*.events[].sqs`         | Supported when the queue maps to a generated `sqsQueue()` resource | SQS Event Source Function with `sqs({ message, queue, handler })`. |
+| `functions.*.events[].eventBridge` | Supported skeleton                                                 | Voke Function skeleton.                                            |
+| Native CloudFormation resources    | Supported skeleton                                                 | Config-first `voke.config.ts` declarations.                        |
+| Other events                       | Manual migration                                                   | Unsupported event report item.                                     |
+| Unsafe custom resources            | Manual migration                                                   | Manual step with the concrete resource type.                       |
 
 ## Notes
 

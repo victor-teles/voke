@@ -1,21 +1,18 @@
 import { expect, test } from "bun:test";
 
+import { createGateway } from "../src/app";
+import type { GatewayOptions } from "../src/app";
+import { VokeConfigError } from "../src/errors";
 import {
-  createGateway,
   createSqsEventHandler,
   defineFunction,
   defineFunctions,
   InvokeError,
   sqsEventSource,
   sqsMessageBatch,
-  VokeConfigError,
   withInvokeTrace,
-} from "../src/index";
-import type {
-  GatewayOptions,
-  InvokeTransport,
-  StandardSchemaV1,
-} from "../src/index";
+} from "../src/invoke";
+import type { InvokeTransport, StandardSchemaV1 } from "../src/invoke";
 
 const passthroughSchema = <TValue>(): StandardSchemaV1<TValue, TValue> => ({
   "~standard": {

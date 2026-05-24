@@ -2,7 +2,8 @@ import { expect, test } from "bun:test";
 
 import { dynamodbTable, sqsQueue } from "../src/aws";
 import { runCli } from "../src/cli";
-import { createDevPlan, defineConfig } from "../src/index";
+import { defineConfig } from "../src/config";
+import { createDevPlan } from "../src/dev";
 import type { LocalProvider } from "../src/local";
 
 test("creates a config-first Bun hot reload dev plan with local bindings", async () => {

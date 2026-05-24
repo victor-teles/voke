@@ -452,7 +452,7 @@ export const createInvokeTestClient = <
   registry?: TRegistry
 ): InvokeTestClient<TRegistry> => {
   if (registry !== undefined) {
-    activateFunctionRegistry(registry);
+    activateFunctionRegistry(registry, "invoke-test-client");
   }
 
   return {

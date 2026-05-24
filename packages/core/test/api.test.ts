@@ -3,7 +3,11 @@ import { expect, test } from "bun:test";
 import { Hono } from "hono";
 import type { LambdaContext, LambdaEvent } from "hono/aws-lambda";
 
+import { api } from "../src/api";
+import { createApiApp, createGateway, routeModule } from "../src/app";
 import {
+  bindResource,
+  createAwsClientConfig,
   dynamodbTable,
   s3Bucket,
   secret,
@@ -13,24 +17,14 @@ import {
 } from "../src/aws";
 import { handleAwsLambdaRequest } from "../src/aws-lambda";
 import { createApiProject, runCli } from "../src/cli";
-import {
-  api,
-  awsContext,
-  bindResource,
-  createApiApp,
-  createAwsClientConfig,
-  createGateway,
-  defineConfig,
-  defineFunction,
-  defineFunctions,
-  getConfig,
-  json,
-  loadVokeConfig,
-  routeModule,
-  synthesizeCloudFormation,
-  VokeConfigError,
-} from "../src/index";
-import type { StandardSchemaV1, VokeEnv } from "../src/index";
+import { synthesizeCloudFormation } from "../src/cloudformation";
+import { defineConfig, getConfig, loadVokeConfig } from "../src/config";
+import { awsContext } from "../src/context";
+import type { VokeEnv } from "../src/context";
+import { VokeConfigError } from "../src/errors";
+import { defineFunction, defineFunctions } from "../src/invoke";
+import type { StandardSchemaV1 } from "../src/invoke";
+import { ok as json } from "../src/response";
 
 const restoreEnv = (name: string, value?: string): void => {
   Bun.env[name] = value;
@@ -397,12 +391,12 @@ test("creates a starter API project", async () => {
   expect(config).toContain('name: "created-api"');
   expect(config).toContain('entrypoint: "./src/index.ts"');
   expect(config).toContain('out: "./dist/cloudformation.json"');
-  expect(index).toContain("new Voke");
-  expect(index).toContain("createGateway");
-  expect(index).toContain("defineFunctions");
+  expect(index).toContain("createFunctions");
+  expect(index).toContain("http");
+  expect(index).toContain("voke");
   expect(index).toContain("voke.config");
-  expect(index).toContain("routes: [createHealthRoute(app)]");
-  expect(healthRoute).toContain("createHealthRoute");
+  expect(index).toContain("routes: [healthRoute]");
+  expect(healthRoute).toContain("healthRoute");
   expect(testFile).toContain("responds to health checks");
 });
 

@@ -10,11 +10,9 @@ import {
   sqsQueue,
   ssmParameter,
 } from "../src/aws";
-import {
-  createLocalResourceBindings,
-  createResourceBindingName,
-  synthesizeCloudFormation,
-} from "../src/index";
+import { createResourceBindingName } from "../src/bindings";
+import { synthesizeCloudFormation } from "../src/cloudformation";
+import { createLocalResourceBindings } from "../src/local";
 
 test("uses one stable binding naming convention everywhere", () => {
   expect(createResourceBindingName("ordersTable", "name")).toBe(

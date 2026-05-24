@@ -1,22 +1,25 @@
-import { defineFunction, defineFunctions } from "voke";
-import type { StandardSchemaV1 } from "voke";
+import { createFunctions, fn } from "voke";
+import { schema } from "voke/schema";
 
-const schema = <TValue>(): StandardSchemaV1<TValue, TValue> => ({
-  "~standard": {
-    validate: (value) => ({ data: value, success: true }),
-    vendor: "voke-example",
-    version: 1,
-  },
+const welcomeEmailInput = schema.object({
+  email: schema.string(),
+  userId: schema.string(),
 });
 
-export const sendWelcomeEmail = defineFunction({
+const welcomeEmailOutput = schema.object({
+  email: schema.string(),
+  queued: schema.boolean(),
+  userId: schema.string(),
+});
+
+export const sendWelcomeEmail = fn({
   handler: (payload) => ({
     email: payload.email,
     queued: true,
     userId: payload.userId,
   }),
-  input: schema<{ userId: string; email: string }>(),
-  output: schema<{ queued: boolean; userId: string; email: string }>(),
+  input: welcomeEmailInput,
+  output: welcomeEmailOutput,
 });
 
-export const functions = defineFunctions({ sendWelcomeEmail });
+export const functions = createFunctions({ sendWelcomeEmail });

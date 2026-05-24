@@ -402,8 +402,8 @@ export const createInternalModel = (
         ...definition.synthesis?.environment,
       },
       eventSources,
-      handler: toFunctionHandler(definition.name ?? definition.key, definition),
-      invokable: definition.handler !== undefined,
+      handler: toFunctionHandler(name, definition),
+      invokable: definition.kind === "invokable",
       routes: definition.routes?.map(toRouteKey) ?? [],
       runtime: definition.synthesis?.runtime ?? config.runtime.lambda,
     };

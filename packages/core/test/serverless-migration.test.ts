@@ -564,10 +564,10 @@ test("creates a measurable migration report and Voke skeleton files", () => {
     "LOG_LEVEL"
   );
   expect(migration.files["./voke-orders/src/index.ts"]).toContain(
-    "createGateway"
+    "voke(functions"
   );
   expect(migration.files["./voke-orders/src/index.ts"]).toContain(
-    "defineFunctions"
+    "createFunctions"
   );
   expect(migration.files["./voke-orders/src/index.ts"]).toContain(
     "voke.config"
@@ -576,14 +576,14 @@ test("creates a measurable migration report and Voke skeleton files", () => {
     "createListOrdersRoutes"
   );
   expect(migration.files["./voke-orders/src/routes/list-orders.ts"]).toContain(
-    'app.get("/orders"'
+    'route.get("/orders"'
   );
   expect(migration.files["./voke-orders/src/routes/list-orders.ts"]).toContain(
     'method: "GET"'
   );
   expect(
     migration.files["./voke-orders/src/functions/fulfill-order.ts"]
-  ).toContain("defineFunction");
+  ).toContain("fn({");
   expect(
     migration.files["./voke-orders/src/functions/fulfill-order.ts"]
   ).toContain('entrypoint: "./src/functions/fulfill-order.ts"');
@@ -591,7 +591,7 @@ test("creates a measurable migration report and Voke skeleton files", () => {
     migration.files["./voke-orders/src/functions/fulfill-order.ts"]
   ).toContain('handler: "fulfillOrder.handler"');
   expect(migration.files["./voke-orders/src/functions/index.ts"]).toContain(
-    "defineFunctions"
+    "createFunctions"
   );
   expect(migration.files["./voke-orders/voke.config.ts"]).toContain(
     'import { functions } from "./src/functions";'
@@ -769,7 +769,7 @@ test("reports expanded event coverage and unknown fields deterministically", () 
   );
   expect(
     migration.files["./voke-advanced/src/routes/api-handler.ts"]
-  ).toContain('app.get("/profiles/:id"');
+  ).toContain('route.get("/profiles/:id"');
   expect(
     migration.files["./voke-advanced/src/functions/api-handler.ts"]
   ).toContain('runtime: "nodejs24.x"');
@@ -806,7 +806,7 @@ test("generates config-first resources and preserves unsafe resources as manual 
   );
   expect(config).not.toContain("RetentionQueue");
   expect(config).not.toContain("AuditLog");
-  expect(route).toContain('app.get("/orders/:orderId"');
+  expect(route).toContain('route.get("/orders/:orderId"');
   expect(report).toContain(
     "CloudFormation resource RetentionQueue (AWS::SQS::Queue) requires manual migration"
   );
@@ -834,17 +834,15 @@ test("generates first-class SQS Event Sources for resolvable queues and reports 
   const compatibility =
     migration.files["./voke-sqs-events/SERVERLESS_COMPATIBILITY.md"];
 
+  expect(processOrder).toContain('import { sqs } from "voke";');
   expect(processOrder).toContain(
-    'import { defineFunction, sqsEventSource, sqsMessageBatch } from "voke";'
+    'queue: { queue: "OrdersQueue", batchSize: 10, enabled: false, maxBatchingWindowSeconds: 20 },'
   );
-  expect(processOrder).toContain(
-    'events: [sqsEventSource("OrdersQueue", { batchSize: 10, enabled: false, maxBatchingWindowSeconds: 20 })],'
-  );
-  expect(processOrder).toContain("input: sqsMessageBatch(messageSchema)");
+  expect(processOrder).toContain("message: messageSchema");
   expect(processOrder).toContain("return payload.ok();");
-  expect(inspectQueue).toContain('import { defineFunction } from "voke";');
-  expect(inspectQueue).not.toContain("sqsEventSource(");
-  expect(retryOrder).not.toContain("sqsEventSource(");
+  expect(inspectQueue).toContain('import { fn } from "voke";');
+  expect(inspectQueue).not.toContain("sqs(");
+  expect(retryOrder).not.toContain("sqs(");
   expect(migration.report.supported).toContain(
     "SQS Event Source: processOrder -> OrdersQueue"
   );
@@ -884,20 +882,20 @@ test("generates skeletons from example Serverless migration fixtures", async () 
   });
 
   expect(httpApi.files["./voke-http-api/src/routes/get-profile.ts"]).toContain(
-    'app.get("/profiles/:id"'
+    'route.get("/profiles/:id"'
   );
   expect(restApi.files["./voke-rest-api/src/routes/create-user.ts"]).toContain(
-    'app.post("/users"'
+    'route.post("/users"'
   );
   expect(
     sqsWorker.files["./voke-sqs-worker/src/functions/process-order.ts"]
   ).toContain('entrypoint: "./src/functions/process-order.ts"');
   expect(
     sqsWorker.files["./voke-sqs-worker/src/functions/process-order.ts"]
-  ).toContain('events: [sqsEventSource("OrdersQueue")],');
+  ).toContain('queue: "OrdersQueue",');
   expect(
     sqsWorker.files["./voke-sqs-worker/src/functions/process-order.ts"]
-  ).toContain("input: sqsMessageBatch(messageSchema)");
+  ).toContain("message: messageSchema");
   expect(sqsWorker.files["./voke-sqs-worker/src/functions/index.ts"]).toContain(
     '"processOrder": processOrder'
   );

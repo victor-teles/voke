@@ -25,6 +25,7 @@ export interface InvokeErrorOptions {
   cause?: unknown;
   code: InvokeErrorCode;
   functionName?: string;
+  issues?: readonly StandardSchemaIssue[];
   requestId?: string;
   statusCode?: number;
 }
@@ -32,6 +33,7 @@ export interface InvokeErrorOptions {
 export class InvokeError extends Error {
   code: InvokeErrorCode;
   functionName?: string;
+  issues?: readonly StandardSchemaIssue[];
   requestId?: string;
   statusCode?: number;
 
@@ -40,6 +42,7 @@ export class InvokeError extends Error {
     this.name = "InvokeError";
     this.code = options.code;
     this.functionName = options.functionName;
+    this.issues = options.issues;
     this.requestId = options.requestId;
     this.statusCode = options.statusCode;
   }
@@ -260,13 +263,14 @@ export type RouteReturn<TResult> =
 export interface RouteRequest<
   TBody = undefined,
   TParams = Record<string, string>,
-  TQuery = Record<string, string>,
+  TQuery = URLSearchParams,
   THeaders = Headers,
 > {
   readonly body: TBody;
   readonly headers: THeaders;
   readonly params: TParams;
   readonly query: TQuery;
+  readonly raw: Request;
   readonly request: Request;
 }
 
@@ -275,11 +279,15 @@ export type RouteHandler<TBody, TParams, TQuery, THeaders, TResult> = (
 ) => RouteReturn<TResult>;
 
 type RouteSchemaOutput<TSchema, TFallback> = TSchema extends AnyStandardSchema
-  ? StandardSchemaOutput<TSchema>
+  ? unknown extends StandardSchemaOutput<TSchema>
+    ? TFallback
+    : StandardSchemaOutput<TSchema>
   : TFallback;
 
 type RouteSchemaInput<TSchema, TFallback> = TSchema extends AnyStandardSchema
-  ? StandardSchemaInput<TSchema>
+  ? unknown extends StandardSchemaInput<TSchema>
+    ? TFallback
+    : StandardSchemaInput<TSchema>
   : TFallback;
 
 export interface RouteDefinitionInput<
@@ -301,6 +309,7 @@ export interface RouteDefinitionInput<
     TResult
   >;
   readonly headers?: THeadersSchema;
+  readonly middleware?: readonly MiddlewareHandler<VokeEnv>[];
   readonly output?: TOutputSchema;
   readonly params?: TParamsSchema;
   readonly query?: TQuerySchema;
@@ -340,16 +349,21 @@ export interface RouteDefinition<
   readonly path: TPath;
 }
 
-type AnyRouteDefinition = RouteDefinition<
-  RouteMethod,
-  string,
-  AnyStandardSchema | undefined,
-  AnyStandardSchema | undefined,
-  AnyStandardSchema | undefined,
-  AnyStandardSchema | undefined,
-  AnyStandardSchema | undefined,
-  unknown
->;
+type AnyRouteDefinition = Omit<
+  RouteDefinition<
+    RouteMethod,
+    string,
+    AnyStandardSchema | undefined,
+    AnyStandardSchema | undefined,
+    AnyStandardSchema | undefined,
+    AnyStandardSchema | undefined,
+    AnyStandardSchema | undefined,
+    unknown
+  >,
+  "handler"
+> & {
+  readonly handler: RouteHandler<never, never, never, never, unknown>;
+};
 
 export interface RouteInvocationInput<TRoute> {
   readonly body?: TRoute extends { readonly body?: infer TSchema }
@@ -362,8 +376,8 @@ export interface RouteInvocationInput<TRoute> {
     ? RouteSchemaInput<TSchema, Record<string, string>>
     : Record<string, string>;
   readonly query?: TRoute extends { readonly query?: infer TSchema }
-    ? RouteSchemaInput<TSchema, Record<string, string>>
-    : Record<string, string>;
+    ? RouteSchemaInput<TSchema, URLSearchParams | Record<string, string>>
+    : Record<string, string> | URLSearchParams;
   readonly request?: Request;
 }
 
@@ -552,6 +566,18 @@ type RouteFunctionDefinitionInput<
   readonly routes?: TRoutes;
 };
 
+type RouteInputList<
+  TRoutes extends AnyRouteDefinition | readonly AnyRouteDefinition[],
+> = TRoutes extends readonly AnyRouteDefinition[]
+  ? TRoutes
+  : readonly [TRoutes];
+
+export interface HttpFunctionDefinitionInput<
+  TRoutes extends AnyRouteDefinition | readonly AnyRouteDefinition[],
+> extends Omit<FunctionDefinitionInputBase, "routes"> {
+  readonly routes: TRoutes;
+}
+
 type EventFunctionDefinitionInput<
   TInputSchema extends SqsMessageBatchSchema<
     AnyStandardSchema,
@@ -562,6 +588,28 @@ type EventFunctionDefinitionInput<
   readonly handler: EventFunctionHandler<StandardSchemaOutput<TInputSchema>>;
   readonly input: TInputSchema;
 };
+
+type SqsQueueInput =
+  | string
+  | ({ readonly queue: string } & SqsEventSourceOptions);
+
+type SqsQueueListInput = SqsQueueInput | readonly SqsQueueInput[];
+
+export interface SqsFunctionDefinitionInput<
+  TMessageSchema extends AnyStandardSchema,
+  TInvalidMessageBody extends SqsInvalidMessageBodyMode = "fail",
+>
+  extends Omit<FunctionDefinitionInputBase, "routes">, SqsEventSourceOptions {
+  readonly handler: EventFunctionHandler<
+    StandardSchemaOutput<
+      SqsMessageBatchSchema<TMessageSchema, TInvalidMessageBody>
+    >
+  >;
+  readonly invalidMessageBody?: TInvalidMessageBody;
+  readonly message: TMessageSchema;
+  readonly queue?: string;
+  readonly queues?: SqsQueueListInput;
+}
 
 export type FunctionRegistryInput = Record<string, AnyFunctionDefinition>;
 
@@ -764,12 +812,27 @@ export interface FunctionRegistryInvoke<TRegistry> {
 }
 
 const traceStack: InvokeTrace[] = [];
-const activatedFunctionRegistries = new WeakSet<object>();
+const activatedFunctionRegistries = new WeakMap<object, string>();
+const reservedFunctionRegistryKeys = new Set(["invoke", "route", "sendEvent"]);
 
 const currentTrace = (): InvokeTrace => traceStack.at(-1) ?? {};
 
-export const activateFunctionRegistry = (registry: object): void => {
-  activatedFunctionRegistries.add(registry);
+export const activateFunctionRegistry = (
+  registry: object,
+  activationKey: string
+): void => {
+  const previousActivationKey = activatedFunctionRegistries.get(registry);
+
+  if (
+    previousActivationKey !== undefined &&
+    previousActivationKey !== activationKey
+  ) {
+    throw new VokeConfigError(
+      "Function Registry is already activated with a different Gateway context"
+    );
+  }
+
+  activatedFunctionRegistries.set(registry, activationKey);
 };
 
 const resolveTrace = (options: InvokeOptions): InvokeTrace => ({
@@ -799,7 +862,11 @@ const formatIssue = (issue: StandardSchemaIssue): string => {
 const parseWithSchema = async <TInput, TOutput>(
   schema: StandardSchemaV1<TInput, TOutput>,
   value: TInput,
-  errorFactory: (message: string, cause?: unknown) => InvokeError
+  errorFactory: (
+    message: string,
+    cause?: unknown,
+    issues?: readonly StandardSchemaIssue[]
+  ) => InvokeError
 ): Promise<TOutput> => {
   try {
     const result = await schema["~standard"].validate(value);
@@ -808,7 +875,11 @@ const parseWithSchema = async <TInput, TOutput>(
       return result.data;
     }
 
-    throw errorFactory(result.issues.map(formatIssue).join("; "));
+    throw errorFactory(
+      result.issues.map(formatIssue).join("; "),
+      undefined,
+      result.issues
+    );
   } catch (error) {
     if (error instanceof InvokeError) {
       throw error;
@@ -1024,11 +1095,12 @@ const parsePayload = async <TInputSchema extends AnyStandardSchema | undefined>(
   return (await parseWithSchema(
     definition.input,
     payload as StandardSchemaInput<TInputSchema>,
-    (message, cause) =>
+    (message, cause, issues) =>
       new InvokeError(`Invalid payload for ${functionName}: ${message}`, {
         cause,
         code: "INVALID_PAYLOAD",
         functionName,
+        issues,
       })
   )) as TInputSchema extends AnyStandardSchema
     ? StandardSchemaOutput<TInputSchema>
@@ -1048,11 +1120,12 @@ const parseResult = async <TOutputSchema extends AnyStandardSchema>(
   return (await parseWithSchema(
     definition.output,
     result,
-    (message, cause) =>
+    (message, cause, issues) =>
       new InvokeError(`Invalid result from ${functionName}: ${message}`, {
         cause,
         code: "INVALID_RESULT",
         functionName,
+        issues,
       })
   )) as StandardSchemaOutput<TOutputSchema>;
 };
@@ -1071,19 +1144,22 @@ const parseRoutePart = async <TSchema extends AnyStandardSchema | undefined>(
     return value as RouteSchemaOutput<TSchema, typeof value>;
   }
 
-  return (await parseWithSchema(
-    schema,
-    value,
-    (message, cause) =>
-      new InvokeError(
-        `Invalid ${part} for ${route.method} ${route.path}: ${message}`,
-        {
-          cause,
-          code,
-          functionName: `${route.method} ${route.path}`,
-        }
-      )
-  )) as RouteSchemaOutput<TSchema, typeof value>;
+  return (await parseWithSchema(schema, value, (message, cause, issues) => {
+    const prefixedIssues = issues?.map((issue) => ({
+      ...issue,
+      path: [part, ...(issue.path ?? [])],
+    }));
+
+    return new InvokeError(
+      `Invalid ${part} for ${route.method} ${route.path}: ${message}`,
+      {
+        cause,
+        code,
+        functionName: `${route.method} ${route.path}`,
+        issues: prefixedIssues,
+      }
+    );
+  })) as RouteSchemaOutput<TSchema, typeof value>;
 };
 
 const headersFromInput = (
@@ -1096,8 +1172,8 @@ const headersFromInput = (
   return new Headers(headers);
 };
 
-const queryFromUrl = (url: string): Record<string, string> =>
-  Object.fromEntries(new URL(url).searchParams.entries());
+const searchParamsFromUrl = (url: string): URLSearchParams =>
+  new URL(url).searchParams;
 
 const bodyFromRequest = async (request: Request): Promise<unknown> => {
   if (request.body === null) {
@@ -1150,7 +1226,7 @@ const createRouteRequest = async (
   );
   const parsedQuery = await parseRoutePart(
     route.query,
-    input.query ?? queryFromUrl(request.url),
+    input.query ?? searchParamsFromUrl(request.url),
     "query",
     route
   );
@@ -1160,6 +1236,7 @@ const createRouteRequest = async (
     headers: parsedHeaders,
     params: parsedParams,
     query: parsedQuery,
+    raw: request,
     request,
   };
 };
@@ -1203,6 +1280,10 @@ const routeResponse = async (
     return result;
   }
 
+  if (result === undefined) {
+    return new Response(null, { status: 204 });
+  }
+
   return json(result);
 };
 
@@ -1218,7 +1299,7 @@ const mountRoute = (app: Hono<VokeEnv>, route: AnyRouteDefinition): void => {
       await routeResponse(route, {
         headers: contextHeaders(context),
         params: context.req.param(),
-        query: queryFromUrl(context.req.url),
+        query: searchParamsFromUrl(context.req.url),
         request: context.req.raw,
       })
   );
@@ -1484,7 +1565,7 @@ export const invokeRegistryFunction = async (
     !activatedFunctionRegistries.has(registry)
   ) {
     throw new VokeConfigError(
-      "Local Function invocation requires Gateway activation. Call createGateway({ functions }) before invoking local functions."
+      "Local Function invocation requires Gateway activation. Call voke(functions) before invoking local functions."
     );
   }
 
@@ -1612,6 +1693,89 @@ export function defineFunction(
   };
 }
 
+export const fn = defineFunction;
+
+export const http = <
+  const TRoutes extends AnyRouteDefinition | readonly AnyRouteDefinition[],
+>(
+  definition: HttpFunctionDefinitionInput<TRoutes>
+): RouteFunctionDefinition<string, RouteInputList<TRoutes>> => {
+  const routes = (Array.isArray(definition.routes)
+    ? definition.routes
+    : [definition.routes]) as unknown as RouteInputList<TRoutes>;
+
+  return Object.freeze({
+    key: "",
+    kind: "route",
+    name: definition.name,
+    routes: Object.freeze([...routes]) as unknown as RouteInputList<TRoutes>,
+    synthesis: definition.synthesis,
+  });
+};
+
+const queueInputs = (queues: SqsQueueListInput): readonly SqsQueueInput[] =>
+  Array.isArray(queues) ? queues : [queues as SqsQueueInput];
+
+const eventSourceFromQueueInput = (
+  queue: SqsQueueInput,
+  options: SqsEventSourceOptions
+): SqsEventSourceDefinition => {
+  if (typeof queue === "string") {
+    return sqsEventSource(queue, options);
+  }
+
+  const { queue: queueName, ...queueOptions } = queue;
+
+  return sqsEventSource(queueName, {
+    ...options,
+    ...queueOptions,
+  });
+};
+
+export const sqs = <
+  const TMessageSchema extends AnyStandardSchema,
+  const TInvalidMessageBody extends SqsInvalidMessageBodyMode = "fail",
+>(
+  definition: SqsFunctionDefinitionInput<TMessageSchema, TInvalidMessageBody>
+): EventFunctionDefinition<
+  string,
+  SqsMessageBatchSchema<TMessageSchema, TInvalidMessageBody>
+> => {
+  if (definition.queue !== undefined && definition.queues !== undefined) {
+    throw new VokeConfigError("Pass either queue or queues to sqs(), not both");
+  }
+
+  if (definition.queue === undefined && definition.queues === undefined) {
+    throw new VokeConfigError("sqs() requires queue or queues");
+  }
+
+  const options = {
+    batchSize: definition.batchSize ?? 10,
+    enabled: definition.enabled,
+    maxBatchingWindowSeconds: definition.maxBatchingWindowSeconds,
+  };
+  const queues =
+    definition.queue === undefined
+      ? queueInputs(definition.queues as SqsQueueListInput)
+      : [definition.queue];
+
+  return Object.freeze({
+    events: Object.freeze(
+      queues.map((queue) => eventSourceFromQueueInput(queue, options))
+    ),
+    handler: definition.handler,
+    input: sqsMessageBatch(definition.message, {
+      invalidMessageBody:
+        definition.invalidMessageBody ?? ("fail" as TInvalidMessageBody),
+    }),
+    key: "",
+    kind: "event",
+    name: definition.name,
+    routes: [],
+    synthesis: definition.synthesis,
+  });
+};
+
 const findRoute = (
   functions: Record<string, AnyFunctionDefinition>,
   method: RouteMethod,
@@ -1680,6 +1844,51 @@ export const assertUniqueFunctionRoutes = (
       }
 
       routes.set(routeKey, key);
+    }
+  }
+};
+
+const routeParamKeys = (path: string): string[] =>
+  [...path.matchAll(/:([A-Za-z0-9_]+)/gu)]
+    .map((match) => match[1])
+    .filter((key): key is string => key !== undefined);
+
+const schemaObjectKeys = (schema: unknown): readonly string[] | undefined => {
+  if (typeof schema !== "object" || schema === null || !("~voke" in schema)) {
+    return undefined;
+  }
+
+  const metadata = (schema as { "~voke"?: { keys?: readonly string[] } })[
+    "~voke"
+  ];
+
+  return metadata?.keys;
+};
+
+export const assertRouteParamSchemas = (
+  registry: FunctionRegistry | FunctionRegistryInput
+): void => {
+  for (const definition of Object.values(registry)) {
+    if (definition.routes === undefined || definition.routes.length === 0) {
+      continue;
+    }
+
+    for (const route of definition.routes) {
+      const expectedKeys = routeParamKeys(route.path);
+      const schemaKeys = schemaObjectKeys(route.params);
+
+      if (schemaKeys === undefined) {
+        continue;
+      }
+
+      const expected = expectedKeys.toSorted();
+      const actual = [...schemaKeys].toSorted();
+
+      if (expected.join("\0") !== actual.join("\0")) {
+        throw new VokeConfigError(
+          `Route ${route.method} ${route.path} params schema expects ${actual.map((key) => JSON.stringify(key)).join(", ")}, but path defines ${expected.map((key) => JSON.stringify(key)).join(", ")}`
+        );
+      }
     }
   }
 };
@@ -1809,10 +2018,15 @@ export const defineFunctions = <const TRegistry extends FunctionRegistryInput>(
   const functions = {} as Record<string, AnyFunctionDefinition>;
 
   for (const [key, definition] of Object.entries(registry)) {
+    if (reservedFunctionRegistryKeys.has(key)) {
+      throw new VokeConfigError(`Function Registry key "${key}" is reserved`);
+    }
+
     functions[key] = {
       ...definition,
       key,
     };
+    Object.freeze(functions[key]);
   }
 
   Object.defineProperty(functions, "invoke", {
@@ -1882,8 +2096,10 @@ export const defineFunctions = <const TRegistry extends FunctionRegistryInput>(
     }) as FunctionRegistryRoute<FunctionRegistry<TRegistry>>,
   });
 
-  return functions as FunctionRegistry<TRegistry>;
+  return Object.freeze(functions) as FunctionRegistry<TRegistry>;
 };
+
+export const createFunctions = defineFunctions;
 
 export const withInvokeTrace = async <TResult>(
   trace: InvokeTrace,

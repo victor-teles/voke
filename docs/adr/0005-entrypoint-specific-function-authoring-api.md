@@ -1,0 +1,9 @@
+# Use entrypoint-specific Function authoring helpers
+
+Voke will use a clean pre-release public API centered on entrypoint-specific Function authoring helpers instead of keeping the older generic `defineFunction`, `defineFunctions`, `createGateway`, `api`, `Voke`, `json`, and `jsonError` surface. The canonical authoring path is `createFunctions({ ... })` with `fn({ ... })` for invokable Functions, `http({ routes })` for route-backed Functions, `sqs({ queue | queues, message, handler })` for SQS Event Source Functions, `route.get(...)` and related route builders for HTTP routes, and `voke(functions)` to compose the exportable Gateway runtime.
+
+This is a deliberate pre-release breaking change. A single generic Function helper made the entrypoint kind easy to hide, while `new Voke()`, `createGateway(...)`, and `api(...)` split the mental model across too many app-like objects. The new API keeps **Function** as the domain concept, makes each Function entrypoint kind explicit at the callsite, keeps the root package focused on the common authoring path, and moves specialized helpers such as response, schema, testing, AWS, build, model, and CloudFormation APIs to subpaths.
+
+`voke(functions)` creates the **Gateway**, which is the exportable runtime. It auto-loads the explicit `voke.config.ts` project file during source/dev/build workflows unless config is provided as an override, but deployed Lambda code must not depend on runtime filesystem config loading. The Gateway exposes HTTP request testing, Web fetch compatibility, Lambda handling, resolved config, and the same activated Function Registry instance that was passed in.
+
+The old authoring names should be removed instead of kept as deprecated aliases because the package is still unreleased. Compatibility pressure should be handled through documentation, examples, tests, and generated-code migration rather than permanent duplicate APIs.

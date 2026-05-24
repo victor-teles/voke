@@ -1,10 +1,7 @@
-import {
-  createGateway,
-  defineFunction,
-  defineFunctions,
-  Voke,
-} from "../src/index";
-import type { StandardSchemaV1 } from "../src/index";
+import { createGateway } from "../src/app";
+import { defineFunction, defineFunctions } from "../src/invoke";
+import type { StandardSchemaV1 } from "../src/invoke";
+import { Voke } from "../src/route-builder";
 
 const schema = <TInput, TOutput = TInput>(): StandardSchemaV1<
   TInput,

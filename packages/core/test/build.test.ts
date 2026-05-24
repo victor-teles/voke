@@ -1,14 +1,11 @@
 import { expect, test } from "bun:test";
 
+import { createBuildPlan } from "../src/build";
 import { runCli } from "../src/cli";
-import {
-  createBuildPlan,
-  defineConfig,
-  defineFunction,
-  defineFunctions,
-  Voke,
-} from "../src/index";
-import type { StandardSchemaV1 } from "../src/index";
+import { defineConfig } from "../src/config";
+import { defineFunction, defineFunctions } from "../src/invoke";
+import type { StandardSchemaV1 } from "../src/invoke";
+import { Voke } from "../src/route-builder";
 
 const schema = <TValue>(): StandardSchemaV1<TValue, TValue> => ({
   "~standard": {

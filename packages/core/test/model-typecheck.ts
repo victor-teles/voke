@@ -1,19 +1,18 @@
 import { sqsQueue } from "../src/aws";
+import { defineConfig } from "../src/config";
 import {
-  createInternalModel,
-  defineConfig,
   defineFunction,
   defineFunctions,
   sqsEventSource,
   sqsMessageBatch,
-} from "../src/index";
+} from "../src/invoke";
+import type { SqsMessageBatch, StandardSchemaV1 } from "../src/invoke";
+import { createInternalModel } from "../src/model";
 import type {
-  SqsMessageBatch,
-  StandardSchemaV1,
   VokeModel,
+  VokeModelSqsEventSource,
   VokeModelValue,
-} from "../src/index";
-import type { VokeModelSqsEventSource } from "../src/model";
+} from "../src/model";
 
 const schema = <TValue>(): StandardSchemaV1<TValue, TValue> => ({
   "~standard": {
