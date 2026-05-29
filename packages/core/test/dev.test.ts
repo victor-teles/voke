@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 
-import { dynamodbTable, sqsQueue } from "../src/aws";
+import { aws, dynamodbTable, sqsQueue } from "@voke/aws";
+
 import { runCli } from "../src/cli";
 import { defineConfig } from "../src/config";
 import { createDevPlan } from "../src/dev";
@@ -31,6 +32,7 @@ test("creates a config-first Bun hot reload dev plan with local bindings", async
       },
       entrypoint,
       name: "orders-api",
+      provider: aws(),
       region: "sa-east-1",
       stage: "local",
     })
@@ -114,6 +116,7 @@ test("dev plan uses the configured local provider", async () => {
         provider,
       },
       name: "orders-api",
+      provider: aws(),
       resources: {
         eventsQueue: sqsQueue(),
       },
@@ -126,6 +129,75 @@ test("dev plan uses the configured local provider", async () => {
     VOKE_RESOURCE_EVENTS_QUEUE_URL:
       "http://localhost:9999/111111111111/EventsQueue",
   });
+});
+
+test("dev plan reports providers without local dev support when resources need bindings", async () => {
+  const directory = `/private/tmp/voke-dev-provider-synth-${crypto.randomUUID()}`;
+  const entrypoint = `${directory}/src/api.ts`;
+
+  await Bun.$`mkdir -p ${directory}/src`;
+  await Bun.write(entrypoint, "export const handler = () => undefined;\n");
+
+  await expect(
+    createDevPlan(
+      defineConfig({
+        entrypoint,
+        name: "orders-api",
+        provider: {
+          name: "custom",
+        },
+        resources: {
+          eventsQueue: sqsQueue(),
+        },
+      })
+    )
+  ).rejects.toThrow(
+    'Provider "custom" does not support dev local environment.'
+  );
+});
+
+test("dev plan delegates provider-specific local environment to provider local capability", async () => {
+  const directory = `/private/tmp/voke-dev-provider-local-${crypto.randomUUID()}`;
+  const entrypoint = `${directory}/src/api.ts`;
+
+  await Bun.$`mkdir -p ${directory}/src`;
+  await Bun.write(entrypoint, "export const handler = () => undefined;\n");
+
+  const plan = await createDevPlan(
+    defineConfig({
+      entrypoint,
+      name: "provider-local-api",
+      provider: {
+        local: {
+          devEnvironment: ({ endpoint, region, stage }) => ({
+            CUSTOM_ENDPOINT: endpoint ?? "none",
+            CUSTOM_REGION: region,
+            CUSTOM_STAGE: stage,
+            VOKE_INVOKE_RUNTIME: "custom-local",
+          }),
+        },
+        name: "custom",
+        synthesis: {
+          synthesize: () => ({
+            Outputs: {},
+            Resources: {},
+          }),
+        },
+      },
+      region: "sa-east-1",
+      stage: "sandbox",
+    }),
+    { endpoint: "http://local.test" }
+  );
+
+  expect(plan.environment).toMatchObject({
+    CUSTOM_ENDPOINT: "http://local.test",
+    CUSTOM_REGION: "sa-east-1",
+    CUSTOM_STAGE: "sandbox",
+    VOKE_INVOKE_RUNTIME: "custom-local",
+    VOKE_STAGE: "sandbox",
+  });
+  expect(plan.environment.AWS_ENDPOINT_URL).toBeUndefined();
 });
 
 test("dev plan exposes configured remote targets as environment", async () => {
@@ -186,10 +258,11 @@ test("dev CLI reads config by default and lets flags override one-off runs", asy
   await Bun.write(
     configPath,
     `import { defineConfig } from "${import.meta.dir}/../src/index";
-import { sqsQueue } from "${import.meta.dir}/../src/aws";
+import { aws, sqsQueue } from "${import.meta.dir}/../../aws/src/index";
 
 export default defineConfig({
   name: "dev-api",
+  provider: aws(),
   stage: "local",
   region: "sa-east-1",
   entrypoint: "${apiEntrypoint}",

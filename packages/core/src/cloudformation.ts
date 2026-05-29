@@ -3,11 +3,9 @@ import { VokeModelError } from "./errors";
 import { createInternalModel } from "./model";
 import type {
   VokeModel,
-  VokeModelAwsResourceProvider,
   VokeModelHttpAuthorizer,
   VokeModelResource,
   VokeModelSqsEventSource,
-  VokeResourceKind,
 } from "./model";
 
 type CloudFormationValue =
@@ -49,6 +47,22 @@ export interface StackResourceDefinition {
   actions: string[];
   outputName: string;
   properties: Record<string, CloudFormationValue>;
+}
+
+type AwsResourceBindingValue = "ref" | "getAttArn" | "getAttId";
+
+type AwsResourcePolicyResource =
+  | "ref"
+  | "getAttArn"
+  | "getAttId"
+  | "parameterArn"
+  | "s3ArnWithObjects";
+
+interface AwsCloudFormationResourceProvider {
+  cloudFormationType: string;
+  bindingValue: AwsResourceBindingValue;
+  policyResource: AwsResourcePolicyResource;
+  outputName: string;
 }
 
 export type SynthesizeCloudFormationOptions = VokeConfigInput & {
@@ -185,57 +199,9 @@ const toLogicalId = (value: string): string => {
 const authorizerLogicalId = (name: string): string =>
   `${toLogicalId(name)}Authorizer`;
 
-const resourceSynthesisByKind: Record<
-  Exclude<VokeResourceKind, "awsResource">,
-  VokeModelAwsResourceProvider
-> = {
-  dynamodbTable: {
-    bindingValue: "ref",
-    cloudFormationType: "AWS::DynamoDB::Table",
-    outputName: "Name",
-    policyResource: "getAttArn",
-  },
-  eventBus: {
-    bindingValue: "ref",
-    cloudFormationType: "AWS::Events::EventBus",
-    outputName: "Name",
-    policyResource: "getAttArn",
-  },
-  s3Bucket: {
-    bindingValue: "ref",
-    cloudFormationType: "AWS::S3::Bucket",
-    outputName: "Name",
-    policyResource: "s3ArnWithObjects",
-  },
-  secret: {
-    bindingValue: "getAttId",
-    cloudFormationType: "AWS::SecretsManager::Secret",
-    outputName: "Id",
-    policyResource: "getAttArn",
-  },
-  snsTopic: {
-    bindingValue: "ref",
-    cloudFormationType: "AWS::SNS::Topic",
-    outputName: "Arn",
-    policyResource: "ref",
-  },
-  sqsQueue: {
-    bindingValue: "ref",
-    cloudFormationType: "AWS::SQS::Queue",
-    outputName: "Url",
-    policyResource: "getAttArn",
-  },
-  ssmParameter: {
-    bindingValue: "ref",
-    cloudFormationType: "AWS::SSM::Parameter",
-    outputName: "Name",
-    policyResource: "parameterArn",
-  },
-};
-
 const resourceValue = (
   logicalId: string,
-  bindingValue: VokeModelAwsResourceProvider["bindingValue"]
+  bindingValue: AwsCloudFormationResourceProvider["bindingValue"]
 ): CloudFormationValue => {
   if (bindingValue === "getAttArn") {
     return { "Fn::GetAtt": [logicalId, "Arn"] };
@@ -250,7 +216,7 @@ const resourceValue = (
 
 const resourceArn = (
   logicalId: string,
-  policyResource: VokeModelAwsResourceProvider["policyResource"]
+  policyResource: AwsCloudFormationResourceProvider["policyResource"]
 ): CloudFormationValue => {
   if (policyResource === "ref") {
     return { Ref: logicalId };
@@ -282,7 +248,7 @@ const resourceArn = (
 const toResourcePolicyStatements = (
   logicalId: string,
   resource: VokeModelResource,
-  provider: VokeModelAwsResourceProvider
+  provider: AwsCloudFormationResourceProvider
 ): CloudFormationValue[] => {
   if (resource.access.actions.length === 0) {
     return [];
@@ -327,16 +293,18 @@ const toResourcePolicyStatements = (
 
 const resourceProvider = (
   resource: VokeModelResource
-): VokeModelAwsResourceProvider => {
-  if (resource.kind === "awsResource") {
-    if (resource.provider?.aws === undefined) {
+): AwsCloudFormationResourceProvider => {
+  const extension = resource.provider?.aws;
+
+  if (extension !== undefined) {
+    if (extension.type !== "cloudformation.resource") {
       throw new Error("AWS resource provider metadata is required");
     }
 
-    return resource.provider.aws;
+    return extension.properties as unknown as AwsCloudFormationResourceProvider;
   }
 
-  return resourceSynthesisByKind[resource.kind];
+  throw new Error("AWS resource provider metadata is required");
 };
 
 const functionLogicalId = (name: string, apiFunctionName: string): string =>
@@ -372,10 +340,12 @@ const toSqsEventSourceMappingResource = (options: {
     ]);
   }
 
-  if (resource.kind !== "sqsQueue") {
+  const provider = resourceProvider(resource);
+
+  if (provider.cloudFormationType !== "AWS::SQS::Queue") {
     throw VokeModelError.validation([
       {
-        message: `Function "${functionName}" SQS event source references resource "${eventSource.queue}", but it is a "${resource.kind}" resource instead of an "sqsQueue".`,
+        message: `Function "${functionName}" SQS event source references resource "${eventSource.queue}", but it is an ${JSON.stringify(provider.cloudFormationType)} resource instead of an "AWS::SQS::Queue".`,
         path: `functions.${functionName}.eventSources.${eventSourceIndex}.queue`,
       },
     ]);

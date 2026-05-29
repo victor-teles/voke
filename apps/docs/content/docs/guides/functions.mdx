@@ -11,7 +11,7 @@ Use `fn()` for invokable Functions and `createFunctions()` for the project regis
 
 ```ts
 import { createFunctions, fn } from "voke";
-import type { StandardSchemaV1 } from "voke/schema";
+import type { StandardSchemaV1 } from "voke";
 
 const userInput: StandardSchemaV1<{ id: string }, { id: string }> = {
   "~standard": {
@@ -131,14 +131,11 @@ Use an Authorizer Registry when route-backed Functions should be protected by AW
 ```ts
 import {
   createAuthorizers,
-  createFunctions,
-  http,
   jwtAuthorizer,
   lambdaAuthorizer,
   requestAuthorizer,
-  route,
-  voke,
-} from "voke";
+} from "@voke/aws";
+import { createFunctions, http, route, voke } from "voke";
 
 const authorizers = createAuthorizers({
   session: lambdaAuthorizer({ function: "authorizeSession" }),
@@ -183,8 +180,9 @@ JWT and Lambda Authorizers default to the `Authorization` header. Lambda Authori
 SQS Event Source Functions are invoked by a queue and tested through `functions.sendEvent(...)`. They do not declare an output schema because Voke owns the SQS batch result contract:
 
 ```ts
-import { createFunctions, sqs } from "voke";
-import type { StandardSchemaV1 } from "voke/schema";
+import { createFunctions } from "voke";
+import { sqs } from "@voke/aws";
+import type { StandardSchemaV1 } from "voke";
 
 const orderMessageSchema: StandardSchemaV1<
   { orderId: string },

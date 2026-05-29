@@ -1,6 +1,6 @@
-import { createFunctions, sqs } from "voke";
-import { createSqsEventHandler } from "voke/invoke";
-import { schema } from "voke/schema";
+import { createSqsEventHandler, sqs } from "@voke/aws";
+import { schema } from "@voke/schema";
+import { createFunctions } from "voke";
 
 const orderMessageSchema = schema.object({
   orderId: schema.string(),

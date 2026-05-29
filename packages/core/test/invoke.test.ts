@@ -574,6 +574,26 @@ test("invokes AWS Lambda through an injected transport", async () => {
   ]);
 });
 
+test("requires an injected transport for AWS runtime invocation", async () => {
+  const functions = defineFunctions({
+    worker: defineFunction({
+      handler: ({ id }: { id: string }) => ({ id }),
+      input: passthroughSchema<{ id: string }>(),
+      name: "deployed-worker",
+      output: passthroughSchema<{ id: string }>(),
+    }),
+  });
+
+  await expect(
+    functions.invoke("worker", { id: "usr_1" }, { runtime: "aws" })
+  ).rejects.toMatchObject({
+    code: "MISSING_TRANSPORT",
+    functionName: "deployed-worker",
+    message:
+      'invoke("deployed-worker") requires an InvokeTransport for runtime "aws"',
+  });
+});
+
 test("fails predictably when AWS transport returns an error", async () => {
   const functions = defineFunctions({
     getUser: defineFunction({

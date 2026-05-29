@@ -6,64 +6,72 @@ This inventory defines the intended stable API surface for the first stable Voke
 
 Use the root package for the common Function-first Gateway authoring path:
 
-- Function and Gateway authoring: `createFunctions`, `fn`, `http`, `route`, `sqs`, `voke`
+- Function and Gateway authoring: `createFunctions`, `fn`, `http`, `route`, `voke`
 - Function Contract helpers: `StandardSchemaV1`-compatible schemas accepted by `fn(...)`, `http(...)`, and the Route Builder
 - Route Builder support: `route.get(...)`, `.post(...)`, `.put(...)`, `.patch(...)`, `.delete(...)`, `.head(...)`, `.options(...)`, and `.route(...)`
-- Config: root exports `defineConfig`; advanced config helpers live on `voke/config`
-- HTTP helpers: use `voke/response`
-- Request context helpers: use `voke/context`
-- Runtime AWS binding helpers: use `voke/aws`
-- CloudFormation synthesis entrypoint: use `voke/cloudformation`
-- Internal model inspection: use `voke/model`
-- Local development helpers: use `voke/local`
-- Invoke helpers: `functions.invoke(...)` and `functions.route(...)`; advanced invoke helpers live on `voke/invoke`
-- Test helpers used by stable examples: use `voke/testing`
+- Config: root exports `defineConfig`
+- HTTP helpers: use `@voke/http`
+- Runtime AWS binding helpers: use `@voke/aws`
+- CloudFormation synthesis entrypoint: use `@voke/aws/cloudformation`
+- Internal model inspection: use root type exports from `voke`
+- Remote helpers: use `@voke/remote`
+- Build helpers: use `@voke/build`
+- Invoke helpers: `functions.invoke(...)` and `functions.route(...)`
+- Test helpers used by stable examples: use `@voke/testing`
+- AWS-specific test helpers: use `@voke/aws/testing`
 
-The root package is intentionally limited to the common authoring path. First-party docs and examples should lead with `createFunctions`, `fn`, `http`, `route`, `sqs`, and `voke`.
+The root package is intentionally limited to the common authoring path. First-party docs and examples should lead with `createFunctions`, `fn`, `http`, `route`, and `voke`; AWS-specific examples should import SQS, resources, authorizers, and provider runtime from `@voke/aws`.
 
 The root should not export removed pre-stable APIs such as `api()`, `createGateway()`, `createApiApp()`, `routeModule()`, `new Voke()`, `createFunctionRegistry()`, global `invoke()`, `registerLocalFunction()`, or `resetLocalFunctions()`. It should also not export AWS resource builders such as `dynamodbTable()` or low-level Lambda adapter internals.
 
-## AWS Subpath: `voke/aws`
+## AWS Package: `@voke/aws`
 
-Use `voke/aws` for AWS-specific authoring and runtime binding helpers:
+Use `@voke/aws` for AWS-specific authoring and runtime binding helpers:
 
 - Resource builders: `dynamodbTable`, `sqsQueue`, `snsTopic`, `eventBus`, `s3Bucket`, `secret`, `ssmParameter`
+- Event Source Function helpers: `sqs`, `createSqsEventHandler`
+- API Gateway authorizer helpers: `createAuthorizers`, `jwtAuthorizer`, `lambdaAuthorizer`, `requestAuthorizer`
 - Runtime binding helpers: `bindResource`, `createAwsClientConfig`
+- Provider: `aws`
 
 Resource builders live here so `voke.config.ts` can stay readable and domain-oriented:
 
 ```ts
 import { defineConfig } from "voke";
-import { dynamodbTable, sqsQueue } from "voke/aws";
+import { aws, dynamodbTable, sqsQueue } from "@voke/aws";
 ```
 
-## Specialized Subpaths
+## Specialized Packages
 
-These subpaths are stable, but should be used only when the caller needs the specialized surface directly:
+These packages are stable, but should be used only when the caller needs the specialized surface directly:
 
-- `voke/build`
-- `voke/cloudformation`
-- `voke/config`
-- `voke/context`
-- `voke/dev`
-- `voke/invoke`
-- `voke/local`
-- `voke/model`
-- `voke/remote`
-- `voke/response`
-- `voke/schema`
-- `voke/serverless-migration`
-- `voke/testing`
+- `@voke/aws`
+- `@voke/aws/cloudformation`
+- `@voke/aws/local`
+- `@voke/aws/testing`
+- `@voke/build`
+- `@voke/http`
+- `@voke/remote`
+- `@voke/schema`
+- `@voke/testing`
 
 ## Not Stable Package Subpaths
 
 The CLI, compatibility adapters, and low-level Lambda adapter modules are implementation details for now. They can still be tested internally by source path, but they should not be published as package subpaths:
 
 - `voke/cli`
+- `voke/aws`
 - `voke/aws-lambda`
 - `voke/app`
 - `voke/api`
+- `voke/build`
+- `voke/cloudformation`
 - `voke/http`
+- `voke/local`
+- `voke/remote`
+- `voke/response`
+- `voke/schema`
+- `voke/testing`
 
 ## Guardrails
 

@@ -1,13 +1,13 @@
 import { expect, test } from "bun:test";
 
-import { createFunctions, fn, http, route, sqs, voke } from "../src/index";
+import { sqs } from "@voke/aws";
+import type { SqsMessageBatchIncludeInvalid } from "@voke/aws";
+import { response } from "@voke/http";
+import { schema } from "@voke/schema";
+
+import { createFunctions, fn, http, route, voke } from "../src/index";
 import type { Middleware } from "../src/index";
-import type {
-  SqsMessageBatchIncludeInvalid,
-  StandardSchemaV1,
-} from "../src/invoke";
-import { response } from "../src/response";
-import { schema } from "../src/schema";
+import type { StandardSchemaV1 } from "../src/invoke";
 
 const standardSchema = <TInput, TOutput = TInput>(
   validate: (value: TInput) => TOutput

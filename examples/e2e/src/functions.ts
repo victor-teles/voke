@@ -1,5 +1,5 @@
+import { schema } from "@voke/schema";
 import { createFunctions, fn } from "voke";
-import { schema } from "voke/schema";
 
 const welcomeEmailInput = schema.object({
   email: schema.string(),

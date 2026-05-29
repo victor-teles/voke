@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { createTestClient } from "voke/testing";
+import { createTestClient } from "@voke/testing";
 
 import service from "../src/index";
 

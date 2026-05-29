@@ -410,4 +410,3 @@ Each implemented roadmap slice should include:
 - Docs and examples when public usage changes.
 - Migration report updates when the feature overlaps with Serverless Framework.
 - `bun test` and `bun run typecheck` before finishing; run `bun run check` when formatting/lint-sensitive files change.
-

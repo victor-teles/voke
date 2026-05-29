@@ -258,7 +258,7 @@ test("generates checked-in Remote Function Registry modules from configured remo
     "http://contracts.local/audit",
   ]);
   expect(writes["src/voke/remotes/users.ts"]).toContain(
-    'import { createRemoteFunctions } from "voke/remote";'
+    'import { createRemoteFunctions } from "@voke/remote";'
   );
   expect(writes["src/voke/remotes/users.ts"]).toContain(
     "export const users = createRemoteFunctions"
