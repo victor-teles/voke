@@ -9,6 +9,7 @@ Public framework workflows should throw `VokeError` subclasses instead of plain 
 - `VokeConfigError`: invalid or missing `voke.config.ts` input, unsupported runtime settings, and dev/build config problems.
 - `VokeModelError`: invalid internal model relationships or malformed model fields.
 - `VokeResourceBindingError`: runtime resource binding environment variables are missing.
+- `VokeRuntimeVariableError`: runtime variable resolution, provider loading, JSON parsing, schema validation, and unsupported value-shape failures.
 - `CliUsageError`: invalid CLI commands, flags, or command shapes.
 - `InvokeError`: function invocation validation, transport, timeout, and missing function failures.
 
@@ -31,4 +32,10 @@ Migration unsupported-feature messages should name the Serverless feature and th
 
 ```txt
 Unsupported Serverless event kafka on function worker: kafka is not an automatic Voke migration target. Recreate the trigger, permissions, batching, and failure behavior manually before cutting over.
+```
+
+Runtime Variable errors should identify the Function key, Runtime Variable key, and redacted source label without including loaded values:
+
+```txt
+Runtime variable "stripeKey" for Function "checkout" could not be loaded from AWS Secrets Manager secret "/prod/stripe/key".
 ```

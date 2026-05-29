@@ -1,6 +1,8 @@
+import { requestAuthorizer } from "../src/authorizers";
 import {
   defineFunction,
   defineFunctions,
+  http,
   sqs,
   sqsEventSource,
   sqsMessageBatch,
@@ -10,6 +12,7 @@ import type {
   SqsBatchResult,
   StandardSchemaV1,
 } from "../src/invoke";
+import { createVariableSource } from "../src/variables";
 
 const schema = <TInput, TOutput = TInput>(): StandardSchemaV1<
   TInput,
@@ -24,15 +27,45 @@ const schema = <TInput, TOutput = TInput>(): StandardSchemaV1<
 
 const getUserInput = schema<{ id: string }>();
 const getUserOutput = schema<{ id: string; name: string }>();
+const apiKey = createVariableSource("test", { id: "api-key", kind: "secret" });
+const eagerlyLoadedApiKey = createVariableSource(
+  "test",
+  { id: "api-key", kind: "secret" },
+  { cache: { ttlSeconds: 30 }, load: "beforeHandler" }
+);
+const uncachedKey = createVariableSource(
+  "test",
+  { id: "uncached", kind: "secret" },
+  { cache: false }
+);
 
 const functions = defineFunctions({
+  authorizeRequest: requestAuthorizer({
+    handler: async (_request, context) => {
+      const _apiKeyText: string = await context.variables.apiKey.text();
+      // @ts-expect-error only this Function's declared Runtime Variable keys are visible.
+      void context.variables.missingKey;
+
+      return { authorized: true };
+    },
+    variables: { apiKey },
+  }),
   getUser: defineFunction({
-    handler: (payload) => ({
-      id: payload.id,
-      name: "Victor",
-    }),
+    handler: async (payload, context) => {
+      const _apiKeyText: string = await context.variables.apiKey.text();
+      const _apiKeyHandle: typeof context.variables.apiKey =
+        await context.variables.apiKey.refresh();
+      // @ts-expect-error only this Function's declared Runtime Variable keys are visible.
+      void context.variables.missingKey;
+
+      return {
+        id: payload.id,
+        name: "Victor",
+      };
+    },
     input: getUserInput,
     output: getUserOutput,
+    variables: { apiKey, eagerlyLoadedApiKey, uncachedKey },
   }),
   health: defineFunction({
     handler: () => ({ ok: true }),
@@ -64,10 +97,36 @@ const functions = defineFunctions({
     message: schema<{ orderId: string }>(),
     queues: [{ batchSize: 1, queue: "ordersQueue" }, "priorityQueue"],
   }),
+  processSecretOrder: sqs({
+    handler: async (event, context) => {
+      const _apiKeyText: string = await context.variables.apiKey.text();
+      // @ts-expect-error only this Function's declared Runtime Variable keys are visible.
+      void context.variables.missingKey;
+
+      return event.ok();
+    },
+    message: schema<{ orderId: string }>(),
+    queue: "secretOrdersQueue",
+    variables: { apiKey },
+  }),
   publicRoute: defineFunction({
     synthesis: {
       runtime: "nodejs24.x",
     },
+  }),
+  secureRoute: http({
+    routes: (route) =>
+      route.get("/secure", {
+        handler: async (_request, context) => {
+          const apiKeyText: string = await context.variables.apiKey.text();
+          // @ts-expect-error only this Function's declared Runtime Variable keys are visible.
+          void context.variables.missingKey;
+
+          return { apiKeyText };
+        },
+        output: schema<{ apiKeyText: string }>(),
+      }),
+    variables: { apiKey },
   }),
 });
 

@@ -22,7 +22,7 @@ Use the root package for the common Function-first Gateway authoring path:
 
 The root package is intentionally limited to the common authoring path. First-party docs and examples should lead with `createFunctions`, `fn`, `http`, `route`, and `voke`; AWS-specific examples should import SQS, resources, authorizers, and provider runtime from `@voke/aws`.
 
-The root should not export removed pre-stable APIs such as `api()`, `createGateway()`, `createApiApp()`, `routeModule()`, `new Voke()`, `createFunctionRegistry()`, global `invoke()`, `registerLocalFunction()`, or `resetLocalFunctions()`. It should also not export AWS resource builders such as `dynamodbTable()` or low-level Lambda adapter internals.
+The root should not export removed pre-stable APIs such as `api()`, `createGateway()`, `createApiApp()`, `routeModule()`, `new Voke()`, `createFunctionRegistry()`, global `invoke()`, `registerLocalFunction()`, or `resetLocalFunctions()`. It should also not export AWS runtime variable builders, AWS resource builders such as `dynamodbTable()`, or low-level Lambda adapter internals.
 
 ## AWS Package: `@voke/aws`
 

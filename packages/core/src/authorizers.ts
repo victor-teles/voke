@@ -1,4 +1,9 @@
-import type { FunctionSynthesisConfig, StandardSchemaV1 } from "./invoke";
+import type {
+  FunctionSynthesisConfig,
+  InvokeContext,
+  StandardSchemaV1,
+} from "./invoke";
+import type { RuntimeVariableCatalog } from "./variables";
 
 export type AuthorizerIdentitySource = string | readonly string[];
 
@@ -44,30 +49,36 @@ export interface AuthorizerResult<
 
 export type RequestAuthorizerHandler<
   TContext extends Record<string, unknown> = Record<string, unknown>,
+  TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
 > = (
-  request: AuthorizerRequest
+  request: AuthorizerRequest,
+  context: InvokeContext<TVariables>
 ) => AuthorizerResult<TContext> | Promise<AuthorizerResult<TContext>>;
 
 export interface RequestAuthorizerFunctionInput<
   TContext extends Record<string, unknown> = Record<string, unknown>,
+  TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
 > {
   readonly context?: StandardSchemaV1<unknown, TContext>;
-  readonly handler: RequestAuthorizerHandler<TContext>;
+  readonly handler: RequestAuthorizerHandler<TContext, TVariables>;
   readonly name?: string;
   readonly synthesis?: FunctionSynthesisConfig;
+  readonly variables?: TVariables;
 }
 
 export interface RequestAuthorizerFunctionDefinition<
   TKey extends string = string,
   TContext extends Record<string, unknown> = Record<string, unknown>,
+  TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
 > {
   readonly context?: StandardSchemaV1<unknown, TContext>;
-  readonly handler: RequestAuthorizerHandler<TContext>;
+  readonly handler: RequestAuthorizerHandler<TContext, TVariables>;
   readonly key: TKey;
   readonly kind: "authorizer";
   readonly name?: string;
   readonly routes: readonly [];
   readonly synthesis?: RequestAuthorizerFunctionInput<TContext>["synthesis"];
+  readonly variables?: TVariables;
 }
 
 export type AuthorizerRegistryInput = Record<string, HttpAuthorizerDefinition>;
@@ -136,9 +147,10 @@ export const createAuthorizers = <
 
 export const requestAuthorizer = <
   const TContext extends Record<string, unknown> = Record<string, unknown>,
+  const TVariables extends RuntimeVariableCatalog = Record<never, never>,
 >(
-  input: RequestAuthorizerFunctionInput<TContext>
-): RequestAuthorizerFunctionDefinition<string, TContext> =>
+  input: RequestAuthorizerFunctionInput<TContext, TVariables>
+): RequestAuthorizerFunctionDefinition<string, TContext, TVariables> =>
   Object.freeze({
     context: input.context,
     handler: input.handler,
@@ -147,4 +159,5 @@ export const requestAuthorizer = <
     name: input.name,
     routes: Object.freeze([]) as readonly [],
     synthesis: input.synthesis,
+    variables: input.variables,
   });

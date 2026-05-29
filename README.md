@@ -110,6 +110,41 @@ const tableName = usersTable.value();
 
 Resource helpers are included for DynamoDB, SQS, SNS, EventBridge, S3, Secrets Manager, and Parameter Store.
 
+## Runtime Variables
+
+Declare provider-backed runtime values on the Function that uses them, then read them through `context.variables`. AWS Secrets Manager and SSM Parameter Store are available from `voke/aws` without importing AWS clients in application code:
+
+```ts
+import { createFunctions, fn } from "voke";
+import { parameter, secret } from "voke/aws";
+
+const functions = createFunctions({
+  checkout: fn({
+    input: checkoutInput,
+    output: checkoutOutput,
+    variables: {
+      flags: parameter("/prod/checkout/flags", { decrypt: false }),
+      stripeKey: secret("/prod/stripe/key", {
+        cache: { ttlSeconds: 60 },
+        load: "beforeHandler",
+      }),
+    },
+    handler: async (payload, context) => {
+      const stripeKey = await context.variables.stripeKey.text();
+      const flags = await context.variables.flags.json(flagsSchema);
+
+      return checkout(payload, { flags, stripeKey });
+    },
+  }),
+});
+```
+
+Use `secret.fromResource("signingSecret")` and `parameter.fromResource("publicConfig")` when the value comes from a Voke-managed CloudFormation resource. Direct calls use external AWS names or ARNs; `.fromResource(...)` uses local Voke resource keys.
+
+Runtime Variables are required by default. `{ optional: true }` returns `undefined` for absence, while invalid values and provider failures still throw `VokeRuntimeVariableError`. Local tests can pass `variables.overrides` to `voke(...)`, and Voke also checks `VOKE_VARIABLE_<FUNCTION>_<KEY>` before `VOKE_VARIABLE_<KEY>`.
+
+Runtime Variables are implementation dependencies: they are excluded from Function Contracts, generated remote clients, and the `voke dev` summary. CloudFormation synthesis grants read permissions only to the Functions that declare each Runtime Variable.
+
 ## SQS Event Sources
 
 SQS Event Source Functions use the same Function Registry model, but receive normalized message batches instead of direct `functions.invoke(...)` payloads:

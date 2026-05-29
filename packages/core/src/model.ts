@@ -8,6 +8,7 @@ import type { VokeConfig, VokeConfigInput, VokeNodeRuntime } from "./config";
 import { VokeConfigError, VokeModelError } from "./errors";
 import type { VokeIssue } from "./errors";
 import type { AnyFunctionDefinition } from "./invoke";
+import type { RuntimeVariableCatalog } from "./variables";
 
 export type VokeModelScalar = string | number | boolean | null;
 
@@ -83,6 +84,7 @@ export interface VokeModelFunction {
   invokable: boolean;
   runtime: VokeNodeRuntime;
   routes: string[];
+  variables: RuntimeVariableCatalog;
   environment: Record<string, string>;
   bindings: VokeModelBinding[];
 }
@@ -184,6 +186,20 @@ const toRouteAuthorizer = (
   const authorizer = route.authorizer ?? definition.authorizer;
 
   return authorizer === "none" ? undefined : authorizer;
+};
+
+const runtimeVariableResourceKind = (
+  source: Record<string, unknown>
+): string | undefined => {
+  if (source.kind === "secretsManagerSecretResource") {
+    return "AWS::SecretsManager::Secret";
+  }
+
+  if (source.kind === "ssmParameterResource") {
+    return "AWS::SSM::Parameter";
+  }
+
+  return undefined;
 };
 
 const toModelAuthorizer = (
@@ -387,6 +403,54 @@ const validateModel = (model: VokeModel): void => {
   }
 };
 
+const validateRuntimeVariableResources = (
+  functionName: string,
+  definition: AnyFunctionDefinition,
+  resources: Record<string, VokeModelResource>
+): void => {
+  const variableIssues: VokeIssue[] = [];
+
+  for (const [variableKey, variable] of Object.entries(
+    definition.variables ?? {}
+  )) {
+    const expectedKind = runtimeVariableResourceKind(variable.source);
+
+    if (expectedKind === undefined) {
+      continue;
+    }
+
+    const resourceKey = variable.source.resource;
+
+    if (typeof resourceKey !== "string") {
+      continue;
+    }
+
+    const resource = resources[resourceKey];
+
+    if (resource === undefined) {
+      variableIssues.push({
+        message: `Runtime Variable "${variableKey}" references resource "${resourceKey}", but no matching resource is defined.`,
+        path: `functions.${functionName}.variables.${variableKey}`,
+      });
+      continue;
+    }
+
+    const cloudFormationType =
+      resource.provider?.aws?.properties.cloudFormationType;
+
+    if (cloudFormationType !== expectedKind) {
+      variableIssues.push({
+        message: `Runtime Variable "${variableKey}" references resource "${resourceKey}", but it is a ${JSON.stringify(cloudFormationType)} resource instead of an "${expectedKind}".`,
+        path: `functions.${functionName}.variables.${variableKey}`,
+      });
+    }
+  }
+
+  if (variableIssues.length > 0) {
+    throw VokeConfigError.validation(variableIssues);
+  }
+};
+
 export const createInternalModel = (
   input: VokeConfig | VokeConfigInput
 ): VokeModel => {
@@ -459,6 +523,8 @@ export const createInternalModel = (
       throw VokeConfigError.validation(eventSourceIssues);
     }
 
+    validateRuntimeVariableResources(name, definition, resources);
+
     return {
       bindings,
       deployedName: definition.name ?? generatedFunctionName(name),
@@ -472,6 +538,7 @@ export const createInternalModel = (
       invokable: definition.kind === "invokable",
       routes: definition.routes?.map(toRouteKey) ?? [],
       runtime: definition.synthesis?.runtime ?? config.runtime.lambda,
+      variables: definition.variables ?? {},
     };
   };
   const functions = Object.fromEntries(
@@ -524,6 +591,7 @@ export const createInternalModel = (
       invokable: false,
       routes: config.api.routes,
       runtime: config.runtime.lambda,
+      variables: {},
     };
   }
   const functionOutputs = Object.fromEntries(

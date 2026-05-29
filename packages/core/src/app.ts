@@ -18,6 +18,10 @@ import type { FunctionRegistry, FunctionRegistryInput } from "./invoke";
 import type { VokeProvider } from "./provider";
 import { mountDevFunctionEndpoints } from "./remote";
 import { error as responseError } from "./response";
+import type {
+  RuntimeVariableOverrides,
+  RuntimeVariableProvider,
+} from "./variables";
 
 export interface ApiRouteModule<TEnv extends VokeEnv = VokeEnv> {
   basePath?: string;
@@ -35,6 +39,10 @@ export interface GatewayOptions {
   functions?: FunctionRegistry | FunctionRegistryInput;
   middleware?: MiddlewareHandler<VokeEnv>[];
   routes?: ApiRouteModule[];
+  variables?: {
+    overrides?: RuntimeVariableOverrides;
+    providers?: readonly RuntimeVariableProvider[];
+  };
 }
 
 export interface VokeOptions<
@@ -43,6 +51,7 @@ export interface VokeOptions<
   config?: VokeConfigInput;
   middleware?: MiddlewareHandler<VokeEnv>[];
   provider?: TProvider;
+  variables?: GatewayOptions["variables"];
 }
 
 export type Middleware = MiddlewareHandler<VokeEnv>;
@@ -184,7 +193,11 @@ export const createGateway = (options: GatewayOptions = {}): Hono<VokeEnv> => {
     assertRouteParamSchemas(configInput.functions);
     activateFunctionRegistry(
       configInput.functions,
-      activationKey(config ?? defineConfig(configInput))
+      activationKey(config ?? defineConfig(configInput)),
+      {
+        variableOverrides: options.variables?.overrides,
+        variableProviders: options.variables?.providers,
+      }
     );
     mountFunctionRoutes(gateway, configInput.functions);
 
@@ -245,6 +258,7 @@ export const voke = <
     config: gatewayConfig,
     functions,
     middleware: options.middleware,
+    variables: options.variables,
   });
   const config = defineConfig({ ...configInput, functions });
   const provider = options.provider ?? config.provider;

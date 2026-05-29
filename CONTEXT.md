@@ -176,6 +176,14 @@ _Avoid_: Function invocation, route invocation
 A human-readable startup log that lists the runtime **Gateway** assembly's **Functions** and **Event Sources** during `voke dev`.
 _Avoid_: Inspect API, machine-readable manifest, config summary
 
+**Runtime Variable**:
+A provider-backed value loaded by a **Function** from a deployed secret or parameter source at runtime.
+_Avoid_: Resource declaration, CloudFormation secret, environment variable binding, runtime secret
+
+**Runtime Variable Key**:
+The app-facing name a **Function** uses to read a **Runtime Variable** from runtime context.
+_Avoid_: AWS secret name, parameter path, resource key
+
 ## Relationships
 
 - A **Voke Project** has exactly one `voke.config.ts` as its project source of truth.
@@ -254,6 +262,41 @@ _Avoid_: Inspect API, machine-readable manifest, config summary
 - A **Local AWS Provider** is distinct from a **Provider** because it emulates local AWS services rather than defining the Gateway's deployment target.
 - A **Gateway** is the runtime source of truth for dev-visible **Function** and **Event Source** details.
 - A **Gateway** can synthesize an **HTTP API** when it contains route-backed **Functions**.
+- A **Function** can load **Runtime Variables** without making those values part of its **Function Contract**.
+- A **Runtime Variable** is declared on the **Function** that loads it.
+- A **Function** declares **Runtime Variables** through one per-Function variable catalog.
+- A **Runtime Variable** can reference either an external AWS name or a Voke-managed resource key.
+- External AWS names and Voke-managed resource keys use visually distinct authoring forms for **Runtime Variables**.
+- A **Runtime Variable Key** is independent from the **Runtime Variable** source name.
+- A **Runtime Variable** that references a Voke-managed resource resolves the resource's deployed identifier through Voke resource bindings.
+- Voke validates Voke-managed resource references for **Runtime Variables** during model creation when the referenced resource is known.
+- A **Runtime Variable** is cached within a warm **Function** runtime by default.
+- **Runtime Variable** cache scope is a **Function** and **Runtime Variable Key**.
+- A **Runtime Variable** can opt out of warm-runtime caching or define an explicit cache duration.
+- A **Runtime Variable** loads lazily by default.
+- A **Runtime Variable** can opt in to loading before its **Function** handler runs.
+- Runtime code reads a **Runtime Variable** through a value handle instead of receiving the raw value directly.
+- A **Runtime Variable** can be read as text, parsed as JSON, or refreshed from its source.
+- A **Runtime Variable** can validate parsed JSON with a Standard Schema-compatible schema.
+- Runtime code reads **Runtime Variables** from Function context for every **Function** kind.
+- Runtime code sees only its own **Function**'s declared **Runtime Variable Keys** in Function context.
+- Route-backed **Function** handlers receive Voke runtime context as a second argument.
+- **Runtime Variables** are required by default and can be declared optional explicitly.
+- Optional **Runtime Variables** allow absence, not invalid loaded values or access failures.
+- Local and test execution resolves **Runtime Variables** from explicit overrides and environment variables before using real AWS sources.
+- Local and test execution uses real AWS sources for **Runtime Variables** only when explicitly configured to do so.
+- Local and test **Runtime Variable** overrides can be project-wide or scoped to a specific **Function**.
+- Function-scoped **Runtime Variable** overrides take precedence over project-wide overrides.
+- Environment variable fallbacks for **Runtime Variables** follow the same Function-scoped then project-wide precedence.
+- **Runtime Variable** errors identify the Function, variable, and source without revealing loaded values.
+- **Runtime Variable** declarations provide the basis for per-Function least-privilege IAM permissions.
+- Every deployable **Function** kind can declare **Runtime Variables**.
+- **Runtime Variables** are provider implementation dependencies, not part of a **Function Contract** or **Function Contract Artifact**.
+- Voke owns provider fetching for **Runtime Variables** in the common authoring path.
+- **Runtime Variables** can be supplied by provider plugins, with AWS Secrets Manager and SSM Parameter Store as first-party providers.
+- **Runtime Variable** provider plugins are registered at the runtime or test boundary.
+- Advanced **Runtime Variable** loader overrides are configured at the runtime or test boundary, not on individual **Runtime Variable** declarations.
+- The **Dev Function Summary** does not list **Runtime Variables**.
 - An **HTTP API** can have an **Authorizer Registry**.
 - **HTTP Authorizer** authoring belongs to the **AWS Provider** package rather than the root `voke` package.
 - An **Authorizer Registry** contains zero or more named **HTTP Authorizers**.

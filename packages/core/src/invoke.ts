@@ -6,10 +6,24 @@ import type {
   RequestAuthorizerFunctionDefinition,
   RequestAuthorizerHandler,
 } from "./authorizers";
+import { createAwsRuntimeVariableProvider } from "./aws-runtime-variables";
 import type { VokeNodeRuntime } from "./config";
 import type { VokeEnv } from "./context";
 import { VokeConfigError } from "./errors";
 import { json, jsonError } from "./http";
+import { Voke } from "./route-builder";
+import {
+  createRuntimeVariableCache,
+  createRuntimeVariables,
+  loadRuntimeVariablesBeforeHandler,
+} from "./variables";
+import type {
+  RuntimeVariableCache,
+  RuntimeVariableCatalog,
+  RuntimeVariableHandles,
+  RuntimeVariableOverrides,
+  RuntimeVariableProvider,
+} from "./variables";
 
 export type InvokeMode = "sync" | "async";
 export type InvokeRuntime = "local" | "aws";
@@ -52,9 +66,12 @@ export class InvokeError extends Error {
   }
 }
 
-export interface InvokeContext {
+export interface InvokeContext<
+  TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+> {
   functionName: string;
   trace: InvokeTrace;
+  variables: RuntimeVariableHandles<TVariables>;
 }
 
 export interface AsyncInvokeResult {
@@ -285,8 +302,16 @@ export interface RouteRequest<
   readonly request: Request;
 }
 
-export type RouteHandler<TBody, TParams, TQuery, THeaders, TResult> = (
-  request: RouteRequest<TBody, TParams, TQuery, THeaders>
+export type RouteHandler<
+  TBody,
+  TParams,
+  TQuery,
+  THeaders,
+  TResult,
+  TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+> = (
+  request: RouteRequest<TBody, TParams, TQuery, THeaders>,
+  context: InvokeContext<TVariables>
 ) => RouteReturn<TResult>;
 
 type RouteSchemaOutput<TSchema, TFallback> = TSchema extends AnyStandardSchema
@@ -310,6 +335,7 @@ export interface RouteDefinitionInput<
   THeadersSchema extends AnyStandardSchema | undefined,
   TOutputSchema extends AnyStandardSchema | undefined,
   TResult,
+  TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
 > {
   readonly authorizer?: RouteAuthorizerReference;
   readonly body?: TBodySchema;
@@ -318,7 +344,8 @@ export interface RouteDefinitionInput<
     RouteSchemaOutput<TParamsSchema, Record<string, string>>,
     RouteSchemaOutput<TQuerySchema, Record<string, string>>,
     RouteSchemaOutput<THeadersSchema, Headers>,
-    TResult
+    TResult,
+    TVariables
   >;
   readonly headers?: THeadersSchema;
   readonly middleware?: readonly MiddlewareHandler<VokeEnv>[];
@@ -346,6 +373,7 @@ export interface RouteDefinition<
     | AnyStandardSchema
     | undefined,
   TResult = unknown,
+  TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
 > extends RouteDefinitionInput<
   TMethod,
   TPath,
@@ -354,7 +382,8 @@ export interface RouteDefinition<
   TQuerySchema,
   THeadersSchema,
   TOutputSchema,
-  TResult
+  TResult,
+  TVariables
 > {
   readonly method: TMethod;
   readonly middleware: readonly MiddlewareHandler<VokeEnv>[];
@@ -370,11 +399,12 @@ type AnyRouteDefinition = Omit<
     AnyStandardSchema | undefined,
     AnyStandardSchema | undefined,
     AnyStandardSchema | undefined,
-    unknown
+    unknown,
+    RuntimeVariableCatalog
   >,
   "handler"
 > & {
-  readonly handler: RouteHandler<never, never, never, never, unknown>;
+  readonly handler: unknown;
 };
 
 export interface RouteInvocationInput<TRoute> {
@@ -466,24 +496,33 @@ export type FunctionRegistryRoute<TRegistry> = <
   RouteInvocationOutput<RoutesForMethodAndPath<TRegistry, TMethod, TPath>>
 >;
 
-export type FunctionHandler<TPayload, TResult> = (
+export type FunctionHandler<
+  TPayload,
+  TResult,
+  TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+> = (
   payload: TPayload,
-  context: InvokeContext
+  context: InvokeContext<TVariables>
 ) => TResult | Promise<TResult>;
 
-export type EventFunctionHandler<TPayload> = (
+export type EventFunctionHandler<
+  TPayload,
+  TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+> = (
   payload: TPayload,
-  context: InvokeContext
+  context: InvokeContext<TVariables>
 ) => SqsBatchResult | Promise<SqsBatchResult>;
 
 export interface BaseFunctionDefinition<
   TKey extends string = string,
   TKind extends FunctionKind = FunctionKind,
+  TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
 > {
   readonly key: TKey;
   readonly kind: TKind;
   readonly name?: string;
   readonly synthesis?: FunctionSynthesisConfig;
+  readonly variables?: TVariables;
 }
 
 export type InvokableFunctionDefinition<
@@ -492,13 +531,15 @@ export type InvokableFunctionDefinition<
     | AnyStandardSchema
     | undefined,
   TOutputSchema extends AnyStandardSchema = AnyStandardSchema,
-> = BaseFunctionDefinition<TKey, "invokable"> & {
+  TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+> = BaseFunctionDefinition<TKey, "invokable", TVariables> & {
   readonly handler: FunctionHandler<
     TInputSchema extends AnyStandardSchema
       ? StandardSchemaOutput<TInputSchema>
       : undefined,
     | StandardSchemaInput<TOutputSchema>
-    | Promise<StandardSchemaInput<TOutputSchema>>
+    | Promise<StandardSchemaInput<TOutputSchema>>,
+    TVariables
   >;
   readonly output: TOutputSchema;
 } & (TInputSchema extends AnyStandardSchema
@@ -508,7 +549,8 @@ export type InvokableFunctionDefinition<
 export type RouteFunctionDefinition<
   TKey extends string = string,
   TRoutes extends readonly AnyRouteDefinition[] = readonly AnyRouteDefinition[],
-> = BaseFunctionDefinition<TKey, "route"> & {
+  TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+> = BaseFunctionDefinition<TKey, "route", TVariables> & {
   readonly authorizer?: string;
   readonly authorizers?: AuthorizerRegistryInput;
   readonly routes: TRoutes;
@@ -517,9 +559,13 @@ export type RouteFunctionDefinition<
 export type EventFunctionDefinition<
   TKey extends string = string,
   TInputSchema extends AnyStandardSchema = AnyStandardSchema,
-> = BaseFunctionDefinition<TKey, "event"> & {
+  TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+> = BaseFunctionDefinition<TKey, "event", TVariables> & {
   readonly events: readonly EventSourceDefinition[];
-  readonly handler: EventFunctionHandler<StandardSchemaOutput<TInputSchema>>;
+  readonly handler: EventFunctionHandler<
+    StandardSchemaOutput<TInputSchema>,
+    TVariables
+  >;
   readonly input: TInputSchema;
 };
 
@@ -540,42 +586,48 @@ export type AnyFunctionDefinition = BaseFunctionDefinition<string> & {
   readonly authorizers?: AuthorizerRegistryInput;
   readonly context?: AnyStandardSchema;
   readonly events?: readonly EventSourceDefinition[];
-  readonly handler?:
-    | FunctionHandler<never, unknown>
-    | ((payload: never) => unknown);
+  readonly handler?: unknown;
   readonly input?: AnyStandardSchema;
   readonly output?: AnyStandardSchema;
   readonly routes?: readonly AnyRouteDefinition[];
+  readonly variables?: RuntimeVariableCatalog;
 };
 
 interface FunctionDefinitionInputBase {
   name?: string;
   routes?: readonly AnyRouteDefinition[];
   synthesis?: FunctionSynthesisConfig;
+  variables?: RuntimeVariableCatalog;
 }
 
 type InvokableFunctionWithInputDefinitionInput<
   TInputSchema extends AnyStandardSchema,
   TOutputSchema extends AnyStandardSchema,
+  TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
 > = FunctionDefinitionInputBase & {
   handler: FunctionHandler<
     StandardSchemaOutput<TInputSchema>,
     | StandardSchemaInput<TOutputSchema>
-    | Promise<StandardSchemaInput<TOutputSchema>>
+    | Promise<StandardSchemaInput<TOutputSchema>>,
+    TVariables
   >;
   input: TInputSchema;
   output: TOutputSchema;
+  variables?: TVariables;
 };
 
 type InvokableZeroInputFunctionDefinitionInput<
   TOutputSchema extends AnyStandardSchema,
+  TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
 > = FunctionDefinitionInputBase & {
   handler: FunctionHandler<
     undefined,
     | StandardSchemaInput<TOutputSchema>
-    | Promise<StandardSchemaInput<TOutputSchema>>
+    | Promise<StandardSchemaInput<TOutputSchema>>,
+    TVariables
   >;
   output: TOutputSchema;
+  variables?: TVariables;
 };
 
 type RouteFunctionDefinitionInput<
@@ -592,18 +644,26 @@ type RouteInputList<
 
 export interface HttpFunctionDefinitionInput<
   TRoutes extends AnyRouteDefinition | readonly AnyRouteDefinition[],
+  TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
 > extends Omit<FunctionDefinitionInputBase, "routes"> {
   readonly authorizer?: string;
   readonly authorizers?: AuthorizerRegistryInput;
-  readonly routes: TRoutes;
+  readonly routes: TRoutes | ((route: Voke<TVariables>) => TRoutes);
+  readonly variables?: TVariables;
 }
 
-type EventFunctionDefinitionInput<TInputSchema extends AnyStandardSchema> =
-  Omit<FunctionDefinitionInputBase, "routes"> & {
-    readonly events: readonly EventSourceDefinition[];
-    readonly handler: EventFunctionHandler<StandardSchemaOutput<TInputSchema>>;
-    readonly input: TInputSchema;
-  };
+type EventFunctionDefinitionInput<
+  TInputSchema extends AnyStandardSchema,
+  TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+> = Omit<FunctionDefinitionInputBase, "routes"> & {
+  readonly events: readonly EventSourceDefinition[];
+  readonly handler: EventFunctionHandler<
+    StandardSchemaOutput<TInputSchema>,
+    TVariables
+  >;
+  readonly input: TInputSchema;
+  readonly variables?: TVariables;
+};
 
 type SqsQueueInput =
   | string
@@ -614,17 +674,20 @@ type SqsQueueListInput = SqsQueueInput | readonly SqsQueueInput[];
 export interface SqsFunctionDefinitionInput<
   TMessageSchema extends AnyStandardSchema,
   TInvalidMessageBody extends SqsInvalidMessageBodyMode = "fail",
+  TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
 >
   extends Omit<FunctionDefinitionInputBase, "routes">, SqsEventSourceOptions {
   readonly handler: EventFunctionHandler<
     StandardSchemaOutput<
       SqsMessageBatchSchema<TMessageSchema, TInvalidMessageBody>
-    >
+    >,
+    TVariables
   >;
   readonly invalidMessageBody?: TInvalidMessageBody;
   readonly message: TMessageSchema;
   readonly queue?: string;
   readonly queues?: SqsQueueListInput;
+  readonly variables?: TVariables;
 }
 
 export type FunctionRegistryInput = Record<string, AnyFunctionDefinition>;
@@ -635,34 +698,98 @@ type FunctionDefinitionWithKey<
 > = TDefinition extends {
   readonly kind: "authorizer";
 }
-  ? RequestAuthorizerFunctionDefinition<TKey>
+  ? TDefinition extends {
+      readonly context?: infer TContext;
+      readonly variables?: infer TVariables;
+    }
+    ? TContext extends StandardSchemaV1<unknown, infer TContextOutput>
+      ? TContextOutput extends Record<string, unknown>
+        ? TVariables extends RuntimeVariableCatalog
+          ? RequestAuthorizerFunctionDefinition<
+              TKey,
+              TContextOutput,
+              TVariables
+            >
+          : RequestAuthorizerFunctionDefinition<
+              TKey,
+              TContextOutput,
+              Record<never, never>
+            >
+        : never
+      : TVariables extends RuntimeVariableCatalog
+        ? RequestAuthorizerFunctionDefinition<
+            TKey,
+            Record<string, unknown>,
+            TVariables
+          >
+        : RequestAuthorizerFunctionDefinition<
+            TKey,
+            Record<string, unknown>,
+            Record<never, never>
+          >
+    : RequestAuthorizerFunctionDefinition<TKey>
   : TDefinition extends {
         readonly events: readonly EventSourceDefinition[];
         readonly input: infer TInputSchema;
         readonly kind: "event";
+        readonly variables?: infer TVariables;
       }
     ? TInputSchema extends AnyStandardSchema
-      ? EventFunctionDefinition<TKey, TInputSchema>
+      ? TVariables extends RuntimeVariableCatalog
+        ? EventFunctionDefinition<TKey, TInputSchema, TVariables>
+        : EventFunctionDefinition<TKey, TInputSchema, Record<never, never>>
       : never
     : TDefinition extends {
           readonly input: infer TInputSchema;
           readonly kind: "invokable";
           readonly output: infer TOutputSchema;
+          readonly variables?: infer TVariables;
         }
       ? TInputSchema extends AnyStandardSchema
         ? TOutputSchema extends AnyStandardSchema
-          ? InvokableFunctionDefinition<TKey, TInputSchema, TOutputSchema>
+          ? TVariables extends RuntimeVariableCatalog
+            ? InvokableFunctionDefinition<
+                TKey,
+                TInputSchema,
+                TOutputSchema,
+                TVariables
+              >
+            : InvokableFunctionDefinition<
+                TKey,
+                TInputSchema,
+                TOutputSchema,
+                Record<never, never>
+              >
           : never
         : never
       : TDefinition extends {
             readonly kind: "invokable";
             readonly output: infer TOutputSchema;
+            readonly variables?: infer TVariables;
           }
         ? TOutputSchema extends AnyStandardSchema
-          ? InvokableFunctionDefinition<TKey, undefined, TOutputSchema>
+          ? TVariables extends RuntimeVariableCatalog
+            ? InvokableFunctionDefinition<
+                TKey,
+                undefined,
+                TOutputSchema,
+                TVariables
+              >
+            : InvokableFunctionDefinition<
+                TKey,
+                undefined,
+                TOutputSchema,
+                Record<never, never>
+              >
           : never
-        : TDefinition extends RouteFunctionDefinition<string, infer TRoutes>
-          ? RouteFunctionDefinition<TKey, TRoutes>
+        : TDefinition extends RouteFunctionDefinition<
+              string,
+              infer TRoutes,
+              infer TVariables
+            >
+          ? TVariables extends RuntimeVariableCatalog
+            ? RouteFunctionDefinition<TKey, TRoutes, TVariables>
+            : RouteFunctionDefinition<TKey, TRoutes, Record<never, never>>
           : never;
 
 export type FunctionRegistry<
@@ -836,27 +963,70 @@ export interface FunctionRegistryInvoke<TRegistry> {
 }
 
 const traceStack: InvokeTrace[] = [];
-const activatedFunctionRegistries = new WeakMap<object, string>();
+interface FunctionRegistryActivation {
+  activationKey: string;
+  variableCache: RuntimeVariableCache;
+  variableOverrides?: RuntimeVariableOverrides;
+  variableProviders: readonly RuntimeVariableProvider[];
+}
+
+const activatedFunctionRegistries = new WeakMap<
+  object,
+  FunctionRegistryActivation
+>();
+const activatedFunctionDefinitions = new WeakMap<
+  BaseFunctionDefinition,
+  FunctionRegistryActivation
+>();
 const reservedFunctionRegistryKeys = new Set(["invoke", "route", "sendEvent"]);
 
 const currentTrace = (): InvokeTrace => traceStack.at(-1) ?? {};
 
 export const activateFunctionRegistry = (
   registry: object,
-  activationKey: string
+  activationKey: string,
+  options: {
+    variableOverrides?: RuntimeVariableOverrides;
+    variableProviders?: readonly RuntimeVariableProvider[];
+  } = {}
 ): void => {
-  const previousActivationKey = activatedFunctionRegistries.get(registry);
+  const previousActivation = activatedFunctionRegistries.get(registry);
 
   if (
-    previousActivationKey !== undefined &&
-    previousActivationKey !== activationKey
+    previousActivation !== undefined &&
+    previousActivation.activationKey !== activationKey
   ) {
     throw new VokeConfigError(
       "Function Registry is already activated with a different Gateway context"
     );
   }
 
-  activatedFunctionRegistries.set(registry, activationKey);
+  const activation = {
+    activationKey,
+    variableCache:
+      previousActivation?.variableCache ?? createRuntimeVariableCache(),
+    variableOverrides: options.variableOverrides,
+    variableProviders: [
+      createAwsRuntimeVariableProvider(),
+      ...(options.variableProviders ?? []),
+    ],
+  };
+
+  activatedFunctionRegistries.set(registry, activation);
+
+  for (const value of Object.values(registry)) {
+    if (
+      typeof value === "object" &&
+      value !== null &&
+      "kind" in value &&
+      "key" in value
+    ) {
+      activatedFunctionDefinitions.set(
+        value as BaseFunctionDefinition,
+        activation
+      );
+    }
+  }
 };
 
 const resolveTrace = (options: InvokeOptions): InvokeTrace => ({
@@ -874,6 +1044,26 @@ const resolveRuntime = (options: InvokeOptions): InvokeRuntime => {
 
 const deployedName = (definition: BaseFunctionDefinition): string =>
   definition.name ?? definition.key;
+
+const createInvokeContext = <TVariables extends RuntimeVariableCatalog>(
+  definition: BaseFunctionDefinition<string, FunctionKind, TVariables>,
+  options: InvokeOptions
+): InvokeContext<TVariables> => {
+  const functionName = deployedName(definition);
+  const activation = activatedFunctionDefinitions.get(definition);
+
+  return {
+    functionName,
+    trace: resolveTrace(options),
+    variables: createRuntimeVariables({
+      cache: activation?.variableCache,
+      functionKey: definition.key,
+      overrides: activation?.variableOverrides,
+      providers: activation?.variableProviders ?? [],
+      variables: definition.variables ?? ({} as TVariables),
+    }),
+  };
+};
 
 const formatIssue = (issue: StandardSchemaIssue): string => {
   if (issue.path === undefined || issue.path.length === 0) {
@@ -1285,11 +1475,34 @@ const parseRouteOutput = async (
 
 const runRoute = async (
   route: AnyRouteDefinition,
-  input: RouteInvocationInput<AnyRouteDefinition>
+  input: RouteInvocationInput<AnyRouteDefinition>,
+  definition?: AnyFunctionDefinition
 ): Promise<unknown> => {
   const request = await createRouteRequest(route, input);
-  const result = await route.handler(
-    request as RouteRequest<never, never, never, never>
+  const context =
+    definition === undefined
+      ? {
+          functionName: `${route.method} ${route.path}`,
+          trace: currentTrace(),
+          variables: createRuntimeVariables({
+            functionKey: `${route.method} ${route.path}`,
+            providers: [],
+            variables: {},
+          }),
+        }
+      : createInvokeContext(definition, {});
+  await loadRuntimeVariablesBeforeHandler(context.variables);
+  const handler = route.handler as RouteHandler<
+    never,
+    never,
+    never,
+    never,
+    unknown,
+    RuntimeVariableCatalog
+  >;
+  const result = await handler(
+    request as RouteRequest<never, never, never, never>,
+    context
   );
 
   return await parseRouteOutput(route, result);
@@ -1297,9 +1510,10 @@ const runRoute = async (
 
 const routeResponse = async (
   route: AnyRouteDefinition,
-  input: RouteInvocationInput<AnyRouteDefinition>
+  input: RouteInvocationInput<AnyRouteDefinition>,
+  definition?: AnyFunctionDefinition
 ): Promise<Response> => {
-  const result = await runRoute(route, input);
+  const result = await runRoute(route, input, definition);
 
   if (result instanceof Response) {
     return result;
@@ -1383,11 +1597,19 @@ const evaluateLocalAuthorizer = async (
 
   try {
     const handler = target.handler as RequestAuthorizerHandler;
-    const result = await handler({
-      headers,
-      raw: request,
-      request,
-    });
+    const runtimeContext = createInvokeContext(
+      target as AnyFunctionDefinition,
+      {}
+    );
+    await loadRuntimeVariablesBeforeHandler(runtimeContext.variables);
+    const result = await handler(
+      {
+        headers,
+        raw: request,
+        request,
+      },
+      runtimeContext
+    );
 
     if (typeof result.authorized !== "boolean") {
       return jsonError("Invalid authorizer result", {
@@ -1449,13 +1671,17 @@ const mountRoute = (
       return auth;
     }
 
-    return await routeResponse(route, {
-      auth,
-      headers: contextHeaders(context),
-      params: context.req.param(),
-      query: searchParamsFromUrl(context.req.url),
-      request: context.req.raw,
-    });
+    return await routeResponse(
+      route,
+      {
+        auth,
+        headers: contextHeaders(context),
+        params: context.req.param(),
+        query: searchParamsFromUrl(context.req.url),
+        request: context.req.raw,
+      },
+      definition
+    );
   });
 };
 
@@ -1537,11 +1763,10 @@ const runLocalFunction = async <
 ): Promise<StandardSchemaOutput<TOutputSchema>> => {
   const functionName = deployedName(definition);
   const parsedPayload = await parsePayload(definition, payload);
+  const context = createInvokeContext(definition, options);
+  await loadRuntimeVariablesBeforeHandler(context.variables);
   const result = await withTimeout(
-    definition.handler(parsedPayload, {
-      functionName,
-      trace: resolveTrace(options),
-    }),
+    definition.handler(parsedPayload, context),
     options.timeoutMs,
     `invoke("${functionName}") timed out after ${options.timeoutMs}ms`,
     functionName
@@ -1752,10 +1977,10 @@ const sendEventToFunction = async (
       })
   );
 
-  return await definition.handler(parsedEvent, {
-    functionName,
-    trace: resolveTrace(options),
-  });
+  const context = createInvokeContext(definition, options);
+  await loadRuntimeVariablesBeforeHandler(context.variables);
+
+  return await definition.handler(parsedEvent, context);
 };
 
 export const createSqsEventHandler =
@@ -1771,28 +1996,40 @@ export const createSqsEventHandler =
 export function defineFunction<
   const TInputSchema extends AnyStandardSchema,
   const TOutputSchema extends AnyStandardSchema,
+  const TVariables extends RuntimeVariableCatalog = Record<never, never>,
 >(
   definition: InvokableFunctionWithInputDefinitionInput<
     TInputSchema,
-    TOutputSchema
+    TOutputSchema,
+    TVariables
   >
-): InvokableFunctionDefinition<string, TInputSchema, TOutputSchema>;
-export function defineFunction<const TOutputSchema extends AnyStandardSchema>(
-  definition: InvokableZeroInputFunctionDefinitionInput<TOutputSchema>
-): InvokableFunctionDefinition<string, undefined, TOutputSchema>;
+): InvokableFunctionDefinition<string, TInputSchema, TOutputSchema, TVariables>;
+export function defineFunction<
+  const TOutputSchema extends AnyStandardSchema,
+  const TVariables extends RuntimeVariableCatalog = Record<never, never>,
+>(
+  definition: InvokableZeroInputFunctionDefinitionInput<
+    TOutputSchema,
+    TVariables
+  >
+): InvokableFunctionDefinition<string, undefined, TOutputSchema, TVariables>;
 export function defineFunction<
   const TInputSchema extends SqsMessageBatchSchema<
     AnyStandardSchema,
     SqsInvalidMessageBodyMode
   >,
+  const TVariables extends RuntimeVariableCatalog = Record<never, never>,
 >(
-  definition: EventFunctionDefinitionInput<TInputSchema>
-): EventFunctionDefinition<string, TInputSchema>;
+  definition: EventFunctionDefinitionInput<TInputSchema, TVariables>
+): EventFunctionDefinition<string, TInputSchema, TVariables>;
 export function defineFunction<
   const TRoutes extends readonly AnyRouteDefinition[],
+  const TVariables extends RuntimeVariableCatalog = Record<never, never>,
 >(
-  definition: RouteFunctionDefinitionInput<TRoutes>
-): RouteFunctionDefinition<string, TRoutes>;
+  definition: RouteFunctionDefinitionInput<TRoutes> & {
+    readonly variables?: TVariables;
+  }
+): RouteFunctionDefinition<string, TRoutes, TVariables>;
 export function defineFunction(
   definition:
     | InvokableFunctionWithInputDefinitionInput<
@@ -1854,12 +2091,17 @@ export const fn = defineFunction;
 
 export const http = <
   const TRoutes extends AnyRouteDefinition | readonly AnyRouteDefinition[],
+  const TVariables extends RuntimeVariableCatalog = Record<never, never>,
 >(
-  definition: HttpFunctionDefinitionInput<TRoutes>
-): RouteFunctionDefinition<string, RouteInputList<TRoutes>> => {
-  const routes = (Array.isArray(definition.routes)
-    ? definition.routes
-    : [definition.routes]) as unknown as RouteInputList<TRoutes>;
+  definition: HttpFunctionDefinitionInput<TRoutes, TVariables>
+): RouteFunctionDefinition<string, RouteInputList<TRoutes>, TVariables> => {
+  const routeInput =
+    typeof definition.routes === "function"
+      ? definition.routes(new Voke<TVariables>())
+      : definition.routes;
+  const routes = (Array.isArray(routeInput)
+    ? routeInput
+    : [routeInput]) as unknown as RouteInputList<TRoutes>;
 
   return Object.freeze({
     authorizer: definition.authorizer,
@@ -1869,6 +2111,7 @@ export const http = <
     name: definition.name,
     routes: Object.freeze([...routes]) as unknown as RouteInputList<TRoutes>,
     synthesis: definition.synthesis,
+    variables: definition.variables,
   });
 };
 
@@ -1894,11 +2137,17 @@ const eventSourceFromQueueInput = (
 export const sqs = <
   const TMessageSchema extends AnyStandardSchema,
   const TInvalidMessageBody extends SqsInvalidMessageBodyMode = "fail",
+  const TVariables extends RuntimeVariableCatalog = Record<never, never>,
 >(
-  definition: SqsFunctionDefinitionInput<TMessageSchema, TInvalidMessageBody>
+  definition: SqsFunctionDefinitionInput<
+    TMessageSchema,
+    TInvalidMessageBody,
+    TVariables
+  >
 ): EventFunctionDefinition<
   string,
-  SqsMessageBatchSchema<TMessageSchema, TInvalidMessageBody>
+  SqsMessageBatchSchema<TMessageSchema, TInvalidMessageBody>,
+  TVariables
 > => {
   if (definition.queue !== undefined && definition.queues !== undefined) {
     throw new VokeConfigError("Pass either queue or queues to sqs(), not both");
@@ -1932,6 +2181,7 @@ export const sqs = <
     name: definition.name,
     routes: [],
     synthesis: definition.synthesis,
+    variables: definition.variables,
   });
 };
 
@@ -2240,6 +2490,9 @@ export const defineFunctions = <const TRegistry extends FunctionRegistryInput>(
     enumerable: false,
     value: ((method: RouteMethod, path: string, request: unknown) => {
       const route = findRoute(functions, method, path);
+      const definition = Object.values(functions).find((candidate) =>
+        candidate.routes?.includes(route as AnyRouteDefinition)
+      );
 
       if (route === undefined) {
         throw new InvokeError(`Route not found: ${method} ${path}`, {
@@ -2250,7 +2503,8 @@ export const defineFunctions = <const TRegistry extends FunctionRegistryInput>(
 
       return runRoute(
         route,
-        (request ?? {}) as RouteInvocationInput<AnyRouteDefinition>
+        (request ?? {}) as RouteInvocationInput<AnyRouteDefinition>,
+        definition
       );
     }) as FunctionRegistryRoute<FunctionRegistry<TRegistry>>,
   });

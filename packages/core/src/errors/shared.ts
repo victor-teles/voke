@@ -2,7 +2,8 @@ export type VokeErrorCode =
   | "CLI_USAGE_ERROR"
   | "CONFIG_ERROR"
   | "MODEL_ERROR"
-  | "RESOURCE_BINDING_ERROR";
+  | "RESOURCE_BINDING_ERROR"
+  | "RUNTIME_VARIABLE_ERROR";
 
 export interface VokeIssue {
   path: string;

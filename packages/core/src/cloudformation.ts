@@ -291,6 +291,26 @@ const toResourcePolicyStatements = (
   return statements;
 };
 
+const secretArn = (secretId: string): CloudFormationValue => {
+  if (secretId.startsWith("arn:")) {
+    return secretId;
+  }
+
+  return {
+    "Fn::Sub": [
+      `arn:aws:secretsmanager:\${AWS::Region}:\${AWS::AccountId}:secret:${secretId}-*`,
+      {},
+    ],
+  };
+};
+
+const parameterArn = (name: string): CloudFormationValue => ({
+  "Fn::Sub": [
+    `arn:aws:ssm:\${AWS::Region}:\${AWS::AccountId}:parameter/${name.replace(/^\/+/u, "")}`,
+    {},
+  ],
+});
+
 const resourceProvider = (
   resource: VokeModelResource
 ): AwsCloudFormationResourceProvider => {
@@ -305,6 +325,110 @@ const resourceProvider = (
   }
 
   throw new Error("AWS resource provider metadata is required");
+};
+
+const toRuntimeVariablePolicyStatements = (
+  variables: VokeModel["functions"][string]["variables"],
+  resources: VokeModel["resources"]
+): CloudFormationValue[] => {
+  const statements: CloudFormationValue[] = [];
+
+  for (const variable of Object.values(variables)) {
+    if (variable.provider !== "aws") {
+      continue;
+    }
+
+    const { source } = variable;
+
+    if (source.kind === "secretsManagerSecret") {
+      statements.push({
+        Action: ["secretsmanager:GetSecretValue"],
+        Effect: "Allow",
+        Resource: secretArn(String(source.secretId)),
+      });
+      continue;
+    }
+
+    if (source.kind === "ssmParameter") {
+      statements.push({
+        Action: ["ssm:GetParameter", "ssm:GetParameters"],
+        Effect: "Allow",
+        Resource: parameterArn(String(source.name)),
+      });
+      continue;
+    }
+
+    if (
+      source.kind !== "secretsManagerSecretResource" &&
+      source.kind !== "ssmParameterResource"
+    ) {
+      continue;
+    }
+
+    const resourceKey = String(source.resource);
+    const resource = resources[resourceKey];
+
+    if (resource === undefined) {
+      throw new Error(
+        `Missing resource model for Runtime Variable: ${resourceKey}`
+      );
+    }
+
+    statements.push(
+      ...toResourcePolicyStatements(
+        toLogicalId(resourceKey),
+        resource,
+        resourceProvider(resource)
+      )
+    );
+  }
+
+  return statements;
+};
+
+const functionRoleLogicalId = (
+  functionName: string,
+  apiFunctionName: string
+): string =>
+  functionName === apiFunctionName
+    ? "FunctionRole"
+    : `${toLogicalId(functionName)}FunctionRole`;
+
+const functionRoleResource = (
+  statements: CloudFormationValue[]
+): CloudFormationResource => {
+  const properties: Record<string, CloudFormationValue> = {
+    AssumeRolePolicyDocument: {
+      Statement: [
+        {
+          Action: "sts:AssumeRole",
+          Effect: "Allow",
+          Principal: { Service: "lambda.amazonaws.com" },
+        },
+      ],
+      Version: "2012-10-17",
+    },
+    ManagedPolicyArns: [
+      "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+    ],
+  };
+
+  if (statements.length > 0) {
+    properties.Policies = [
+      {
+        PolicyDocument: {
+          Statement: statements,
+          Version: "2012-10-17",
+        },
+        PolicyName: "VokeResourceAccess",
+      },
+    ];
+  }
+
+  return {
+    Properties: properties,
+    Type: "AWS::IAM::Role",
+  };
 };
 
 const functionLogicalId = (name: string, apiFunctionName: string): string =>
@@ -646,38 +770,6 @@ export const synthesizeCloudFormationFromModel = (
     );
   }
 
-  const functionRoleProperties: Record<string, CloudFormationValue> = {
-    AssumeRolePolicyDocument: {
-      Statement: [
-        {
-          Action: "sts:AssumeRole",
-          Effect: "Allow",
-          Principal: { Service: "lambda.amazonaws.com" },
-        },
-      ],
-      Version: "2012-10-17",
-    },
-    ManagedPolicyArns: [
-      "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
-    ],
-  };
-
-  if (policyStatements.length > 0) {
-    functionRoleProperties.Policies = [
-      {
-        PolicyDocument: {
-          Statement: policyStatements,
-          Version: "2012-10-17",
-        },
-        PolicyName: "VokeResourceAccess",
-      },
-    ];
-  }
-
-  templateResources.FunctionRole = {
-    Properties: functionRoleProperties,
-    Type: "AWS::IAM::Role",
-  };
   for (const [name, definition] of Object.entries(model.functions).toSorted(
     ([leftName], [rightName]) => {
       if (leftName === apiFunctionName) {
@@ -692,6 +784,14 @@ export const synthesizeCloudFormationFromModel = (
     }
   )) {
     const logicalId = functionLogicalId(name, apiFunctionName);
+    const roleLogicalId = functionRoleLogicalId(name, apiFunctionName);
+    templateResources[roleLogicalId] = functionRoleResource([
+      ...policyStatements,
+      ...toRuntimeVariablePolicyStatements(
+        definition.variables,
+        model.resources
+      ),
+    ]);
     const environmentVariables: Record<string, CloudFormationValue> = {
       ...definition.environment,
     };
@@ -729,7 +829,7 @@ export const synthesizeCloudFormationFromModel = (
         },
         FunctionName: definition.deployedName,
         Handler: definition.handler,
-        Role: { "Fn::GetAtt": ["FunctionRole", "Arn"] },
+        Role: { "Fn::GetAtt": [roleLogicalId, "Arn"] },
         Runtime: definition.runtime,
       },
       Type: "AWS::Lambda::Function",

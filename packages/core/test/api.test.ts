@@ -5,19 +5,18 @@ import type { LambdaContext, LambdaEvent } from "hono/aws-lambda";
 
 import { api } from "../src/api";
 import { createApiApp, createGateway, routeModule } from "../src/app";
+import { bindResource, createAwsClientConfig } from "../src/aws";
+import { handleAwsLambdaRequest } from "../src/aws-lambda";
+import { createApiProject, runCli } from "../src/cli";
 import {
-  bindResource,
-  createAwsClientConfig,
   dynamodbTable,
   s3Bucket,
   secret,
   snsTopic,
   sqsQueue,
+  synthesizeCloudFormation,
   ssmParameter,
-} from "../src/aws";
-import { handleAwsLambdaRequest } from "../src/aws-lambda";
-import { createApiProject, runCli } from "../src/cli";
-import { synthesizeCloudFormation } from "../src/cloudformation";
+} from "../src/cloudformation";
 import { defineConfig, getConfig, loadVokeConfig } from "../src/config";
 import { awsContext } from "../src/context";
 import type { VokeEnv } from "../src/context";
@@ -560,7 +559,7 @@ test("loads voke.config.ts default export", async () => {
   await Bun.write(
     configPath,
     `import { defineConfig } from "${import.meta.dir}/../src/index.ts";
-import { sqsQueue } from "${import.meta.dir}/../src/aws.ts";
+import { sqsQueue } from "${import.meta.dir}/../src/cloudformation.ts";
 
 export default defineConfig({
   name: "configured-api",
