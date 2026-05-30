@@ -19,15 +19,7 @@ export type VokeModelValue =
 
 export type VokeModelRecord = Record<string, VokeModelValue>;
 
-export type VokeResourceKind =
-  | "dynamodbTable"
-  | "eventBus"
-  | "s3Bucket"
-  | "secret"
-  | "snsTopic"
-  | "sqsQueue"
-  | "ssmParameter"
-  | "awsResource";
+export type VokeResourceKind = "resource";
 
 export interface VokeModel {
   schemaVersion: "1";
@@ -118,9 +110,7 @@ export interface VokeModelResource {
   properties: VokeModelRecord;
   binding: VokeModelResourceBinding;
   access: VokeModelResourceAccess;
-  provider?: {
-    aws: VokeModelAwsResourceProvider;
-  };
+  provider?: Record<string, VokeModelProviderExtensionRecord>;
 }
 
 export interface VokeModelResourceBinding {
@@ -133,16 +123,9 @@ export interface VokeModelResourceAccess {
   actions: string[];
 }
 
-export interface VokeModelAwsResourceProvider {
-  cloudFormationType: string;
-  bindingValue: "ref" | "getAttArn" | "getAttId";
-  policyResource:
-    | "ref"
-    | "getAttArn"
-    | "getAttId"
-    | "parameterArn"
-    | "s3ArnWithObjects";
-  outputName: string;
+export interface VokeModelProviderExtensionRecord {
+  type: string;
+  properties: VokeModelRecord;
 }
 
 export interface VokeModelOutput {
@@ -163,27 +146,13 @@ export interface VokeModelOutput {
 }
 
 export interface VokeModelLocal {
-  providers: Record<string, VokeModelLocalProvider>;
+  provider: VokeModelLocalProvider;
 }
 
 export interface VokeModelLocalProvider {
   adapter: string;
   optional: boolean;
 }
-
-const resourceKinds: Record<string, VokeResourceKind> = {
-  "AWS::DynamoDB::Table": "dynamodbTable",
-  "AWS::Events::EventBus": "eventBus",
-  "AWS::S3::Bucket": "s3Bucket",
-  "AWS::SNS::Topic": "snsTopic",
-  "AWS::SQS::Queue": "sqsQueue",
-  "AWS::SSM::Parameter": "ssmParameter",
-  "AWS::SecretsManager::Secret": "secret",
-};
-
-const nativeResourceKinds = new Set<VokeResourceKind>(
-  Object.values(resourceKinds)
-);
 
 const toOutputKey = (name: string, attribute: string): string =>
   `${name}${attribute[0]?.toUpperCase() ?? ""}${attribute.slice(1)}`;
@@ -221,13 +190,13 @@ const toRouteAuthorizer = (
 
 const runtimeVariableResourceKind = (
   source: Record<string, unknown>
-): VokeResourceKind | undefined => {
+): string | undefined => {
   if (source.kind === "secretsManagerSecretResource") {
-    return "secret";
+    return "AWS::SecretsManager::Secret";
   }
 
   if (source.kind === "ssmParameterResource") {
-    return "ssmParameter";
+    return "AWS::SSM::Parameter";
   }
 
   return undefined;
@@ -317,7 +286,6 @@ const toModelResource = (
   name: string,
   resource: VokeConfig["cloudFormation"]["resources"][string]
 ): VokeModelResource => {
-  const kind = resourceKinds[resource.cloudFormationType] ?? "awsResource";
   const binding = createResourceBindingDefinition({
     attribute: resource.bindingAttribute,
     resource: name,
@@ -331,20 +299,20 @@ const toModelResource = (
       attribute: binding.attribute,
       env: binding.env,
     },
-    kind,
+    kind: "resource",
     properties: resource.properties,
-  };
-
-  if (kind === "awsResource" || !nativeResourceKinds.has(kind)) {
-    modelResource.provider = {
+    provider: resource.provider ?? {
       aws: {
-        bindingValue: resource.bindingValue,
-        cloudFormationType: resource.cloudFormationType,
-        outputName: resource.outputName,
-        policyResource: resource.policyResource,
+        properties: {
+          bindingValue: resource.bindingValue,
+          cloudFormationType: resource.cloudFormationType,
+          outputName: resource.outputName,
+          policyResource: resource.policyResource,
+        },
+        type: "cloudformation.resource",
       },
-    };
-  }
+    },
+  };
 
   return modelResource;
 };
@@ -402,13 +370,6 @@ const validateModel = (model: VokeModel): void => {
           path: `functions.${functionName}.eventSources.${eventSourceIndex}.queue`,
         });
         continue;
-      }
-
-      if (resource.kind !== "sqsQueue") {
-        issues.push({
-          message: `Function "${functionName}" SQS event source references resource "${eventSource.queue}", but it is a "${resource.kind}" resource instead of an "sqsQueue".`,
-          path: `functions.${functionName}.eventSources.${eventSourceIndex}.queue`,
-        });
       }
     }
   }
@@ -474,9 +435,12 @@ const validateRuntimeVariableResources = (
       continue;
     }
 
-    if (resource.kind !== expectedKind) {
+    const cloudFormationType =
+      resource.provider?.aws?.properties.cloudFormationType;
+
+    if (cloudFormationType !== expectedKind) {
       variableIssues.push({
-        message: `Runtime Variable "${variableKey}" references resource "${resourceKey}", but it is a "${resource.kind}" resource instead of a "${expectedKind}".`,
+        message: `Runtime Variable "${variableKey}" references resource "${resourceKey}", but it is a ${JSON.stringify(cloudFormationType)} resource instead of an "${expectedKind}".`,
         path: `functions.${functionName}.variables.${variableKey}`,
       });
     }
@@ -541,14 +505,6 @@ export const createInternalModel = (
       if (resource === undefined) {
         eventSourceIssues.push({
           message: `SQS event source references resource "${eventSource.queue}", but no matching resource is defined.`,
-          path: `functions.${name}.events.${eventSourceIndex}.queue`,
-        });
-        continue;
-      }
-
-      if (resource.kind !== "sqsQueue") {
-        eventSourceIssues.push({
-          message: `SQS event source references resource "${eventSource.queue}", but it is a "${resource.kind}" resource instead of an "sqsQueue".`,
           path: `functions.${name}.events.${eventSourceIndex}.queue`,
         });
         continue;
@@ -683,11 +639,9 @@ export const createInternalModel = (
     },
     functions: modelFunctions,
     local: {
-      providers: {
-        aws: {
-          adapter: config.local.provider.name,
-          optional: config.local.providerOptional,
-        },
+      provider: {
+        adapter: config.local.provider.name,
+        optional: config.local.providerOptional,
       },
     },
     outputs: {
@@ -705,6 +659,7 @@ export const createInternalModel = (
   };
 
   validateModel(model);
+  config.provider?.validate?.(model);
 
   return model;
 };

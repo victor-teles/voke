@@ -1,6 +1,7 @@
+import { aws } from "@voke/aws";
+import { created } from "@voke/http";
+import { schema } from "@voke/schema";
 import { createFunctions, http, route, voke } from "voke";
-import { created } from "voke/response";
-import { schema } from "voke/schema";
 
 import { sendWelcomeEmail } from "./functions";
 
@@ -56,6 +57,7 @@ functionRuntime.current = registry;
 
 const gateway = voke(registry, {
   config: { name: "e2e-api" },
+  provider: aws(),
 });
 
 export default gateway;

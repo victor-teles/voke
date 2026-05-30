@@ -10,6 +10,8 @@
     "clean": "rm -rf dist coverage"
   },
   "dependencies": {
+    "@voke/aws": "workspace:*",
+    "@voke/schema": "workspace:*",
     "hono": "^4.0.0",
     "voke": "workspace:*"
   },

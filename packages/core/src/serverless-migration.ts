@@ -1962,8 +1962,8 @@ const createSqsFunctionTemplate = (
     return sqsQueueExpression(event, queue);
   });
 
-  return `import { sqs } from "voke";
-import type { StandardSchemaV1 } from "voke/schema";
+  return `import { sqs } from "@voke/aws";
+import type { StandardSchemaV1 } from "voke";
 
 const messageSchema: StandardSchemaV1<unknown, unknown> = {
   "~standard": {
@@ -2012,7 +2012,7 @@ const createFunctionTemplate = (
     .map((event) => event.type);
 
   return `import { fn } from "voke";
-import type { StandardSchemaV1 } from "voke/schema";
+import type { StandardSchemaV1 } from "voke";
 
 const outputSchema: StandardSchemaV1<unknown, unknown> = {
   "~standard": {
@@ -2119,7 +2119,7 @@ const createConfigTemplate = (service: ServerlessService): string => {
       ? ""
       : `\nimport { ${[...new Set(resources.map((resource) => resource.helper))]
           .toSorted()
-          .join(", ")} } from "voke/cloudformation";`;
+          .join(", ")} } from "@voke/aws";`;
   const resourceEntries = resources.map(
     (resource) => `      ${tsString(resource.name)}: ${resource.expression},`
   );

@@ -1,11 +1,7 @@
-import { synthesizeCloudFormation } from "./cloudformation";
 import { defineConfig } from "./config";
 import type { VokeConfig, VokeConfigInput } from "./config";
 import { VokeConfigError } from "./errors";
-import {
-  createLocalAwsEnvironment,
-  createLocalResourceBindings,
-} from "./local";
+import { createInternalModel } from "./model";
 import { remoteEnvironment } from "./remote";
 
 export interface DevPlan {
@@ -22,6 +18,47 @@ export interface DevPlanOverrides {
   region?: string;
   stage?: string;
 }
+
+const createProviderLocalEnvironment = (
+  config: VokeConfig,
+  overrides: {
+    endpoint?: string;
+    entrypoint: string;
+    hasResources: boolean;
+    region: string;
+    stage: string;
+  }
+): Record<string, string> => {
+  const { provider } = config;
+  const devEnvironment = provider?.local?.devEnvironment;
+
+  if (devEnvironment === undefined) {
+    if (!overrides.hasResources) {
+      return {};
+    }
+
+    throw new VokeConfigError(
+      provider === undefined
+        ? "No provider configured for dev local environment."
+        : `Provider "${provider.name}" does not support dev local environment.`
+    );
+  }
+
+  const devConfig = defineConfig({
+    ...config,
+    entrypoint: overrides.entrypoint,
+    region: overrides.region,
+    stage: overrides.stage,
+  });
+
+  return devEnvironment({
+    config: devConfig,
+    endpoint: overrides.endpoint,
+    model: createInternalModel(devConfig),
+    region: overrides.region,
+    stage: overrides.stage,
+  });
+};
 
 const createDevOrigin = (
   config: VokeConfig,
@@ -69,31 +106,23 @@ export const createDevPlan = async (
   const region = overrides.region ?? config.region;
   const stage = overrides.stage ?? config.stage;
   const origin = createDevOrigin(config, overrides);
-  const template = synthesizeCloudFormation({
-    ...config,
+  const hasResources = Object.keys(config.cloudFormation.resources).length > 0;
+  const providerEnvironment = createProviderLocalEnvironment(config, {
+    endpoint: overrides.endpoint,
     entrypoint,
+    hasResources,
     region,
     stage,
-  });
-  const localEnvironment = createLocalAwsEnvironment({
-    endpoint: overrides.endpoint,
-    provider: config.local.provider,
-    region,
   });
 
   return {
     command: ["bun", "--hot", entrypoint],
     entrypoint,
     environment: {
-      ...localEnvironment,
+      ...providerEnvironment,
       ...config.cloudFormation.environment,
       ...config.dev.environment,
       ...remoteEnvironment(config.remotes ?? {}),
-      ...createLocalResourceBindings(template, {
-        accountId: config.local.provider.defaults.accountId,
-        endpoint: localEnvironment.AWS_ENDPOINT_URL,
-        region,
-      }),
       VOKE_DEV_ORIGIN: origin,
       VOKE_DEV_STARTED_AT: String(Date.now()),
       VOKE_DEV_SUMMARY: "1",

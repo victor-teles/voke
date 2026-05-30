@@ -13,10 +13,9 @@ The stable root package is intentionally limited to the common authoring path:
 - `fn`
 - `http`
 - `route`
-- `sqs`
 - `voke`
 
-Specialized helpers stay on subpaths: `voke/aws`, `voke/build`, `voke/cloudformation`, `voke/config`, `voke/context`, `voke/dev`, `voke/invoke`, `voke/local`, `voke/model`, `voke/remote`, `voke/response`, `voke/schema`, `voke/serverless-migration`, and `voke/testing`.
+Specialized helpers stay in explicit packages: `@voke/aws`, `@voke/aws/cloudformation`, `@voke/aws/local`, `@voke/aws/testing`, `@voke/build`, `@voke/http`, `@voke/remote`, `@voke/schema`, and `@voke/testing`.
 
 ## Drift review
 

@@ -1,15 +1,7 @@
 import { expect, test } from "bun:test";
 
 import packageJson from "../package.json";
-import * as aws from "../src/aws";
-import * as cloudformation from "../src/cloudformation";
-import * as testing from "../src/e2e";
 import * as voke from "../src/index";
-import * as local from "../src/local";
-import * as remote from "../src/remote";
-import * as responseHelpers from "../src/response";
-import * as schemaHelpers from "../src/schema";
-import * as variables from "../src/variables";
 
 const documentationFiles = [
   "../../../README.md",
@@ -53,99 +45,110 @@ const firstPartyExampleFiles = [
 const readPackageFile = async (path: string): Promise<string> =>
   await Bun.file(new URL(path, import.meta.url)).text();
 
+const importPackage = async (
+  specifier: string
+): Promise<Record<string, unknown>> => {
+  if (specifier === "@voke/remote") {
+    return await import("../../remote/src/index.ts");
+  }
+
+  if (specifier === "@voke/testing") {
+    return await import("../../testing/src/index.ts");
+  }
+
+  return await import(specifier);
+};
+
 test("keeps the stable root runtime surface intentional", () => {
   expect(Object.keys(voke).toSorted()).toEqual([
-    "createAuthorizers",
+    "InvokeError",
+    "VokeConfigError",
+    "activateFunctionRegistry",
     "createFunctions",
+    "createHandlerNameFromEntrypoint",
+    "createVokeModel",
     "defineConfig",
     "fn",
     "http",
-    "jwtAuthorizer",
-    "lambdaAuthorizer",
-    "requestAuthorizer",
+    "invokeRegistryFunction",
+    "loadVokeConfig",
     "route",
-    "sqs",
+    "toEnvKey",
     "voke",
   ]);
 });
 
-test("keeps AWS runtime helpers on the voke/aws subpath", () => {
+test("keeps AWS authoring in @voke/aws", async () => {
+  const aws = await importPackage("@voke/aws");
+
   expect(Object.keys(aws).toSorted()).toEqual([
+    "aws",
     "bindResource",
+    "createAuthorizers",
     "createAwsClientConfig",
+    "createAwsLambdaHandler",
+    "createAwsLambdaInvokeTransport",
     "createResourceBindingName",
-    "parameter",
+    "createSqsEventHandler",
+    "dynamodbTable",
+    "eventBus",
+    "handleAwsLambdaRequest",
+    "jwtAuthorizer",
+    "lambdaAuthorizer",
+    "requestAuthorizer",
+    "s3Bucket",
     "secret",
+    "snsTopic",
+    "sqs",
+    "sqsEventSource",
+    "sqsMessageBatch",
+    "sqsQueue",
+    "ssmParameter",
     "toEnvKey",
   ]);
   expect("dynamodbTable" in voke).toBe(false);
   expect("sqsQueue" in voke).toBe(false);
 });
 
-test("keeps AWS resource authoring on the voke/cloudformation subpath", () => {
-  expect(Object.keys(cloudformation)).toContain("dynamodbTable");
-  expect(Object.keys(cloudformation)).toContain("eventBus");
-  expect(Object.keys(cloudformation)).toContain("s3Bucket");
-  expect(Object.keys(cloudformation)).toContain("secret");
-  expect(Object.keys(cloudformation)).toContain("snsTopic");
-  expect(Object.keys(cloudformation)).toContain("sqsQueue");
-  expect(Object.keys(cloudformation)).toContain("ssmParameter");
-  expect("dynamodbTable" in aws).toBe(false);
-  expect("ssmParameter" in aws).toBe(false);
-});
-
 test("publishes only stable package subpaths", () => {
-  expect(Object.keys(packageJson.exports).toSorted()).toEqual([
-    ".",
-    "./aws",
-    "./build",
-    "./cloudformation",
-    "./config",
-    "./context",
-    "./dev",
-    "./invoke",
-    "./local",
-    "./model",
-    "./remote",
-    "./response",
-    "./schema",
-    "./serverless-migration",
-    "./testing",
-    "./variables",
-  ]);
+  expect(Object.keys(packageJson.exports).toSorted()).toEqual(["."]);
 });
 
-test("publishes Runtime Variable extension helpers on voke/variables", () => {
-  expect(Object.keys(variables).toSorted()).toEqual([
-    "VokeRuntimeVariableError",
-    "createRuntimeVariableCache",
-    "createRuntimeVariables",
-    "createVariableProvider",
-    "createVariableSource",
-    "loadRuntimeVariablesBeforeHandler",
-  ]);
-});
+test("keeps provider-neutral testing helpers in @voke/testing", async () => {
+  const testing = await importPackage("@voke/testing");
 
-test("keeps testing helpers on the voke/testing subpath", () => {
   expect(Object.keys(testing).toSorted()).toEqual([
-    "createHttpApiEvent",
     "createInvokeTestClient",
-    "createStackTestContext",
     "createTestClient",
   ]);
   expect("createTestClient" in voke).toBe(false);
 });
 
-test("keeps Remote Function helpers on the voke/remote subpath", () => {
+test("keeps AWS testing helpers in @voke/aws/testing", async () => {
+  const awsTesting = await importPackage("@voke/aws/testing");
+
+  expect(Object.keys(awsTesting).toSorted()).toEqual([
+    "createStackTestContext",
+  ]);
+  expect("createStackTestContext" in voke).toBe(false);
+});
+
+test("keeps Remote Function helpers in @voke/remote", async () => {
+  const remote = await importPackage("@voke/remote");
+
   expect(Object.keys(remote).toSorted()).toContain("createRemoteFunctions");
   expect("createRemoteFunctions" in voke).toBe(false);
   expect("defineRemoteFunctions" in voke).toBe(false);
 });
 
-test("keeps response helpers on the voke/response subpath", () => {
-  expect(Object.keys(responseHelpers).toSorted()).toEqual([
+test("keeps HTTP helpers in @voke/http", async () => {
+  const httpHelpers = await importPackage("@voke/http");
+
+  expect(Object.keys(httpHelpers).toSorted()).toEqual([
     "created",
     "error",
+    "json",
+    "jsonError",
     "noContent",
     "ok",
     "response",
@@ -154,12 +157,16 @@ test("keeps response helpers on the voke/response subpath", () => {
   expect("response" in voke).toBe(false);
 });
 
-test("keeps schema helpers on the voke/schema subpath", () => {
+test("keeps schema helpers in @voke/schema", async () => {
+  const schemaHelpers = await importPackage("@voke/schema");
+
   expect(Object.keys(schemaHelpers).toSorted()).toEqual(["schema"]);
   expect("schema" in voke).toBe(false);
 });
 
-test("keeps local provider helpers on the voke/local subpath", () => {
+test("keeps local AWS provider helpers in @voke/aws/local", async () => {
+  const local = await importPackage("@voke/aws/local");
+
   expect(Object.keys(local).toSorted()).toEqual([
     "LocalProviderError",
     "createFlociComposeConfig",

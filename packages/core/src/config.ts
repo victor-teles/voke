@@ -1,6 +1,5 @@
 import type { Context } from "hono";
 
-import type { StackResourceDefinition } from "./cloudformation";
 import type { VokeEnv } from "./context";
 import { VokeConfigError } from "./errors";
 import type {
@@ -10,6 +9,11 @@ import type {
 } from "./invoke";
 import { resolveLocalProvider } from "./local-provider";
 import type { LocalProvider, LocalProviderInput } from "./local-provider";
+import type {
+  VokeModelProviderExtensionRecord,
+  VokeModelRecord,
+} from "./model";
+import type { VokeProvider } from "./provider";
 import { defineRemoteConfig } from "./remote";
 import type { VokeRemoteConfig, VokeRemoteConfigInput } from "./remote";
 
@@ -24,6 +28,7 @@ export interface VokeConfig {
   dev: VokeDevConfig;
   functions: FunctionRegistry | FunctionRegistryInput;
   local: VokeLocalConfig;
+  provider?: VokeProvider;
   remotes?: Record<string, VokeRemoteConfig>;
   runtime: VokeRuntimeConfig;
 }
@@ -45,7 +50,23 @@ export interface VokeCloudFormationConfig {
   out: string;
   handler: string;
   environment: Record<string, string>;
-  resources: Record<string, StackResourceDefinition>;
+  resources: Record<string, VokeResourceInput>;
+}
+
+export interface VokeResourceInput {
+  actions: string[];
+  bindingAttribute: string;
+  bindingValue: "ref" | "getAttArn" | "getAttId";
+  cloudFormationType: string;
+  outputName: string;
+  policyResource:
+    | "ref"
+    | "getAttArn"
+    | "getAttId"
+    | "parameterArn"
+    | "s3ArnWithObjects";
+  provider?: Record<string, VokeModelProviderExtensionRecord>;
+  properties: VokeModelRecord;
 }
 
 export interface VokeDevConfig {
@@ -80,11 +101,12 @@ export interface VokeConfigInput {
   dev?: Partial<VokeDevConfig>;
   functions?: FunctionRegistry | FunctionRegistryInput;
   local?: Partial<VokeLocalConfigInput>;
+  provider?: VokeProvider;
   remotes?: Record<string, VokeRemoteConfig | VokeRemoteConfigInput>;
   runtime?: Partial<VokeRuntimeConfig>;
   handler?: string;
   environment?: Record<string, string>;
-  resources?: Record<string, StackResourceDefinition>;
+  resources?: Record<string, VokeResourceInput>;
 }
 
 const defineApiConfig = (input: VokeConfigInput): VokeApiConfig => ({
@@ -198,6 +220,7 @@ export const defineConfig = (input: VokeConfigInput): VokeConfig => {
     functions: input.functions ?? {},
     local: defineLocalConfig(input),
     name: input.name,
+    ...(input.provider === undefined ? {} : { provider: input.provider }),
     region: input.region ?? Bun.env.AWS_REGION ?? "us-east-1",
     ...(Object.keys(remotes).length > 0 ? { remotes } : {}),
     runtime: defineRuntimeConfig(input),

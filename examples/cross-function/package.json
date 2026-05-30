@@ -11,6 +11,8 @@
     "clean": "rm -rf dist coverage"
   },
   "dependencies": {
+    "@voke/schema": "workspace:*",
+    "@voke/testing": "workspace:*",
     "hono": "^4.0.0",
     "voke": "workspace:*"
   },

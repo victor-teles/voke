@@ -1,6 +1,7 @@
+import { aws } from "@voke/aws";
+import { created, error } from "@voke/http";
+import { schema } from "@voke/schema";
 import { createFunctions, http, route, voke } from "voke";
-import { created, error } from "voke/response";
-import { schema } from "voke/schema";
 
 import config from "../voke.config";
 import { requestInfo } from "./middleware/request-info";
@@ -85,6 +86,7 @@ const functions = createFunctions({
 const gateway = voke(functions, {
   config,
   middleware: [requestInfo],
+  provider: aws(),
 });
 
 export default gateway;

@@ -2,13 +2,13 @@
 
 import packageJson from "../package.json";
 import { createBuildPlan } from "./build";
-import { synthesizeCloudFormation } from "./cloudformation";
 import { defineConfig, loadVokeConfig } from "./config";
 import type { VokeConfig } from "./config";
 import { createDevPlan } from "./dev";
 import { VokeError } from "./errors";
 import { createLocalBootstrapPlan, LocalProviderError } from "./local";
 import type { LocalProvider } from "./local";
+import { createInternalModel } from "./model";
 import { generateRemoteModules } from "./remote";
 import { writeServerlessMigration } from "./serverless-migration";
 
@@ -305,7 +305,7 @@ const runLocalProviderCommand = async (options: {
 
 const createTestTemplate =
   (): string => `import { expect, test } from "bun:test";
-import { createTestClient } from "voke/testing";
+import { createTestClient } from "@voke/testing";
 
 import service from "../src/index";
 
@@ -327,7 +327,8 @@ export const healthRoute = route.get("/health", {
 
 const createVokeConfigTemplate = (
   name: string
-): string => `import { defineConfig } from "voke";
+): string => `import { aws } from "@voke/aws";
+import { defineConfig } from "voke";
 
 export default defineConfig({
   build: {
@@ -338,6 +339,7 @@ export default defineConfig({
   },
   entrypoint: "./src/index.ts",
   name: "${name}",
+  provider: aws(),
 });
 `;
 
@@ -374,6 +376,8 @@ const createTsconfig = (): Record<string, unknown> => ({
 
 const createPackageJson = (packageName: string): Record<string, unknown> => ({
   dependencies: {
+    "@voke/aws": `^${packageJson.version}`,
+    "@voke/testing": `^${packageJson.version}`,
     hono: "^4.0.0",
     voke: `^${packageJson.version}`,
   },
@@ -517,8 +521,19 @@ export const synth = async (options: {
     region: options.region ?? options.config?.region,
     stage: options.stage ?? options.config?.stage,
   });
-  const template = synthesizeCloudFormation({
-    ...config,
+  const synthesize = config.provider?.synthesis?.synthesize;
+
+  if (synthesize === undefined) {
+    throw new CliUsageError(
+      config.provider === undefined
+        ? "No provider configured for synthesis."
+        : `Provider "${config.provider.name}" does not support synthesis.`
+    );
+  }
+
+  const template = synthesize({
+    config,
+    model: createInternalModel(config),
   });
   const out = options.out ?? config.cloudFormation.out;
   const directory = out.split("/").slice(0, -1).join("/");

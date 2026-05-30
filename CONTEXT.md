@@ -28,6 +28,10 @@ _Avoid_: Function map, worker list
 The input and output schemas that define what a **Function** accepts and returns.
 _Avoid_: Validation callbacks, TypeScript-only shape
 
+**Voke Schema Helper**:
+An optional helper package for authoring Standard Schema-compatible **Function Contracts** with Voke metadata.
+_Avoid_: Validation package, only accepted schema format, model validation
+
 **Function Contract Artifact**:
 An implementation-free, JSON-schema-like metadata description of one or more **Function Contracts** that another **Voke Project** can consume even when the provider project's source code lives elsewhere.
 _Avoid_: Function implementation import, remote source import, TypeScript-only contract module
@@ -44,16 +48,44 @@ _Avoid_: Public function route, user-defined HTTP endpoint
 The explicit workflow where a consuming **Voke Project** fetches a provider's **Function Contract Artifact** and generates local typed remote-function code before runtime.
 _Avoid_: Runtime-only contract fetching, implicit boot-time type discovery
 
+**Remote Helper**:
+A specialized utility for generating, constructing, and invoking **Remote Function Registries** from **Function Contract Artifacts**.
+_Avoid_: Function Contract, provider package, root Function authoring
+
+**Build Helper**:
+A specialized utility for planning or running build workflows for a **Voke Project**.
+_Avoid_: Provider, Function authoring, deployment synthesis
+
 **Gateway**:
 The API Gateway-facing assembly that exposes HTTP-backed **Functions**.
 _Avoid_: API app, route module as primary API
+
+**Provider**:
+A platform adapter that gives a **Gateway** runtime, deployment, synthesis, and local workflow behavior while keeping **Function** authoring provider-neutral.
+_Avoid_: Local emulator only, config provider, deployment script
+
+**Provider Capability**:
+A focused part of a **Provider** contract, such as runtime, invocation, build, synthesis, or local workflow behavior.
+_Avoid_: Provider package, feature flag, config section
+
+**Provider Extension Record**:
+A provider-keyed model record that carries provider-specific data without making the root project model platform-specific.
+_Avoid_: Core resource kind, CloudFormation metadata, untyped plugin state
+
+**AWS Provider**:
+The **Provider** that adapts a **Gateway** to AWS runtime, deployment, synthesis, and local workflow behavior.
+_Avoid_: CloudFormation only, Lambda handler helper
+
+**Local AWS Provider**:
+A local development implementation that emulates AWS services for a **Voke Project**.
+_Avoid_: Provider, Gateway provider, local runtime
 
 **HTTP API**:
 The AWS API Gateway HTTP API v2 resource synthesized from route-backed **Functions** in a **Gateway**.
 _Avoid_: REST API, generic AWS gateway
 
 **HTTP Authorizer**:
-An authorization rule that an **HTTP API** applies before invoking a route-backed **Function**.
+An AWS authorization rule that an **HTTP API** applies before invoking a route-backed **Function**.
 _Avoid_: Middleware, handler guard, function contract
 
 **JWT Authorizer**:
@@ -69,7 +101,7 @@ The local, deployed, or remote Lambda-compatible function used by a **Lambda Req
 _Avoid_: Middleware callback, route handler reference
 
 **Request Authorizer Function**:
-A **Function** authored specifically to serve as a **Lambda Request Authorizer**.
+A **Function** authored through the **AWS Provider** package specifically to serve as a **Lambda Request Authorizer**.
 _Avoid_: Invokable function, route-backed function, middleware function
 
 **Authorizer Result**:
@@ -112,12 +144,16 @@ _Avoid_: Middleware skip, public flag
 The JavaScript-friendly builder used to define HTTP routes for a **Function**.
 _Avoid_: App, Hono app as primary API, route module as primary API
 
+**HTTP Helper**:
+A specialized utility for HTTP route implementation details that is not part of the core **Function** authoring model.
+_Avoid_: Route Builder, HTTP API, Function entrypoint
+
 **Event Source**:
 A trigger relationship where an external event provider invokes a **Function**.
 _Avoid_: Worker, background route, queue handler as a separate concept
 
 **SQS Event Source**:
-An **Event Source** where an SQS queue invokes a **Function** through a Lambda event source mapping.
+An AWS **Event Source** where an SQS queue invokes a **Function** through a Lambda event source mapping.
 _Avoid_: SQS route, SQS worker, queue resource
 
 **SQS Message Batch**:
@@ -152,15 +188,20 @@ _Avoid_: AWS secret name, parameter path, resource key
 
 - A **Voke Project** has exactly one `voke.config.ts` as its project source of truth.
 - A **Voke Project** keeps `voke.config.ts` explicit even when most project settings use defaults.
+- A **Voke Project** declares its durable **Provider** choice and provider workflow settings in `voke.config.ts`.
+- A **Voke Project** has at most one **Provider** in v1.
 - A **Voke Project** uses **Functions** as the primary authoring model for serverless work.
 - A **Voke Project** keeps **Function Registry** composition in runtime source code, not inside `voke.config.ts`.
 - A **Voke Project** can auto-load `voke.config.ts` when composing a **Gateway** from source code.
 - A **Project Starter** creates one **Voke Project**.
 - A **Voke Project** can define one or more **Functions**.
 - A **Voke Project** can have exactly one **Function Registry**.
+- A **Voke Project** has a provider-neutral project model that **Providers** adapt to platform-specific artifacts.
 - A **Function Registry** contains zero or more **Functions**.
 - A **Function** has a handler as its executable code.
 - A **Function** has a **Function Contract**.
+- A **Voke Schema Helper** can author a **Function Contract**, but Voke accepts any Standard Schema-compatible validator.
+- The **Voke Schema Helper** belongs to a specialized package rather than the root `voke` package.
 - A **Function Contract Artifact** can describe **Functions** without exposing or importing their handlers.
 - A **Voke Project** can consume a **Function Contract Artifact** from another **Voke Project** without sharing source repositories.
 - A **Function Contract Artifact** may be generated, fetched from provider metadata, or written manually.
@@ -172,8 +213,10 @@ _Avoid_: AWS secret name, parameter path, resource key
 - `voke remote generate <name>` runs **Remote Code Generation** for one configured remote.
 - A consuming **Voke Project** should be able to typecheck and run tests from generated remote-function code without the provider dev server running.
 - **Remote Code Generation** produces checked-in generated modules in the consuming **Voke Project**.
-- A generated remote module exports a ready-to-import **Remote Function Registry** created with `createRemoteFunctions`.
+- A generated remote module exports a ready-to-import **Remote Function Registry** created with a **Remote Helper**.
+- **Remote Helpers** belong to a specialized package rather than the root `voke` package.
 - The default generated remote module path is `src/voke/remotes/<remote>.ts`.
+- **Build Helpers** belong to a specialized package rather than the root `voke` package.
 - A configured remote can override its generated module path with `out`.
 - A generated remote module embeds the provider **Function Contract Artifact** fingerprint it was generated from.
 - A **Remote Function Registry** is created from a **Function Contract Artifact** plus a runtime target for the provider project.
@@ -192,10 +235,12 @@ _Avoid_: AWS secret name, parameter path, resource key
 - A **Function** can have an explicit deployed name used for its AWS Lambda deployment.
 - A **Function** can define one or more HTTP routes.
 - A **Function** can define HTTP routes through a **Route Builder**.
+- **HTTP Helpers** belong to a specialized package rather than the root `voke` package.
 - A **Function** can have HTTP route handlers, an invokable handler, or both.
 - A **Function** can have one or more **Event Sources**.
 - A Function with **Event Sources** does not mix HTTP routes or invokable handlers in v1.
 - An **SQS Event Source** is attached to a **Function**.
+- An **SQS Event Source** is authored through the **AWS Provider** package rather than the root `voke` package.
 - An **SQS Event Source** delivers an **SQS Message Batch** to its **Function**.
 - An **SQS Message Schema** describes one message body, while an **SQS Message Batch** is the handler input.
 - An **SQS Event Source** uses partial batch failure reporting by default.
@@ -206,6 +251,15 @@ _Avoid_: AWS secret name, parameter path, resource key
 - A **Gateway** treats config as project metadata around its **Function Registry**, not as the primary place where Functions are composed.
 - A **Gateway** is the default exportable runtime for a **Voke Project** API.
 - A **Gateway** exposes local HTTP testing and AWS Lambda handling for its **Function Registry**.
+- A **Gateway** can use a **Provider** to expose provider-specific runtime, deployment, synthesis, and local workflow behavior.
+- A **Provider** adapts a **Gateway** without changing the provider-neutral **Function Registry** authoring model.
+- A **Provider** is described through explicit **Provider Capabilities** rather than provider-specific branches in the root `voke` package.
+- A **Provider** owns its platform-specific model metadata instead of storing provider-specific resource details in the root project model.
+- **Provider Extension Records** are the canonical way for provider-specific entrypoints, resources, and workflow data to appear in the provider-neutral project model.
+- The root project model validates provider-neutral structure, while each **Provider** validates its own **Provider Extension Records**.
+- Runtime source code can pass a **Provider** to a **Gateway** when it needs provider behavior or an explicit override.
+- The **AWS Provider** supplies AWS-specific runtime, deployment, synthesis, and local workflow behavior for a **Gateway**.
+- A **Local AWS Provider** is distinct from a **Provider** because it emulates local AWS services rather than defining the Gateway's deployment target.
 - A **Gateway** is the runtime source of truth for dev-visible **Function** and **Event Source** details.
 - A **Gateway** can synthesize an **HTTP API** when it contains route-backed **Functions**.
 - A **Function** can load **Runtime Variables** without making those values part of its **Function Contract**.
@@ -244,6 +298,7 @@ _Avoid_: AWS secret name, parameter path, resource key
 - Advanced **Runtime Variable** loader overrides are configured at the runtime or test boundary, not on individual **Runtime Variable** declarations.
 - The **Dev Function Summary** does not list **Runtime Variables**.
 - An **HTTP API** can have an **Authorizer Registry**.
+- **HTTP Authorizer** authoring belongs to the **AWS Provider** package rather than the root `voke` package.
 - An **Authorizer Registry** contains zero or more named **HTTP Authorizers**.
 - **HTTP Authorizer** names are scoped to the **HTTP API**.
 - An **HTTP API** cannot contain two different **HTTP Authorizers** with the same name.
@@ -262,6 +317,7 @@ _Avoid_: AWS secret name, parameter path, resource key
 - A **Lambda Request Authorizer** can define a **Lambda Authorizer Cache TTL**.
 - The default **Lambda Authorizer Cache TTL** is zero.
 - A **Request Authorizer Function** is a distinct Function entrypoint kind.
+- A **Request Authorizer Function** is authored through the **AWS Provider** package rather than the root `voke` package.
 - A **Request Authorizer Function** can use resource bindings and synthesis configuration.
 - A **Request Authorizer Function** does not mix HTTP routes, Event Sources, or invokable handlers in v1.
 - A **Request Authorizer Function** returns an **Authorizer Result**.

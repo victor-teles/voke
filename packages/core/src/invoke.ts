@@ -6,7 +6,6 @@ import type {
   RequestAuthorizerFunctionDefinition,
   RequestAuthorizerHandler,
 } from "./authorizers";
-import { createAwsLambdaInvokeTransport } from "./aws-lambda-invoke-transport";
 import { createAwsRuntimeVariableProvider } from "./aws-runtime-variables";
 import type { VokeNodeRuntime } from "./config";
 import type { VokeEnv } from "./context";
@@ -559,10 +558,7 @@ export type RouteFunctionDefinition<
 
 export type EventFunctionDefinition<
   TKey extends string = string,
-  TInputSchema extends SqsMessageBatchSchema<
-    AnyStandardSchema,
-    SqsInvalidMessageBodyMode
-  > = SqsMessageBatchSchema<AnyStandardSchema, SqsInvalidMessageBodyMode>,
+  TInputSchema extends AnyStandardSchema = AnyStandardSchema,
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
 > = BaseFunctionDefinition<TKey, "event", TVariables> & {
   readonly events: readonly EventSourceDefinition[];
@@ -657,10 +653,7 @@ export interface HttpFunctionDefinitionInput<
 }
 
 type EventFunctionDefinitionInput<
-  TInputSchema extends SqsMessageBatchSchema<
-    AnyStandardSchema,
-    SqsInvalidMessageBodyMode
-  >,
+  TInputSchema extends AnyStandardSchema,
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
 > = Omit<FunctionDefinitionInputBase, "routes"> & {
   readonly events: readonly EventSourceDefinition[];
@@ -741,10 +734,7 @@ type FunctionDefinitionWithKey<
         readonly kind: "event";
         readonly variables?: infer TVariables;
       }
-    ? TInputSchema extends SqsMessageBatchSchema<
-        AnyStandardSchema,
-        SqsInvalidMessageBodyMode
-      >
+    ? TInputSchema extends AnyStandardSchema
       ? TVariables extends RuntimeVariableCatalog
         ? EventFunctionDefinition<TKey, TInputSchema, TVariables>
         : EventFunctionDefinition<TKey, TInputSchema, Record<never, never>>
@@ -907,19 +897,26 @@ type EventFunctionKey<TRegistry> = {
   [TKey in keyof TRegistry]: TRegistry[TKey] extends {
     readonly events: readonly EventSourceDefinition[];
     readonly handler: unknown;
-    readonly input: SqsMessageBatchSchema<
-      AnyStandardSchema,
-      SqsInvalidMessageBodyMode
-    >;
+    readonly input: SqsLikeMessageBatchSchema;
   }
     ? TKey
     : never;
 }[keyof TRegistry];
 
+type SqsLikeMessageBatchSchema<
+  TBodySchema extends AnyStandardSchema = AnyStandardSchema,
+  TInvalidMessageBody extends SqsInvalidMessageBodyMode =
+    SqsInvalidMessageBodyMode,
+> = AnyStandardSchema & {
+  readonly body: TBodySchema;
+  readonly invalidMessageBody: TInvalidMessageBody;
+  readonly source: "sqs";
+};
+
 type EventFunctionInput<TFunction> = TFunction extends {
   readonly input: infer TInputSchema;
 }
-  ? TInputSchema extends SqsMessageBatchSchema<
+  ? TInputSchema extends SqsLikeMessageBatchSchema<
       infer TBodySchema,
       infer TInvalidMessageBody
     >
@@ -1829,20 +1826,23 @@ const unwrapPayload = <TResult>(
   return payload as TResult;
 };
 
-let cachedAwsLambdaInvokeTransport: InvokeTransport | undefined;
-
-const defaultAwsLambdaInvokeTransport = (): InvokeTransport => {
-  cachedAwsLambdaInvokeTransport ??= createAwsLambdaInvokeTransport();
-  return cachedAwsLambdaInvokeTransport;
-};
-
 const invokeAws = async (
   definition: InvokableFunctionDefinition,
   payload: unknown,
   options: InvokeOptions
 ): Promise<unknown> => {
-  const transport = options.transport ?? defaultAwsLambdaInvokeTransport();
+  const { transport } = options;
   const functionName = deployedName(definition);
+
+  if (transport === undefined) {
+    throw new InvokeError(
+      `invoke("${functionName}") requires an InvokeTransport for runtime "aws"`,
+      {
+        code: "MISSING_TRANSPORT",
+        functionName,
+      }
+    );
+  }
 
   const parsedPayload = await parsePayload(definition, payload);
   const response = await runWithRetries(

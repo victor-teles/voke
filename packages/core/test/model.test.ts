@@ -117,11 +117,9 @@ test("builds a small serializable model from normalized config", () => {
       },
     },
     local: {
-      providers: {
-        aws: {
-          adapter: "floci",
-          optional: true,
-        },
+      provider: {
+        adapter: "floci",
+        optional: true,
       },
     },
     outputs: {
@@ -169,8 +167,19 @@ test("builds a small serializable model from normalized config", () => {
           attribute: "url",
           env: "VOKE_RESOURCE_EVENTS_QUEUE_URL",
         },
-        kind: "sqsQueue",
+        kind: "resource",
         properties: {},
+        provider: {
+          aws: {
+            properties: {
+              bindingValue: "ref",
+              cloudFormationType: "AWS::SQS::Queue",
+              outputName: "Url",
+              policyResource: "getAttArn",
+            },
+            type: "cloudformation.resource",
+          },
+        },
       },
       ordersTable: {
         access: {
@@ -188,7 +197,7 @@ test("builds a small serializable model from normalized config", () => {
           attribute: "name",
           env: "VOKE_RESOURCE_ORDERS_TABLE_NAME",
         },
-        kind: "dynamodbTable",
+        kind: "resource",
         properties: {
           AttributeDefinitions: [
             {
@@ -212,6 +221,17 @@ test("builds a small serializable model from normalized config", () => {
             },
           ],
         },
+        provider: {
+          aws: {
+            properties: {
+              bindingValue: "ref",
+              cloudFormationType: "AWS::DynamoDB::Table",
+              outputName: "Name",
+              policyResource: "getAttArn",
+            },
+            type: "cloudformation.resource",
+          },
+        },
       },
     },
     schemaVersion: "1",
@@ -219,6 +239,37 @@ test("builds a small serializable model from normalized config", () => {
       name: "orders-api",
       region: "sa-east-1",
       stage: "prod",
+    },
+  });
+});
+
+test("stores provider resource metadata as provider-neutral extension records", () => {
+  const model = createInternalModel({
+    name: "provider-neutral-model",
+    resources: {
+      customTopic: {
+        actions: ["sns:Publish"],
+        bindingAttribute: "arn",
+        bindingValue: "ref",
+        cloudFormationType: "AWS::Custom::TopicLike",
+        outputName: "Arn",
+        policyResource: "ref",
+        properties: {
+          TopicName: "events",
+        },
+      },
+    },
+  });
+
+  expect(model.resources.customTopic?.provider).toEqual({
+    aws: {
+      properties: {
+        bindingValue: "ref",
+        cloudFormationType: "AWS::Custom::TopicLike",
+        outputName: "Arn",
+        policyResource: "ref",
+      },
+      type: "cloudformation.resource",
     },
   });
 });
@@ -239,7 +290,7 @@ test("keeps empty model sections explicit for minimal configs", () => {
   expect(apiFunction.routes).toEqual(["$default"]);
   expect(apiFunction.runtime).toBe("nodejs22.x");
   expect(model.apis.http?.name).toBe("minimal-api");
-  expect(model.local.providers.aws).toEqual({
+  expect(model.local.provider).toEqual({
     adapter: "floci",
     optional: true,
   });
@@ -625,9 +676,9 @@ test("models SQS event sources attached to Function definitions", () => {
   ]);
 });
 
-test("rejects SQS event source references to missing or non-SQS resources", () => {
+test("rejects SQS event source references to missing resources", () => {
   const processOrders = defineFunction({
-    events: [sqsEventSource("ordersTable"), sqsEventSource("missingQueue")],
+    events: [sqsEventSource("missingQueue")],
     handler: (batch: SqsMessageBatch<{ orderId: string }>) => batch.ok(),
     input: sqsMessageBatch(schema<{ orderId: string }>()),
   });
@@ -636,9 +687,6 @@ test("rejects SQS event source references to missing or non-SQS resources", () =
     createInternalModel({
       functions: defineFunctions({ processOrders }),
       name: "invalid-worker",
-      resources: {
-        ordersTable: dynamodbTable(),
-      },
     })
   ).toThrow(VokeConfigError);
 
@@ -646,9 +694,6 @@ test("rejects SQS event source references to missing or non-SQS resources", () =
     createInternalModel({
       functions: defineFunctions({ processOrders }),
       name: "invalid-worker",
-      resources: {
-        ordersTable: dynamodbTable(),
-      },
     });
   } catch (error) {
     expect(error).toBeInstanceOf(VokeConfigError);
@@ -656,9 +701,6 @@ test("rejects SQS event source references to missing or non-SQS resources", () =
       issues: [
         {
           path: "functions.processOrders.events.0.queue",
-        },
-        {
-          path: "functions.processOrders.events.1.queue",
         },
       ],
     });
