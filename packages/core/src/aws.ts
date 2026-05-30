@@ -46,13 +46,13 @@ export const createAwsClientConfig = (
     options.endpoint ??
     Bun.env.VOKE_AWS_ENDPOINT_URL ??
     Bun.env.AWS_ENDPOINT_URL;
+  const region =
+    [options.region, Bun.env.AWS_REGION, Bun.env.AWS_DEFAULT_REGION].find(
+      (value) => value !== undefined && value !== ""
+    ) ?? "us-east-1";
 
   return {
-    region:
-      options.region ??
-      Bun.env.AWS_REGION ??
-      Bun.env.AWS_DEFAULT_REGION ??
-      "us-east-1",
+    region,
     ...(endpoint === undefined || endpoint === "" ? {} : { endpoint }),
   };
 };

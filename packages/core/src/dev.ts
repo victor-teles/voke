@@ -33,7 +33,7 @@ const createProviderLocalEnvironment = (
   const devEnvironment = provider?.local?.devEnvironment;
 
   if (devEnvironment === undefined) {
-    if (!overrides.hasResources && provider === undefined) {
+    if (!overrides.hasResources) {
       return {};
     }
 

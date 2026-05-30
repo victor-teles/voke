@@ -9,7 +9,7 @@ import {
   voke,
 } from "voke";
 
-import { aws, sqsQueue } from "../src/index";
+import { aws, createAwsClientConfig, sqsQueue } from "../src/index";
 
 test("adds an AWS Lambda handler to a Voke Gateway", async () => {
   const functions = createFunctions({
@@ -86,4 +86,32 @@ test("provides AWS local dev environment through the provider capability", () =>
     VOKE_RESOURCE_EVENTS_QUEUE_URL:
       "http://localhost:9999/000000000000/EventsQueue",
   });
+});
+
+test("falls back from empty string regions in AWS client config", () => {
+  const previous = {
+    defaultRegion: Bun.env.AWS_DEFAULT_REGION,
+    region: Bun.env.AWS_REGION,
+  };
+
+  try {
+    Bun.env.AWS_REGION = "";
+    Bun.env.AWS_DEFAULT_REGION = "us-west-2";
+
+    expect(createAwsClientConfig({ region: "" })).toMatchObject({
+      region: "us-west-2",
+    });
+  } finally {
+    if (previous.region === undefined) {
+      delete Bun.env.AWS_REGION;
+    } else {
+      Bun.env.AWS_REGION = previous.region;
+    }
+
+    if (previous.defaultRegion === undefined) {
+      delete Bun.env.AWS_DEFAULT_REGION;
+    } else {
+      Bun.env.AWS_DEFAULT_REGION = previous.defaultRegion;
+    }
+  }
 });

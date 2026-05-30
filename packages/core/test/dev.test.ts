@@ -156,6 +156,27 @@ test("dev plan reports providers without local dev support when resources need b
   );
 });
 
+test("dev plan does not require provider local support when there are no resources", async () => {
+  const directory = `/private/tmp/voke-dev-provider-no-resources-${crypto.randomUUID()}`;
+  const entrypoint = `${directory}/src/api.ts`;
+
+  await Bun.$`mkdir -p ${directory}/src`;
+  await Bun.write(entrypoint, "export const handler = () => undefined;\n");
+
+  const plan = await createDevPlan(
+    defineConfig({
+      entrypoint,
+      name: "provider-no-resources-api",
+      provider: {
+        name: "custom",
+      },
+    })
+  );
+
+  expect(plan.environment.VOKE_STAGE).toBe("local");
+  expect(plan.environment.AWS_ENDPOINT_URL).toBeUndefined();
+});
+
 test("dev plan delegates provider-specific local environment to provider local capability", async () => {
   const directory = `/private/tmp/voke-dev-provider-local-${crypto.randomUUID()}`;
   const entrypoint = `${directory}/src/api.ts`;

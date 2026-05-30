@@ -269,12 +269,12 @@ export const voke = <
     }) ?? {};
 
   return {
+    ...providerGateway,
     app,
     config,
     fetch: app.fetch.bind(app) as Hono<VokeEnv>["fetch"],
     functions,
     name: config.name,
-    ...providerGateway,
     request: app.request.bind(app) as Hono<VokeEnv>["request"],
   } as GatewayRuntime<TFunctions> & ProviderGatewayExtension<TProvider>;
 };

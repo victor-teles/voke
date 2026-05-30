@@ -35,8 +35,12 @@ export interface StackTestContext {
 }
 
 const toDynamoAttribute = (
+  key: string,
   value: unknown
 ): Record<string, string | boolean> => {
+  if (typeof value === "string") {
+    return { S: value };
+  }
   if (typeof value === "number") {
     return { N: String(value) };
   }
@@ -47,14 +51,19 @@ const toDynamoAttribute = (
     return { NULL: true };
   }
 
-  return { S: String(value) };
+  throw new Error(
+    `Unsupported DynamoDB seed attribute "${key}". Expected string, number, boolean, or null.`
+  );
 };
 
 const toDynamoItem = (
   item: Record<string, unknown>
 ): Record<string, Record<string, string | boolean>> =>
   Object.fromEntries(
-    Object.entries(item).map(([key, value]) => [key, toDynamoAttribute(value)])
+    Object.entries(item).map(([key, value]) => [
+      key,
+      toDynamoAttribute(key, value),
+    ])
   );
 
 const stringifyOutput = (value: unknown): string =>
@@ -81,13 +90,16 @@ const createSeedPlan = (
   const commands: string[][] = [];
 
   for (const [tableName, items] of Object.entries(input.dynamodb ?? {})) {
+    const resolvedTableName =
+      bindings[`VOKE_RESOURCE_${toEnvKey(tableName)}_NAME`] ?? tableName;
+
     for (const item of items) {
       commands.push([
         "aws",
         "dynamodb",
         "put-item",
         "--table-name",
-        tableName,
+        resolvedTableName,
         "--item",
         JSON.stringify(toDynamoItem(item)),
         "--region",

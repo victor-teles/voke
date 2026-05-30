@@ -37,3 +37,29 @@ test("extends a Gateway through a configured Provider runtime capability", () =>
   expect(gateway.deployTarget).toBe("orders:dev");
   expect("handler" in gateway).toBe(false);
 });
+
+test("keeps core Gateway fields authoritative over Provider extensions", () => {
+  const provider: VokeProvider<{ name: string; request: string }> = {
+    name: "overlapping-provider",
+    runtime: {
+      gateway: () => ({
+        name: "provider-name",
+        request: "provider-request",
+      }),
+    },
+  };
+  const functions = defineFunctions({
+    ping: defineFunction({
+      handler: () => ({ ok: true }),
+      output: schema<{ ok: boolean }>(),
+    }),
+  });
+
+  const gateway = voke(functions, {
+    config: { name: "orders" },
+    provider,
+  });
+
+  expect(gateway.name).toBe("orders");
+  expect(typeof gateway.request).toBe("function");
+});
