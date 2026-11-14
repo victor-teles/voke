@@ -122,7 +122,7 @@ test("voke synth exits with the discovery error when the entrypoint exports no F
 
   await Bun.write(
     configPath,
-    `export default { name: "no-functions", entrypoint: ${JSON.stringify(entrypoint)} };\n`
+    `export default { name: "no-functions", entrypoint: ${JSON.stringify(entrypoint)}, provider: { name: "test", synthesis: { synthesize: () => ({}) } } };\n`
   );
 
   await expect(runCli(["synth", "--config", configPath])).rejects.toThrow(

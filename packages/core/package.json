@@ -1,9 +1,30 @@
 {
   "name": "voke",
   "version": "0.0.0",
+  "description": "A TypeScript-first framework for AWS Lambda APIs: Functions, a Gateway, typed contracts and one-command deploys.",
+  "keywords": [
+    "api",
+    "aws",
+    "bun",
+    "framework",
+    "lambda",
+    "serverless"
+  ],
+  "homepage": "https://github.com/victor-teles/voke#readme",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/victor-teles/voke",
+    "directory": "packages/core"
+  },
   "bin": {
     "voke": "./src/cli.ts"
   },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
   "type": "module",
   "types": "./src/index.ts",
   "exports": {
@@ -13,7 +34,9 @@
     "build": "bun build ./src/index.ts ./src/cli.ts --outdir ./dist --target bun",
     "test": "bun test",
     "typecheck": "bunx tsgo --project tsconfig.json --noEmit",
-    "clean": "rm -rf dist coverage"
+    "clean": "rm -rf dist coverage",
+    "prepack": "cp ../../LICENSE ../../README.md .",
+    "postpack": "rm -f LICENSE README.md"
   },
   "devDependencies": {
     "@types/bun": "latest",
@@ -22,5 +45,8 @@
   },
   "peerDependencies": {
     "hono": "^4.0.0"
+  },
+  "engines": {
+    "bun": ">=1.4.4"
   }
 }

@@ -494,3 +494,71 @@ macOS and Linux must not change.
   output never includes credentials.
 - Deferred: project templates (worker, API plus table), interactive prompts, `bunx create-voke`,
   shell completions, and the package-name/npm-scope decision.
+
+## Execution notes (2026-11-14)
+
+Done on branch `feature/first-run-experience`, stacked on plan 005 (`feature/production-safe-defaults`,
+PR #57, open). Uncommitted. Gates: `bun run check` 0 errors, `bun run typecheck` 18/18, `bun run test`
+23/23 tasks (core 243, `@voke/aws` 82, `@voke/build` 5).
+
+- **CLI:** `cli-spec.ts` holds one command table that drives `voke --help`, `voke <command> --help`,
+  `voke help <command>`, usage errors and flag validation. `--version`/`-v` print `voke <version>`. Unknown
+  flags fail with the closest flag within edit distance 2.
+- **Result lines:** `synth` (`Wrote template to <path> (<n> resources)`), `build`, `migrate serverless`,
+  `remote generate` and `local <subcommand>` print a result line.
+- **Scaffold:** `scaffold.ts` implements `voke create <name> [directory] [--no-install] [--force]`. The name
+  is not rescoped. All Voke dependencies are pinned at the lockstep version, with `deploy`/`remove`
+  scripts, `.gitignore` and `README.md`. `bun install` goes through the runner, and next steps print the
+  `defaultDevPort` from `dev.ts`. `voke create api <name>` is rejected with the replacement.
+- **Zero-config:** the name comes from `./package.json` (scope stripped). `synth`/`deploy`/`remove`/`local`
+  without a Provider fail with the `provider: aws()` hint before importing the project. `voke dev` prints
+  the hint as a note.
+- **Doctor:** `voke doctor` (`doctor.ts`) checks Bun against `engines.bun`, the config, the entrypoint,
+  Functions/routes, and the Provider, then runs `diagnostics`. Any `fail` row exits non-zero.
+- **`@voke/aws` diagnostics:**
+  - Credentials are checked with `DescribeStacks` on the bootstrap stack. The output is the account id
+    (from the stack ARN, once deployed) and the region only. Credential errors reuse the deploy client's
+    message, which echoes nothing.
+  - The local tool is the first word of the Local AWS Provider's start command (`docker`), checked on
+    PATH; it is a `warn` when missing.
+- **Metadata:** root MIT `LICENSE` and `"license": "MIT"` in all 13 manifests. The 7 packages gain
+  `description`, `repository`, `homepage`, `keywords`, `files`, `engines.bun >=1.4.4`, and
+  `prepack`/`postpack` scripts that copy and remove `LICENSE` (plus the root README for `voke`). Each
+  `@voke/*` package has a short README.
+  - `bun pm pack --dry-run` lists `LICENSE`, `README.md` and `src/` only.
+  - `bun pm pack` rewrites `workspace:*` to the exact version `0.0.0` (pinned, not `^`), so no STOP.
+- **Paths:**
+  - `synth`, the scaffold, and both remote writers use `mkdir(..., { recursive: true })`/`dirname`.
+  - `loadVokeConfig` uses `isAbsolute`/`resolve`/`pathToFileURL`, and the handler file name uses
+    `basename`.
+- **Docs:** getting started is now create → dev/test → deploy, with manual setup second. The CLI reference
+  shows the real `voke --help`, `create`, `doctor` and flag errors. The README Quickstart starts with
+  `voke create` and adds a License section.
+
+Adaptations and deviations:
+
+- `cli.ts` was 957 lines, so the spec/parser and the scaffold moved into `cli-spec.ts` and `scaffold.ts`.
+  `cli.ts` still re-exports `CliUsageError`, `ParsedFlags` and `createApiProject`.
+- `ProviderLocalWorkflow` gains an optional `flags` map. `voke local` validates flags against the core
+  flags plus the Provider's, and the AWS workflow declares `compose`, `data`, `endpoint`, `hostname`,
+  `image`, `port` and `template`.
+- Files touched outside the listed scope:
+  - `errors/shared.ts` gains the `CREATE_ERROR` code, used when `bun install` fails after scaffolding.
+  - `dev.ts` exports `defaultDevPort`.
+  - `deploy-clients.ts` adds `StackDescription.id`, the stack ARN.
+  - `packages/build/test/build.test.ts`.
+  - `deploy-cli.test.ts` and `project.test.ts` were updated for the new hint and the provider-first check.
+- **Hangs:** the credentials check has a 10 s limit, and the CLI entry exits after a successful command so a
+  pending SDK socket cannot hang it. Run here, `DescribeStacks` never answered, because the sandbox
+  cannot reach AWS.
+- **No Bun-only API in diagnostics:** `aws()` ships in Lambda bundles, and the Node-runtime test forbids
+  the `Bun` global, so the PATH lookup uses `node:fs`.
+- **Build paths:** `packages/build` converts `\` to `/` instead of using `node:path`, because its paths
+  become bundle paths and Lambda handler names, which must use `/`. A test covers it.
+- **Simpler scaffold config:** the generated `voke.config.ts` no longer repeats the default `build.outdir`
+  and `cloudFormation.out`.
+- **Not changed:** `packages/core/src/project.ts` (`startsWith("/")`, `file://` import) and
+  `packages/aws/src/build.ts` (generated import specifiers) are outside this plan's scope.
+- **Still open:** the package name and npm scope. The docs say the published names are not final.
+- **`voke doctor` in `examples/hello-api`:** prints Bun, Config, Entrypoint, Project (1 Function,
+  6 routes), Provider `aws`, AWS credentials (`fail` here: no AWS access within 10 s) and docker (`ok`).

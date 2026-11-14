@@ -1,3 +1,6 @@
+import { basename, isAbsolute, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+
 import type { Context } from "hono";
 
 import type { VokeEnv } from "./context";
@@ -174,8 +177,7 @@ const defineApiConfig = (input: VokeConfigInput): VokeApiConfig => {
 };
 
 export const createHandlerNameFromEntrypoint = (entrypoint: string): string => {
-  const fileName = entrypoint.split("/").at(-1) ?? "index.ts";
-  const moduleName = fileName.replace(/\.[^.]+$/u, "");
+  const moduleName = basename(entrypoint).replace(/\.[^.]+$/u, "");
 
   return `${moduleName}.handler`;
 };
@@ -356,7 +358,7 @@ export const loadVokeConfig = async (
 ): Promise<VokeConfig> => {
   const path = options.path ?? "voke.config.ts";
   const cwd = options.cwd ?? readEnv("PWD") ?? ".";
-  const absolutePath = path.startsWith("/") ? path : `${cwd}/${path}`;
+  const absolutePath = isAbsolute(path) ? path : resolve(cwd, path);
   const configFile = Bun.file(absolutePath);
 
   if (!(await configFile.exists())) {
@@ -364,7 +366,7 @@ export const loadVokeConfig = async (
   }
 
   const module = await import(
-    `${new URL(`file://${absolutePath}`).href}?t=${Date.now()}`
+    `${pathToFileURL(absolutePath).href}?t=${Date.now()}`
   );
   const exportedConfig = module.default;
 

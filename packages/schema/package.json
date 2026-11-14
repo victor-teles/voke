@@ -1,6 +1,24 @@
 {
   "name": "@voke/schema",
   "version": "0.0.0",
+  "description": "Standard Schema helpers for Voke Function Contracts.",
+  "keywords": [
+    "schema",
+    "validation",
+    "voke"
+  ],
+  "homepage": "https://github.com/victor-teles/voke#readme",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/victor-teles/voke",
+    "directory": "packages/schema"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
   "type": "module",
   "types": "./src/index.ts",
   "exports": {
@@ -10,7 +28,9 @@
     "build": "bun build ./src/index.ts --outdir ./dist --target bun",
     "test": "bun test --pass-with-no-tests",
     "typecheck": "bunx tsgo --project tsconfig.json --noEmit",
-    "clean": "rm -rf dist coverage"
+    "clean": "rm -rf dist coverage",
+    "prepack": "cp ../../LICENSE .",
+    "postpack": "rm -f LICENSE"
   },
   "dependencies": {
     "voke": "workspace:*"
@@ -18,5 +38,8 @@
   "devDependencies": {
     "@types/bun": "latest",
     "@typescript/native-preview": "catalog:"
+  },
+  "engines": {
+    "bun": ">=1.4.4"
   }
 }

@@ -3,6 +3,8 @@ import { VokeDeployError } from "voke";
 import { createAwsClientConfig } from "./resources";
 
 export interface StackDescription {
+  /** The stack ARN, which names the account. */
+  id?: string;
   outputs: Record<string, string>;
   status: string;
 }
@@ -194,6 +196,7 @@ export const createDeployAwsClients = async (
           return stack === undefined
             ? undefined
             : {
+                ...(stack.StackId === undefined ? {} : { id: stack.StackId }),
                 outputs: toRecord(stack.Outputs),
                 status: stack.StackStatus ?? "",
               };

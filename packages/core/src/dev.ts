@@ -5,6 +5,9 @@ import { createInternalModel } from "./model";
 import type { ProviderLocalDevEnvironment } from "./provider";
 import { remoteEnvironment } from "./remote";
 
+/** The port `voke dev` listens on unless PORT or --port says otherwise. */
+export const defaultDevPort = 3000;
+
 export interface DevPlan {
   command: string[];
   entrypoint: string;
@@ -74,7 +77,7 @@ const createDevOrigin = (
     const hostname = overrides.hostname ?? "localhost";
     const port =
       overrides.port ??
-      Number(config.dev.environment.PORT ?? Bun.env.PORT ?? 3000);
+      Number(config.dev.environment.PORT ?? Bun.env.PORT ?? defaultDevPort);
 
     return `http://${hostname}:${port}`;
   }
@@ -90,7 +93,7 @@ const createDevOrigin = (
   const hostname = overrides.hostname ?? Bun.env.HOST ?? "localhost";
   const port =
     overrides.port ??
-    Number(config.dev.environment.PORT ?? Bun.env.PORT ?? 3000);
+    Number(config.dev.environment.PORT ?? Bun.env.PORT ?? defaultDevPort);
 
   return `http://${hostname}:${port}`;
 };

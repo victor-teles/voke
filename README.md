@@ -4,6 +4,18 @@ Voke is a TypeScript-first AWS Lambda framework. You describe work as Functions,
 
 ## Quickstart
 
+Three commands from nothing to a deployed API:
+
+```bash
+voke create my-api      # writes the project and runs bun install
+cd my-api
+bun run deploy          # deploys the dev stage to AWS and prints the API URL
+```
+
+In between, `bun run dev` serves the API locally and `bun test` runs its test. `voke doctor` explains what is missing (Bun, config, project, AWS credentials). The packages are not published yet, and the published names (`voke`, `@voke/*`) are not final.
+
+### Manual setup
+
 Create `voke.config.ts` for project, build, and CloudFormation settings:
 
 ```ts
@@ -74,15 +86,18 @@ This repository uses Bun workspaces and Turborepo.
 
 ## CLI
 
-The first Voke CLI commands are:
+`voke --help` lists the commands; `voke <command> --help` prints a command's flags, and an unknown flag is an error that suggests the closest one.
 
 ```bash
+voke create <name> [directory]
 voke dev [entrypoint]
 voke build [entrypoint] [outdir]
-voke create api <name> [directory]
 voke synth [entrypoint] [out] --config voke.config.ts
 voke deploy --stage dev
 voke remove --stage dev
+voke doctor
+voke local <start|stop|reset|bootstrap>
+voke remote generate [name]
 voke migrate serverless [serverless.yml] --out ./voke-migration
 ```
 
@@ -376,3 +391,7 @@ curl http://localhost:3000
 ```
 
 Bun starts the example from its default exported Gateway because `voke(functions)` exposes a `fetch` handler.
+
+## License
+
+MIT. See [LICENSE](./LICENSE).

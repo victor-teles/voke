@@ -253,6 +253,18 @@ const runLocalCommand = async (
  * (`--compose`, `--data`, `--hostname`, `--image`, `--port`, `--region`) before starting it;
  * `bootstrap` provisions the project's resources from its model (`--endpoint`, `--template`).
  */
+// The extra `voke local` flags this workflow reads; voke rejects any other flag.
+const localWorkflowFlags = {
+  compose: `Docker Compose file. Default: ${defaultComposePath}`,
+  data: "Emulator data directory. Default: .voke/local/data",
+  endpoint: "Local AWS endpoint for bootstrap",
+  hostname: "Emulator hostname",
+  image: "Emulator container image",
+  port: "Emulator port",
+  template:
+    "Template written by bootstrap. Default: .voke/local/cloudformation.json",
+} as const;
+
 export const createLocalWorkflow = (
   provider: LocalProvider
 ): ProviderLocalWorkflow => {
@@ -283,6 +295,7 @@ export const createLocalWorkflow = (
         );
       }
     },
+    flags: localWorkflowFlags,
     reset: async (context) => {
       await runLocalCommand(
         provider,

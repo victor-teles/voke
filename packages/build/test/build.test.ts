@@ -131,3 +131,19 @@ test("planned output paths match what the bundler writes", async () => {
     await rm(directory, { force: true, recursive: true });
   }
 });
+
+test("plans the same bundle paths for Windows-style separators", () => {
+  const posix = createBuildPlan({
+    build: buildConfig({ outdir: "./build" }),
+    entrypoints: ["./src/jobs/report.ts", "./src/index.ts"],
+    functions: {},
+  });
+  const windows = createBuildPlan({
+    build: buildConfig({ outdir: ".\\build" }),
+    entrypoints: [".\\src\\jobs\\report.ts", ".\\src\\index.ts"],
+    functions: {},
+  });
+
+  expect(Object.values(windows.outputs)).toEqual(Object.values(posix.outputs));
+  expect(windows.files).toEqual(posix.files);
+});
