@@ -1,6 +1,28 @@
 {
   "name": "@voke/build",
   "version": "0.0.0",
+  "description": "Lambda bundle planning for Voke projects.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/victor-teles/voke",
+    "directory": "packages/build"
+  },
+  "homepage": "https://github.com/victor-teles/voke#readme",
+  "keywords": [
+    "build",
+    "bundle",
+    "lambda",
+    "voke"
+  ],
+  "engines": {
+    "bun": ">=1.4.4"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
   "type": "module",
   "types": "./src/index.ts",
   "exports": {
@@ -10,7 +32,9 @@
     "build": "bun build ./src/index.ts --outdir ./dist --target bun",
     "test": "bun test",
     "typecheck": "bunx tsgo --project tsconfig.json --noEmit",
-    "clean": "rm -rf dist coverage"
+    "clean": "rm -rf dist coverage",
+    "prepack": "cp ../../LICENSE .",
+    "postpack": "rm -f LICENSE"
   },
   "dependencies": {
     "voke": "workspace:*"

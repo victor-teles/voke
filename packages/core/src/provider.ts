@@ -135,13 +135,15 @@ export interface ProviderLocalWorkflowContext {
   /** Config resolved with the CLI's name, stage and region overrides. */
   config: VokeConfig;
   model: VokeModel;
-  /** The remaining `voke local` flags; the Provider reads the ones it understands. */
+  /** The `voke local` flags, including the ones the workflow declares in `flags`. */
   options: Readonly<Record<string, string>>;
   run: ProviderCommandRunner;
 }
 
 /** The `voke local start|stop|reset|bootstrap` workflow a Provider runs for local development. */
 export interface ProviderLocalWorkflow {
+  /** Extra `voke local` flags the workflow reads, with a description; others are rejected. */
+  flags?: Readonly<Record<string, string>>;
   bootstrap: (context: ProviderLocalWorkflowContext) => Promise<void>;
   reset: (context: ProviderLocalWorkflowContext) => Promise<void>;
   start: (context: ProviderLocalWorkflowContext) => Promise<void>;
@@ -159,9 +161,27 @@ export interface ProviderLocalCapability {
   workflow?: ProviderLocalWorkflow;
 }
 
+export type DiagnosticStatus = "ok" | "warn" | "fail";
+
+/** One `voke doctor` row. `detail` says what was found or how to fix it; never a secret. */
+export interface DiagnosticResult {
+  check: string;
+  detail: string;
+  status: DiagnosticStatus;
+}
+
+/** Provider checks that `voke doctor` runs after its own, such as credentials and local tools. */
+export interface ProviderDiagnosticsCapability {
+  run: (input: {
+    config: VokeConfig;
+    model: VokeModel;
+  }) => Promise<DiagnosticResult[]>;
+}
+
 export interface VokeProvider {
   build?: ProviderBuildCapability;
   deploy?: ProviderDeployCapability;
+  diagnostics?: ProviderDiagnosticsCapability;
   invoke?: ProviderInvokeCapability;
   local?: ProviderLocalCapability;
   name: string;
@@ -173,6 +193,7 @@ export interface VokeProvider {
 export type VokeProviderCapability =
   | ProviderBuildCapability
   | ProviderDeployCapability
+  | ProviderDiagnosticsCapability
   | ProviderInvokeCapability
   | ProviderLocalCapability
   | ProviderRuntimeCapability

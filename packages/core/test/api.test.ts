@@ -303,9 +303,16 @@ test("creates a starter API project", async () => {
   const config = await Bun.file(`${directory}/voke.config.ts`).text();
   const testFile = await Bun.file(`${directory}/test/api.test.ts`).text();
 
-  expect(packageJson.name).toBe("@voke/created-api");
-  expect(packageJson.dependencies["@voke/aws"]).toBe("^0.0.0");
-  expect(packageJson.dependencies.voke).toBe("^0.0.0");
+  expect(packageJson.name).toBe("created-api");
+  expect(packageJson.dependencies).toEqual({
+    "@voke/aws": "^0.0.0",
+    "@voke/testing": "^0.0.0",
+    hono: "^4.0.0",
+    voke: "^0.0.0",
+  });
+  expect(packageJson.license).toBeUndefined();
+  expect(packageJson.scripts.deploy).toBe("voke deploy --stage dev");
+  expect(packageJson.scripts.remove).toBe("voke remove --stage dev");
   expect(packageJson.scripts.build).toBe("voke build");
   expect(packageJson.scripts.dev).toBe("voke dev");
   expect(packageJson.scripts.synth).toBe("voke synth");
@@ -315,9 +322,17 @@ test("creates a starter API project", async () => {
   );
   expect(config).toContain('name: "created-api"');
   expect(config).toContain('entrypoint: "./src/index.ts"');
-  expect(config).toContain('out: "./dist/cloudformation.json"');
   expect(config).toContain('import { aws } from "@voke/aws";');
   expect(config).toContain("provider: aws()");
+  expect(healthRoute).toContain(
+    'route.get("/health", {\n  handler: () => ({ ok: true }),\n});'
+  );
+  expect(await Bun.file(`${directory}/.gitignore`).text()).toBe(
+    "node_modules\ndist\n.voke\n.env*\ncoverage\n"
+  );
+  expect(await Bun.file(`${directory}/README.md`).text()).toContain(
+    "bun run deploy"
+  );
   expect(index).toContain("createFunctions");
   expect(index).toContain("http");
   expect(index).toContain("voke");
@@ -334,12 +349,26 @@ test("generated starter test suite passes with local package links", async () =>
     directory,
     name: "created-api-smoke",
   });
-  await Bun.$`mkdir -p ${directory}/node_modules`;
+  const links: Record<string, string> = {
+    "@voke/aws": `${import.meta.dir}/../../aws`,
+    "@voke/testing": `${import.meta.dir}/../../testing`,
+    hono: `${import.meta.dir}/../node_modules/hono`,
+    voke: `${import.meta.dir}/..`,
+  };
+  const { dependencies } = (await Bun.file(
+    `${directory}/package.json`
+  ).json()) as { dependencies: Record<string, string> };
+
+  // A new scaffold dependency needs a link here, or this smoke test would not exercise it.
+  expect(Object.keys(dependencies).toSorted()).toEqual(
+    Object.keys(links).toSorted()
+  );
+
   await Bun.$`mkdir -p ${directory}/node_modules/@voke`;
-  await Bun.$`ln -s ${`${import.meta.dir}/..`} ${`${directory}/node_modules/voke`}`;
-  await Bun.$`ln -s ${`${import.meta.dir}/../../aws`} ${`${directory}/node_modules/@voke/aws`}`;
-  await Bun.$`ln -s ${`${import.meta.dir}/../../testing`} ${`${directory}/node_modules/@voke/testing`}`;
-  await Bun.$`ln -s ${`${import.meta.dir}/../node_modules/hono`} ${`${directory}/node_modules/hono`}`;
+
+  for (const [name, target] of Object.entries(links)) {
+    await Bun.$`ln -s ${target} ${`${directory}/node_modules/${name}`}`;
+  }
 
   const process = Bun.spawn(["bun", "test"], {
     cwd: directory,
@@ -561,7 +590,9 @@ test("runs create and build through the CLI parser", async () => {
 
   const configPath = `${directory}/build.config.ts`;
 
-  await runCli(["create", "api", "cli-api", directory]);
+  await runCli(["create", "cli-api", directory, "--no-install"], {
+    output: () => {},
+  });
   await writeHttpEntrypoint(entrypoint);
   await Bun.write(
     configPath,

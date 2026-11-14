@@ -44,7 +44,7 @@ serves `GET /health` from an API Gateway v2 event.
 | 004  | `voke deploy` takes a project from source to a live URL in one command                          | P1       | L      | 009, 003 (008)      | DONE (real-AWS proof not run) |
 | 010  | `voke local` and `voke dev` run through the Provider's local workflow                           | P2       | M      | 009 (003, 008, 004) | DONE                          |
 | 005  | A freshly deployed Voke stack has production-safe Lambda and HTTP defaults                      | P2       | M      | 009, 003, 008       | DONE                          |
-| 006  | A new user goes from nothing to a deployed API with three commands and clear CLI feedback       | P2       | M      | 004, 008, 010       | TODO                          |
+| 006  | A new user goes from nothing to a deployed API with three commands and clear CLI feedback       | P2       | M      | 004, 008, 010       | DONE                          |
 | 007  | `voke local` and `voke dev` run against the official AWS Emulator with real stack outputs       | P2       | M      | 010 (004 optional)  | TODO                          |
 
 Dependencies in parentheses are ordering only (shared files), not hard prerequisites.

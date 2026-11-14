@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 
 import { error as errorResponse, ok } from "@voke/http";
 import type { Hono } from "hono";
@@ -554,13 +556,8 @@ export const generateRemoteModules = async (
   const writer =
     options.write ??
     (async (path, text) => {
-      const directory = path.split("/").slice(0, -1).join("/");
-
-      if (directory !== "") {
-        await Bun.$`mkdir -p ${directory}`;
-      }
-
-      await Bun.write(path, text);
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, text);
     });
   const remotes = config.remotes ?? {};
   const names = options.names ?? Object.keys(remotes);

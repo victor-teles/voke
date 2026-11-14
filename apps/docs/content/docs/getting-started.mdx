@@ -1,17 +1,45 @@
 ---
 title: Getting Started
-description: Create a config-first Voke project, define route-backed Functions, and run the local Gateway.
+description: Go from nothing to a deployed API with voke create, then define route-backed Functions.
 ---
 
-## Install
-
-Use Bun for dependency and script execution:
+## Three commands
 
 ```bash
-bun install
+voke create my-api
+cd my-api
+bun run deploy
 ```
 
-Inside a Voke project, add `voke.config.ts`:
+`voke create` writes a working API, runs `bun install`, and prints the next steps. In between, run it locally and test it:
+
+```bash
+bun run dev     # local API on http://localhost:3000
+bun test
+```
+
+`bun run deploy` runs `voke deploy --stage dev`: it needs AWS credentials (a profile, SSO login, or environment credentials) and prints the API URL when it finishes. `bun run remove` deletes the stage. Run `voke doctor` when something is missing; it checks Bun, the config, the project and your AWS credentials.
+
+The packages are not published yet, and the published names (`voke`, `@voke/*`) are not final.
+
+## What `voke create` generates
+
+```txt
+my-api/
+  voke.config.ts       # project settings and the Provider: provider: aws()
+  src/index.ts         # the Functions and the Gateway
+  src/routes/health.ts # GET /health
+  test/api.test.ts     # a test through @voke/testing
+  package.json         # dev, test, deploy and remove scripts
+  README.md
+  .gitignore
+```
+
+`provider: aws()` in `voke.config.ts` is what makes `deploy`, `synth` and `local` work: the Provider is set only there.
+
+## Manual setup
+
+Inside an existing project, add `voke.config.ts`:
 
 ```ts
 import { defineConfig } from "voke";

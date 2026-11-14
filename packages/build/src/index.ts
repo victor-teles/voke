@@ -19,8 +19,13 @@ export interface BaseBuildPlanInput {
 
 const unique = (values: readonly string[]): string[] => [...new Set(values)];
 
+// Build paths become bundle paths and Lambda handler names, which always use "/". Windows
+// separators in config are converted, so the plan is the same on every platform.
 const normalize = (path: string): string =>
-  path.replace(/^\.\//u, "").replace(/\/+$/u, "");
+  path
+    .replaceAll("\\", "/")
+    .replace(/^\.\//u, "")
+    .replace(/\/+$/u, "");
 
 const directoryOf = (path: string): string[] =>
   normalize(path).split("/").slice(0, -1);

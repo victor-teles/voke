@@ -3,6 +3,36 @@ title: CLI Reference
 description: Common Voke CLI commands for development, build, synth, deploy, local AWS, and migration workflows.
 ---
 
+## Help and version
+
+```txt
+Voke v0.0.0
+
+Usage: voke <command> [options]
+
+Commands:
+  voke build    Bundle the project's Functions through the Provider.
+  voke create   Create a new API project and install its dependencies.
+  voke deploy   Build and deploy a stage through the Provider.
+  voke dev      Run the API locally with hot reload.
+  voke doctor   Check the toolchain, the project and the Provider.
+  voke local    Run the Provider's local environment. The Provider may accept more flags.
+  voke migrate  Generate a Voke skeleton from a Serverless Framework service.
+  voke remote   Generate Remote Function Registry modules from remotes.
+  voke remove   Delete a deployed stage through the Provider.
+  voke synth    Write the Provider's deployment template.
+
+Run voke <command> --help for its flags. voke --version prints the version.
+```
+
+`voke <command> --help` (or `voke help <command>`) prints a command's usage and flags. `voke --version` prints the version. An unknown flag is an error that suggests the closest flag:
+
+```txt
+$ voke synth --stag prod
+Invalid CLI usage: Unknown flag --stag for "synth". Did you mean --stage?
+Usage: voke synth [entrypoint] [out] [--config voke.config.ts] [--name api] [--stage local] [--region us-east-1]
+```
+
 ## Development
 
 ```bash
@@ -22,10 +52,18 @@ Builds an ESM bundle of the entrypoint for the AWS Lambda Node.js runtime and wr
 ## Project starter
 
 ```bash
-voke create api <name> [directory]
+voke create <name> [directory] [--no-install] [--force]
 ```
 
-Creates a new Voke Project starter.
+Creates an API project in `./<name>` (or `directory`), runs `bun install`, and prints the next steps. The `package.json` name is exactly `<name>`, scope included. A non-empty directory is refused unless `--force`, which overwrites the starter files and keeps every other file.
+
+## Doctor
+
+```bash
+voke doctor [--config voke.config.ts]
+```
+
+Prints one `ok`, `warn` or `fail` row per check: the Bun version, the config, the entrypoint, the discovered Functions and routes, the Provider, and the Provider's own checks (for `aws()`: credentials with the account id and region, and the local container tool). Exits non-zero when any row fails. Credentials are never printed.
 
 ## CloudFormation
 

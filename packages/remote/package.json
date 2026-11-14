@@ -1,6 +1,24 @@
 {
   "name": "@voke/remote",
   "version": "0.0.0",
+  "description": "Typed Remote Function Registries for calling Voke Functions across projects.",
+  "keywords": [
+    "remote",
+    "rpc",
+    "voke"
+  ],
+  "homepage": "https://github.com/victor-teles/voke#readme",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/victor-teles/voke",
+    "directory": "packages/remote"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
   "type": "module",
   "types": "./src/index.ts",
   "exports": {
@@ -10,7 +28,9 @@
     "build": "bun build ./src/index.ts --outdir ./dist --target bun",
     "test": "bun test",
     "typecheck": "bunx tsgo --project tsconfig.json --noEmit",
-    "clean": "rm -rf dist coverage"
+    "clean": "rm -rf dist coverage",
+    "prepack": "cp ../../LICENSE .",
+    "postpack": "rm -f LICENSE"
   },
   "dependencies": {
     "@voke/http": "workspace:*",
@@ -20,5 +40,8 @@
   "devDependencies": {
     "@types/bun": "latest",
     "@typescript/native-preview": "catalog:"
+  },
+  "engines": {
+    "bun": ">=1.4.4"
   }
 }

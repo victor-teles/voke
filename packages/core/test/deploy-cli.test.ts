@@ -164,7 +164,7 @@ test("deploy fails clearly without a Provider deploy capability", async () => {
       stage: "dev",
     })
   ).rejects.toThrow(
-    "No provider configured for deploy. Set provider: aws() in voke.config.ts."
+    "No provider configured. Add a provider to voke.config.ts, for example:"
   );
 });
 

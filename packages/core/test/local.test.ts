@@ -8,8 +8,7 @@ import {
   LocalProviderError,
 } from "@voke/aws/local";
 
-import { runCli, runCommand } from "../src/cli";
-import { VokeConfigError } from "../src/errors";
+import { CliUsageError, runCli, runCommand } from "../src/cli";
 import { tempPath } from "./support/temp";
 
 const awsIndex = `${import.meta.dir}/../../aws/src/index.ts`;
@@ -296,12 +295,14 @@ test("voke local needs a Provider with a local workflow", async () => {
     runCli(["local", "start", "--config", withoutProvider.configPath], {
       run: () => {},
     })
-  ).rejects.toThrow(VokeConfigError);
+  ).rejects.toThrow(CliUsageError);
   await expect(
     runCli(["local", "start", "--config", withoutProvider.configPath], {
       run: () => {},
     })
-  ).rejects.toThrow("No provider configured for voke local.");
+  ).rejects.toThrow(
+    "No provider configured. Add a provider to voke.config.ts, for example:"
+  );
   await expect(
     runCli(["local", "start", "--config", withoutWorkflow.configPath], {
       run: () => {},

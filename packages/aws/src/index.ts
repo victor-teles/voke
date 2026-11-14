@@ -4,6 +4,7 @@ import { createAwsBuildPlan } from "./build";
 import { synthesizeCloudFormationFromModel } from "./cloudformation-synthesis";
 import { deployAwsStack, removeAwsStack } from "./deploy";
 import { createDeployAwsClients } from "./deploy-clients";
+import { createAwsDiagnostics } from "./diagnostics";
 import { awsRouteAuth } from "./lambda";
 import {
   defineAwsLambdaSettings,
@@ -140,6 +141,7 @@ export const aws = (options: AwsProviderOptions = {}): VokeProvider => {
           }),
         }),
     },
+    diagnostics: createAwsDiagnostics(localProvider),
     local: {
       devEnvironment: ({ endpoint, model, region }) => {
         const environment = createLocalAwsEnvironment({
