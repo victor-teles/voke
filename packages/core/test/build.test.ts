@@ -7,6 +7,7 @@ import { defineConfig } from "../src/config";
 import { defineFunction, defineFunctions } from "../src/invoke";
 import type { StandardSchemaV1 } from "../src/invoke";
 import { Voke } from "../src/route-builder";
+import { tempPath } from "./support/temp";
 
 const schema = <TValue>(): StandardSchemaV1<TValue, TValue> => ({
   "~standard": {
@@ -82,7 +83,7 @@ test("normalizes build inputs and Lambda handler output from config", () => {
 });
 
 test("build CLI uses config by default and lets flags override one-off runs", async () => {
-  const directory = `/private/tmp/voke-build-cli-${crypto.randomUUID()}`;
+  const directory = tempPath(`voke-build-cli-${crypto.randomUUID()}`);
   const configPath = `${directory}/voke.config.ts`;
   const commands: string[][] = [];
 

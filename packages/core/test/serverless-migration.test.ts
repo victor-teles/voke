@@ -5,6 +5,7 @@ import {
   createServerlessMigration,
   parseServerlessYaml,
 } from "../src/serverless-migration";
+import { tempPath } from "./support/temp";
 
 const serverlessYaml = `service: orders-api
 
@@ -1132,7 +1133,7 @@ test("reports Serverless Framework plugin compatibility deterministically", () =
 });
 
 test("runs serverless migration through the CLI parser", async () => {
-  const directory = `/private/tmp/voke-serverless-${crypto.randomUUID()}`;
+  const directory = tempPath(`voke-serverless-${crypto.randomUUID()}`);
   const serverlessPath = `${directory}/serverless.yml`;
   const outDirectory = `${directory}/voke`;
 

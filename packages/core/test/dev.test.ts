@@ -6,9 +6,10 @@ import { runCli } from "../src/cli";
 import { defineConfig } from "../src/config";
 import { createDevPlan } from "../src/dev";
 import type { LocalProvider } from "../src/local";
+import { tempPath } from "./support/temp";
 
 test("creates a config-first Bun hot reload dev plan with local bindings", async () => {
-  const directory = `/private/tmp/voke-dev-plan-${crypto.randomUUID()}`;
+  const directory = tempPath(`voke-dev-plan-${crypto.randomUUID()}`);
   const entrypoint = `${directory}/src/api.ts`;
 
   await Bun.$`mkdir -p ${directory}/src`;
@@ -65,7 +66,9 @@ test("creates a config-first Bun hot reload dev plan with local bindings", async
 });
 
 test("dev plan reports missing entrypoints clearly", async () => {
-  const missing = `/private/tmp/voke-dev-missing-${crypto.randomUUID()}/src/api.ts`;
+  const missing = tempPath(
+    `voke-dev-missing-${crypto.randomUUID()}/src/api.ts`
+  );
 
   await expect(
     createDevPlan({
@@ -76,7 +79,7 @@ test("dev plan reports missing entrypoints clearly", async () => {
 });
 
 test("dev plan uses the configured local provider", async () => {
-  const directory = `/private/tmp/voke-dev-custom-provider-${crypto.randomUUID()}`;
+  const directory = tempPath(`voke-dev-custom-provider-${crypto.randomUUID()}`);
   const entrypoint = `${directory}/src/api.ts`;
   const provider: LocalProvider = {
     bootstrapPlan: ({ environment }) => ({
@@ -132,7 +135,7 @@ test("dev plan uses the configured local provider", async () => {
 });
 
 test("dev plan reports providers without local dev support when resources need bindings", async () => {
-  const directory = `/private/tmp/voke-dev-provider-synth-${crypto.randomUUID()}`;
+  const directory = tempPath(`voke-dev-provider-synth-${crypto.randomUUID()}`);
   const entrypoint = `${directory}/src/api.ts`;
 
   await Bun.$`mkdir -p ${directory}/src`;
@@ -157,7 +160,9 @@ test("dev plan reports providers without local dev support when resources need b
 });
 
 test("dev plan does not require provider local support when there are no resources", async () => {
-  const directory = `/private/tmp/voke-dev-provider-no-resources-${crypto.randomUUID()}`;
+  const directory = tempPath(
+    `voke-dev-provider-no-resources-${crypto.randomUUID()}`
+  );
   const entrypoint = `${directory}/src/api.ts`;
 
   await Bun.$`mkdir -p ${directory}/src`;
@@ -178,7 +183,7 @@ test("dev plan does not require provider local support when there are no resourc
 });
 
 test("dev plan delegates provider-specific local environment to provider local capability", async () => {
-  const directory = `/private/tmp/voke-dev-provider-local-${crypto.randomUUID()}`;
+  const directory = tempPath(`voke-dev-provider-local-${crypto.randomUUID()}`);
   const entrypoint = `${directory}/src/api.ts`;
 
   await Bun.$`mkdir -p ${directory}/src`;
@@ -222,7 +227,7 @@ test("dev plan delegates provider-specific local environment to provider local c
 });
 
 test("dev plan exposes configured remote targets as environment", async () => {
-  const directory = `/private/tmp/voke-dev-remotes-${crypto.randomUUID()}`;
+  const directory = tempPath(`voke-dev-remotes-${crypto.randomUUID()}`);
   const entrypoint = `${directory}/src/api.ts`;
 
   await Bun.$`mkdir -p ${directory}/src`;
@@ -260,7 +265,7 @@ test("dev plan exposes configured remote targets as environment", async () => {
 });
 
 test("dev CLI reads config by default and lets flags override one-off runs", async () => {
-  const directory = `/private/tmp/voke-dev-cli-${crypto.randomUUID()}`;
+  const directory = tempPath(`voke-dev-cli-${crypto.randomUUID()}`);
   const configPath = `${directory}/voke.config.ts`;
   const apiEntrypoint = `${directory}/src/api.ts`;
   const workerEntrypoint = `${directory}/src/worker.ts`;
@@ -352,7 +357,7 @@ export default defineConfig({
 });
 
 test("dev CLI lets hostname and port override the route summary origin", async () => {
-  const directory = `/private/tmp/voke-dev-origin-${crypto.randomUUID()}`;
+  const directory = tempPath(`voke-dev-origin-${crypto.randomUUID()}`);
   const configPath = `${directory}/voke.config.ts`;
   const entrypoint = `${directory}/src/api.ts`;
   const calls: { command: string[]; env?: Record<string, string> }[] = [];

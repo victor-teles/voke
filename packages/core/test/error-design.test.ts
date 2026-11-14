@@ -12,6 +12,7 @@ import {
 } from "../src/errors";
 import { createInternalModel } from "../src/model";
 import { createServerlessMigration } from "../src/serverless-migration";
+import { tempPath } from "./support/temp";
 
 test("standardizes framework error types for public workflows", async () => {
   expect(() =>
@@ -45,7 +46,9 @@ test("standardizes framework error types for public workflows", async () => {
   const missingBinding = bindResource("ordersTable", "name");
   expect(() => missingBinding.value()).toThrow(VokeResourceBindingError);
 
-  const missing = `/private/tmp/voke-error-design-${crypto.randomUUID()}/src/api.ts`;
+  const missing = tempPath(
+    `voke-error-design-${crypto.randomUUID()}/src/api.ts`
+  );
   await expect(
     createDevPlan({
       entrypoint: missing,

@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 
 import { CliUsageError, createApiProject, runCli, synth } from "../src/cli";
 import { defineConfig } from "../src/config";
+import { tempPath } from "./support/temp";
 
 const writeProviderConfig = async (
   directory: string,
@@ -30,7 +31,7 @@ const writeProviderConfig = async (
 };
 
 test("prints useful run details for real CLI execution", async () => {
-  const directory = `/private/tmp/voke-cli-details-${crypto.randomUUID()}`;
+  const directory = tempPath(`voke-cli-details-${crypto.randomUUID()}`);
   const templatePath = `${directory}/template.json`;
   const configPath = await writeProviderConfig(directory, "details-api");
   const output: string[] = [];
@@ -142,7 +143,7 @@ test("standardizes CLI usage errors for invalid commands and flags", async () =>
 });
 
 test("synth uses the configured provider synthesis capability", async () => {
-  const directory = `/private/tmp/voke-provider-synth-${crypto.randomUUID()}`;
+  const directory = tempPath(`voke-provider-synth-${crypto.randomUUID()}`);
   const out = `${directory}/template.json`;
   const config = defineConfig({
     name: "provider-synth",
@@ -177,7 +178,7 @@ test("synth fails clearly when the configured provider cannot synthesize", async
 });
 
 test("creates a config-first API starter with stable files", async () => {
-  const directory = `/private/tmp/voke-create-api-${crypto.randomUUID()}`;
+  const directory = tempPath(`voke-create-api-${crypto.randomUUID()}`);
 
   await runCli(["create", "api", "orders-api", directory]);
 
@@ -216,7 +217,7 @@ test("creates a config-first API starter with stable files", async () => {
 });
 
 test("generated API starter responds through the public test client", async () => {
-  const directory = `/private/tmp/voke-create-smoke-${crypto.randomUUID()}`;
+  const directory = tempPath(`voke-create-smoke-${crypto.randomUUID()}`);
 
   await createApiProject({ directory, name: "smoke-api" });
   await Bun.$`mkdir -p ${directory}/node_modules`;
@@ -239,7 +240,7 @@ test("generated API starter responds through the public test client", async () =
 });
 
 test("supports equals-style flags as explicit overrides", async () => {
-  const directory = `/private/tmp/voke-cli-contract-${crypto.randomUUID()}`;
+  const directory = tempPath(`voke-cli-contract-${crypto.randomUUID()}`);
   const templatePath = `${directory}/template.json`;
   const configPath = await writeProviderConfig(directory, "orders-api");
 
