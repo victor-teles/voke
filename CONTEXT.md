@@ -393,7 +393,7 @@ _Avoid_: AWS secret name, parameter path, resource key
 > **Domain expert:** "No, SQS is an **Event Source** that invokes a **Function**."
 >
 > **Dev:** "Is `sqsQueue()` how I attach a queue trigger?"
-> **Domain expert:** "No, `sqsQueue()` defines a queue resource; `sqsEventSource()` attaches a queue as an **SQS Event Source**."
+> **Domain expert:** "No, `sqsQueue()` defines a queue resource; `sqs({ queue })` attaches a queue as an **SQS Event Source**."
 >
 > **Dev:** "Does an SQS Event Source point at the queue object?"
 > **Domain expert:** "No, it points at the queue resource key; Voke resolves that key during model and CloudFormation synthesis."
@@ -428,7 +428,7 @@ _Avoid_: AWS secret name, parameter path, resource key
 > **Dev:** "Where do I disable automatic invalid-message failure?"
 > **Domain expert:** "On the **SQS Message Batch** contract with `invalidMessageBody: \"include\"`, because it changes input normalization rather than trigger infrastructure."
 >
-> **Dev:** "Does `sqsMessageBatch()` parse raw string messages?"
+> **Dev:** "Does `sqs()` parse raw string messages?"
 > **Domain expert:** "No, the v1 primary SQS contract treats message bodies as JSON application messages."
 >
 > **Dev:** "Should tests call an SQS Function handler directly?"
@@ -576,7 +576,7 @@ _Avoid_: AWS secret name, parameter path, resource key
 - The **Dev Function Summary** includes internal invokable **Functions** as well as route-backed and Event Source **Functions**.
 - Route-backed entries in the **Dev Function Summary** include local URLs in addition to method and path.
 - HTTP raw value serialization keeps the `{ data: ... }` success envelope.
-- `sqsEventSource()` is the primary helper for attaching an **SQS Event Source** to a **Function**.
+- `sqs({ queue })` (or `queues`) is the primary helper for attaching an **SQS Event Source** to a **Function**.
 - An **SQS Event Source** references its queue by Voke resource key, not by passing the queue resource object.
 - **SQS Message Batch** handlers validate message bodies as the primary contract instead of requiring users to validate the raw AWS SQS event.
 - **SQS Batch Result** is the primary handler output for partial batch failure behavior.
@@ -586,8 +586,8 @@ _Avoid_: AWS secret name, parameter path, resource key
 - SQS Event Source v1 options are limited to batch size, maximum batching window, and enabled state.
 - DLQ/redrive configuration is deferred from SQS Event Source v1.
 - Invalid SQS message bodies are automatic per-message failures by default, with an explicit opt-out for handlers that need to inspect invalid messages.
-- `sqsMessageBatch()` uses `invalidMessageBody: "fail" | "include"` to control invalid body handling.
-- `sqsMessageBatch()` treats SQS message bodies as JSON in v1.
+- `sqs()` uses `invalidMessageBody: "fail" | "include"` to control invalid body handling.
+- `sqs()` treats SQS message bodies as JSON in v1, validated with its `message` schema.
 - Event Source Functions are tested through `functions.sendEvent(...)`, not `functions.invoke(...)` or direct handler calls.
 - `functions.sendEvent(...)` defaults to SQS in v1 and also accepts an explicit `source: "sqs"`.
 - Local SQS **Event Invocation** accepts minimal message inputs and synthesizes provider metadata when omitted.

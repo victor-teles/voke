@@ -8,8 +8,6 @@ import {
   parameter,
   secret,
   sqs,
-  sqsEventSource,
-  sqsMessageBatch,
 } from "@voke/aws";
 import {
   dynamodbTable,
@@ -20,7 +18,7 @@ import {
 
 import { defineConfig } from "../src/config";
 import { VokeConfigError } from "../src/errors";
-import { defineFunction, defineFunctions, http } from "../src/invoke";
+import { fn, createFunctions, http } from "../src/invoke";
 import type { SqsMessageBatch, StandardSchemaV1 } from "../src/invoke";
 import { createInternalModel } from "../src/model";
 import { Voke } from "../src/route-builder";
@@ -43,24 +41,22 @@ test("builds a small serializable model from normalized config", () => {
       build: {
         outdir: "./build",
       },
-      cloudFormation: {
-        environment: {
-          LOG_LEVEL: "debug",
-        },
-        resources: {
-          eventsQueue: sqsQueue(),
-          ordersTable: dynamodbTable({ partitionKey: "pk", sortKey: "sk" }),
-        },
-      },
       entrypoint: "./src/api.ts",
+      environment: {
+        LOG_LEVEL: "debug",
+      },
       name: "orders-api",
       region: "sa-east-1",
+      resources: {
+        eventsQueue: sqsQueue(),
+        ordersTable: dynamodbTable({ partitionKey: "pk", sortKey: "sk" }),
+      },
       runtime: {
         lambda: "nodejs22.x",
       },
       stage: "prod",
     }),
-    functions: defineFunctions({
+    functions: createFunctions({
       api: http({
         routes: [
           app.get("/orders", { handler: () => [] }),
@@ -294,9 +290,9 @@ test("keeps empty model sections explicit for minimal configs", () => {
 test("names every deployed Function <name>-<stage>-<key> and points it at the generated handler", () => {
   const app = new Voke();
   const model = createInternalModel({
-    functions: defineFunctions({
+    functions: createFunctions({
       api: http({ routes: [app.get("/health", { handler: () => "ok" })] }),
-      "send-email": defineFunction({
+      "send-email": fn({
         handler: () => "sent",
         output: schema<string>(),
       }),
@@ -316,16 +312,16 @@ test("names every deployed Function <name>-<stage>-<key> and points it at the ge
 test("rejects registry keys that map to the same Lambda handler export", () => {
   expect(() =>
     createInternalModel({
-      functions: defineFunctions({
-        "send-email": defineFunction({
+      functions: createFunctions({
+        "send-email": fn({
           handler: () => "a",
           output: schema<string>(),
         }),
-        sendEmail: defineFunction({
+        sendEmail: fn({
           handler: () => "c",
           output: schema<string>(),
         }),
-        send_email: defineFunction({
+        send_email: fn({
           handler: () => "b",
           output: schema<string>(),
         }),
@@ -338,7 +334,7 @@ test("rejects registry keys that map to the same Lambda handler export", () => {
 });
 
 test("maps explicit function definitions from config into the model", () => {
-  const sendWelcomeEmail = defineFunction({
+  const sendWelcomeEmail = fn({
     handler: (payload) => ({
       queued: true,
       to: payload.email,
@@ -356,16 +352,14 @@ test("maps explicit function definitions from config into the model", () => {
     },
   });
   const model = createInternalModel({
-    cloudFormation: {
-      environment: {
-        LOG_LEVEL: "info",
-      },
-      resources: {
-        eventsQueue: sqsQueue(),
-      },
+    environment: {
+      LOG_LEVEL: "info",
     },
-    functions: defineFunctions({ sendWelcomeEmail }),
+    functions: createFunctions({ sendWelcomeEmail }),
     name: "workers-api",
+    resources: {
+      eventsQueue: sqsQueue(),
+    },
   });
 
   expect(model.functions.sendWelcomeEmail).toEqual({
@@ -394,8 +388,8 @@ test("maps explicit function definitions from config into the model", () => {
 test("models endpoint, CRUD group, use case, and mixed functions consistently", () => {
   const app = new Voke();
   const model = createInternalModel({
-    functions: defineFunctions({
-      checkout: defineFunction({
+    functions: createFunctions({
+      checkout: fn({
         handler: (payload) => ({ id: payload.cartId }),
         input: schema<{ cartId: string }>(),
         output: schema<{ id: string }>(),
@@ -403,7 +397,7 @@ test("models endpoint, CRUD group, use case, and mixed functions consistently", 
           entrypoint: "./src/functions/checkout.ts",
         },
       }),
-      health: defineFunction({
+      health: fn({
         routes: [
           app.get("/health", {
             handler: () => ({ ok: true }),
@@ -413,7 +407,7 @@ test("models endpoint, CRUD group, use case, and mixed functions consistently", 
           entrypoint: "./src/functions/health.ts",
         },
       }),
-      orders: defineFunction({
+      orders: fn({
         handler: (payload: { id: string }) => ({ id: payload.id }),
         input: schema<{ id: string }>(),
         output: schema<{ id: string }>(),
@@ -427,7 +421,7 @@ test("models endpoint, CRUD group, use case, and mixed functions consistently", 
           entrypoint: "./src/functions/orders.ts",
         },
       }),
-      users: defineFunction({
+      users: fn({
         routes: [
           app.get("/users", {
             handler: () => [],
@@ -502,7 +496,7 @@ test("models JWT Authorizers for route-backed Functions", () => {
     }),
   });
   const model = createInternalModel({
-    functions: defineFunctions({
+    functions: createFunctions({
       users: http({
         authorizer: "userJwt",
         authorizers,
@@ -545,7 +539,7 @@ test("models route authorizer inheritance, overrides, and explicit public routes
     }),
   });
   const model = createInternalModel({
-    functions: defineFunctions({
+    functions: createFunctions({
       users: http({
         authorizer: "userJwt",
         authorizers,
@@ -591,7 +585,7 @@ test("models Lambda Authorizers with local Request Authorizer Function targets",
     session: lambdaAuthorizer({ function: "authorizeSession" }),
   });
   const model = createInternalModel({
-    functions: defineFunctions({
+    functions: createFunctions({
       authorizeSession: requestAuthorizer({
         handler: () => ({ authorized: true }),
       }),
@@ -627,7 +621,7 @@ test("rejects invalid HTTP Authorizer references and duplicate names", () => {
 
   expect(() =>
     createInternalModel({
-      functions: defineFunctions({
+      functions: createFunctions({
         users: http({
           authorizers: userAuthorizers,
           routes: app.get("/admin", {
@@ -642,7 +636,7 @@ test("rejects invalid HTTP Authorizer references and duplicate names", () => {
 
   expect(() =>
     createInternalModel({
-      functions: defineFunctions({
+      functions: createFunctions({
         admin: http({
           authorizers: createAuthorizers({
             userJwt: jwtAuthorizer({
@@ -685,7 +679,7 @@ test("models SQS event sources attached to Function definitions", () => {
     },
   });
   const model = createInternalModel({
-    functions: defineFunctions({ processOrders }),
+    functions: createFunctions({ processOrders }),
     name: "orders-worker",
     resources: {
       ordersQueue: sqsQueue(),
@@ -716,22 +710,22 @@ test("models SQS event sources attached to Function definitions", () => {
 });
 
 test("rejects SQS event source references to missing resources", () => {
-  const processOrders = defineFunction({
-    events: [sqsEventSource("missingQueue")],
+  const processOrders = sqs({
     handler: (batch: SqsMessageBatch<{ orderId: string }>) => batch.ok(),
-    input: sqsMessageBatch(schema<{ orderId: string }>()),
+    message: schema<{ orderId: string }>(),
+    queue: "missingQueue",
   });
 
   expect(() =>
     createInternalModel({
-      functions: defineFunctions({ processOrders }),
+      functions: createFunctions({ processOrders }),
       name: "invalid-worker",
     })
   ).toThrow(VokeConfigError);
 
   try {
     createInternalModel({
-      functions: defineFunctions({ processOrders }),
+      functions: createFunctions({ processOrders }),
       name: "invalid-worker",
     });
   } catch (error) {
@@ -747,7 +741,7 @@ test("rejects SQS event source references to missing resources", () => {
 });
 
 test("rejects invalid AWS resource-key Runtime Variables during model creation", () => {
-  const checkout = defineFunction({
+  const checkout = fn({
     handler: () => "ok",
     output: schema<string>(),
     variables: {
@@ -759,7 +753,7 @@ test("rejects invalid AWS resource-key Runtime Variables during model creation",
 
   expect(() =>
     createInternalModel({
-      functions: defineFunctions({ checkout }),
+      functions: createFunctions({ checkout }),
       name: "invalid-runtime-variables",
       resources: {
         publicConfig: ssmParameter({ value: "hello" }),
@@ -770,7 +764,7 @@ test("rejects invalid AWS resource-key Runtime Variables during model creation",
 
   try {
     createInternalModel({
-      functions: defineFunctions({ checkout }),
+      functions: createFunctions({ checkout }),
       name: "invalid-runtime-variables",
       resources: {
         publicConfig: ssmParameter({ value: "hello" }),

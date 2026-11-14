@@ -2109,12 +2109,12 @@ const createConfigTemplate = (service: ServerlessService): string => {
           .toSorted()
           .join(", ")} } from "@voke/aws/cloudformation";`;
   const resourceEntries = resources.map(
-    (resource) => `      ${tsString(resource.name)}: ${resource.expression},`
+    (resource) => `    ${tsString(resource.name)}: ${resource.expression},`
   );
   const resourceBlock =
     resourceEntries.length === 0
       ? ""
-      : `\n    resources: {\n${resourceEntries.join("\n")}\n    },`;
+      : `\n  resources: {\n${resourceEntries.join("\n")}\n  },`;
 
   // Functions live in the entrypoint (src/index.ts); the config holds project metadata,
   // the Provider, and infrastructure resources.
@@ -2127,9 +2127,7 @@ export default defineConfig({
   stage: ${tsString(service.provider.stage ?? "local")},
   region: ${tsString(service.provider.region ?? "us-east-1")},
   entrypoint: "./src/index.ts",
-  cloudFormation: {
-    environment: ${stringifyObject(environment, 4).replaceAll("\n", "\n    ")},${resourceBlock}
-  },
+  environment: ${stringifyObject(environment, 2).replaceAll("\n", "\n  ")},${resourceBlock}
 });
 `;
 };

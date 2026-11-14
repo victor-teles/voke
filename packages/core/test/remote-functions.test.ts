@@ -2,10 +2,10 @@ import { afterEach, expect, test } from "bun:test";
 
 import { secret } from "@voke/aws";
 
-import { createGateway } from "../src/app";
+import { voke } from "../src/app";
 import { defineConfig } from "../src/config";
 import type { StandardSchemaV1 } from "../src/invoke";
-import { defineFunction, defineFunctions } from "../src/invoke";
+import { fn, createFunctions } from "../src/invoke";
 import type {
   FunctionContractArtifact,
   FunctionContractMetadata,
@@ -77,8 +77,8 @@ test("invokes a remote Function through another voke dev server", async () => {
   Bun.env.VOKE_DEV_SUMMARY = "1";
   console.info = () => {};
 
-  const functions = defineFunctions({
-    getUser: defineFunction({
+  const functions = createFunctions({
+    getUser: fn({
       handler: (payload, context) => ({
         id: payload.id,
         name: "Victor",
@@ -104,10 +104,7 @@ test("invokes a remote Function through another voke dev server", async () => {
       }),
     }),
   });
-  const gateway = createGateway({
-    config: { name: "users" },
-    functions,
-  });
+  const gateway = voke(functions, { config: { name: "users" } });
   const origin = usersOrigin;
 
   await withGatewayFetch(origin, gateway, async () => {
@@ -154,7 +151,7 @@ test("invokes a remote Function through another voke dev server", async () => {
 test("excludes Runtime Variables from contracts and generated remotes", async () => {
   Bun.env.VOKE_DEV_SUMMARY = "1";
   console.info = () => {};
-  const getUserBase = defineFunction({
+  const getUserBase = fn({
     handler: (payload: { id: string }) => ({ id: payload.id }),
     input: schema<{ id: string }>({
       properties: { id: { type: "string" } },
@@ -167,7 +164,7 @@ test("excludes Runtime Variables from contracts and generated remotes", async ()
       type: "object",
     }),
   });
-  const getUserWithVariables = defineFunction({
+  const getUserWithVariables = fn({
     handler: (payload: { id: string }) => ({ id: payload.id }),
     input: schema<{ id: string }>({
       properties: { id: { type: "string" } },
@@ -183,14 +180,13 @@ test("excludes Runtime Variables from contracts and generated remotes", async ()
       stripeKey: secret("/prod/stripe/key"),
     },
   });
-  const baseGateway = createGateway({
+  const baseGateway = voke(createFunctions({ getUser: getUserBase }), {
     config: { name: "users" },
-    functions: defineFunctions({ getUser: getUserBase }),
   });
-  const variableGateway = createGateway({
-    config: { name: "users" },
-    functions: defineFunctions({ getUser: getUserWithVariables }),
-  });
+  const variableGateway = voke(
+    createFunctions({ getUser: getUserWithVariables }),
+    { config: { name: "users" } }
+  );
   const baseResponse = await baseGateway.request("/_voke/contract");
   const variableResponse = await variableGateway.request("/_voke/contract");
   const baseArtifact = await baseResponse.json();
@@ -238,8 +234,8 @@ test("fails remote invocation clearly when the generated contract fingerprint is
   Bun.env.VOKE_DEV_SUMMARY = "1";
   console.info = () => {};
 
-  const functions = defineFunctions({
-    getUser: defineFunction({
+  const functions = createFunctions({
+    getUser: fn({
       handler: (payload) => ({ id: payload.id }),
       input: schema<{ id: string }>({
         properties: { id: { type: "string" } },
@@ -253,10 +249,7 @@ test("fails remote invocation clearly when the generated contract fingerprint is
       }),
     }),
   });
-  const gateway = createGateway({
-    config: { name: "users" },
-    functions,
-  });
+  const gateway = voke(functions, { config: { name: "users" } });
   const origin = usersOrigin;
 
   await withGatewayFetch(origin, gateway, async () => {

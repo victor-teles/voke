@@ -1,7 +1,7 @@
-import { sqsEventSource, sqsMessageBatch } from "@voke/aws";
+import { sqs } from "@voke/aws";
 import { sqsQueue } from "@voke/aws/cloudformation";
 
-import { defineFunction, defineFunctions } from "../src/invoke";
+import { fn, createFunctions } from "../src/invoke";
 import type { SqsMessageBatch, StandardSchemaV1 } from "../src/invoke";
 import { createInternalModel } from "../src/model";
 import type {
@@ -24,7 +24,7 @@ const value: VokeModelValue = {
   name: "users",
 };
 
-const getUser = defineFunction({
+const getUser = fn({
   handler: (payload) => ({
     id: payload.id,
   }),
@@ -51,13 +51,20 @@ if (modelFunction === undefined) {
 
 const { runtime }: { runtime: "nodejs22.x" | "nodejs24.x" } = modelFunction;
 
-const processOrder = defineFunction({
-  events: [sqsEventSource("ordersQueue", { batchSize: 5 })],
-  handler: (batch: SqsMessageBatch<{ id: string }>) => batch.ok(),
-  input: sqsMessageBatch(schema<{ id: string }>()),
+const processOrder = sqs({
+  batchSize: 5,
+  handler: (
+    batch: SqsMessageBatch<{
+      id: string;
+    }>
+  ) => batch.ok(),
+  message: schema<{
+    id: string;
+  }>(),
+  queue: "ordersQueue",
 });
 const eventSourceModel = createInternalModel({
-  functions: defineFunctions({ processOrder }),
+  functions: createFunctions({ processOrder }),
   name: "typed-events",
   resources: {
     ordersQueue: sqsQueue(),

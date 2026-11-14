@@ -1,11 +1,6 @@
-import {
-  requestAuthorizer,
-  sqs,
-  sqsEventSource,
-  sqsMessageBatch,
-} from "@voke/aws";
+import { requestAuthorizer, sqs } from "@voke/aws";
 
-import { defineFunction, defineFunctions, http } from "../src/invoke";
+import { fn, createFunctions, http } from "../src/invoke";
 import type {
   AsyncInvokeResult,
   SqsBatchResult,
@@ -38,7 +33,7 @@ const uncachedKey = createVariableSource(
   { cache: false }
 );
 
-const functions = defineFunctions({
+const functions = createFunctions({
   authorizeRequest: requestAuthorizer({
     handler: async (_request, context) => {
       const _apiKeyText: string = await context.variables.apiKey.text();
@@ -49,7 +44,7 @@ const functions = defineFunctions({
     },
     variables: { apiKey },
   }),
-  getUser: defineFunction({
+  getUser: fn({
     handler: async (payload, context) => {
       const _apiKeyText: string = await context.variables.apiKey.text();
       const _apiKeyHandle: typeof context.variables.apiKey =
@@ -66,7 +61,7 @@ const functions = defineFunctions({
     output: getUserOutput,
     variables: { apiKey, eagerlyLoadedApiKey, uncachedKey },
   }),
-  health: defineFunction({
+  health: fn({
     handler: () => ({ ok: true }),
     output: schema<{ ok: boolean }>(),
   }),
@@ -108,7 +103,7 @@ const functions = defineFunctions({
     queue: "secretOrdersQueue",
     variables: { apiKey },
   }),
-  publicRoute: defineFunction({
+  publicRoute: fn({
     synthesis: {
       runtime: "nodejs24.x",
     },
@@ -168,7 +163,7 @@ void functions.sendEvent("processOrder", {
   source: "sqs",
 });
 
-// @ts-expect-error event message body shape is inferred from sqsMessageBatch.
+// @ts-expect-error event message body shape is inferred from the sqs() message schema.
 void functions.sendEvent("processOrder", { messages: [{ body: {} }] });
 
 // @ts-expect-error invokable functions are not event source functions.
@@ -185,18 +180,18 @@ sqs({
   queue: "ordersQueue",
 });
 
-defineFunction({
+fn({
   // @ts-expect-error invokable functions require an output schema.
   handler: () => ({ ok: true }),
 });
 
-defineFunction({
-  events: [sqsEventSource("ordersQueue")],
+sqs({
   handler: (event) => event.ok(),
-  input: sqsMessageBatch(schema<{ id: string }>()),
+  message: schema<{ id: string }>(),
+  queue: "ordersQueue",
 });
 
-defineFunction({
+fn({
   handler: () => ({ ok: true }),
   output: schema<{ ok: boolean }>(),
   synthesis: {

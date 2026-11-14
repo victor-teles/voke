@@ -38,7 +38,7 @@ const eventWithAuthorizer = (authorizer: unknown) => ({
   version: "2.0",
 });
 
-const createGateway = (calls: { count: number }) =>
+const createAuthGateway = (calls: { count: number }) =>
   voke(
     createFunctions({
       authorizeSession: requestAuthorizer({
@@ -72,7 +72,7 @@ const createGateway = (calls: { count: number }) =>
   );
 
 const call = async (
-  gateway: ReturnType<typeof createGateway>,
+  gateway: ReturnType<typeof createAuthGateway>,
   event: object
 ): Promise<{ data: { auth: unknown } }> => {
   const handler = createLambdaHandlers({ default: gateway }).http;
@@ -89,7 +89,7 @@ const call = async (
 test("deployed routes use the Lambda authorizer result API Gateway attached", async () => {
   const calls = { count: 0 };
   const body = await call(
-    createGateway(calls),
+    createAuthGateway(calls),
     eventWithAuthorizer({ lambda: { userId: "usr_from_gateway" } })
   );
 
@@ -109,7 +109,7 @@ test("deployed routes expose verified JWT claims", async () => {
     rawPath: "/profile",
   };
   event.requestContext.http.path = "/profile";
-  const body = await call(createGateway({ count: 0 }), event);
+  const body = await call(createAuthGateway({ count: 0 }), event);
 
   expect(body.data.auth).toEqual({
     context: { sub: "usr_jwt" },
@@ -119,7 +119,7 @@ test("deployed routes expose verified JWT claims", async () => {
 
 test("requests without an authorizer result still evaluate the authorizer locally", async () => {
   const calls = { count: 0 };
-  const response = await createGateway(calls).request("/me", {
+  const response = await createAuthGateway(calls).request("/me", {
     headers: { authorization: "Bearer token" },
   });
 

@@ -1,13 +1,8 @@
 import { createHash } from "node:crypto";
 
-import { json, jsonError } from "@voke/http";
+import { error as errorResponse, ok } from "@voke/http";
 import type { Hono } from "hono";
-import {
-  InvokeError,
-  invokeRegistryFunction,
-  toEnvKey,
-  VokeConfigError,
-} from "voke";
+import { InvokeError, invokeRegistryFunction, VokeConfigError } from "voke";
 import type {
   FunctionRegistry,
   FunctionRegistryInput,
@@ -18,6 +13,14 @@ import type {
   VokeEnv,
 } from "voke";
 type JsonPrimitive = boolean | null | number | string;
+
+// Same rule as @voke/aws resource bindings; private so @voke/remote stays provider-neutral.
+const toEnvKey = (value: string): string =>
+  value
+    .replaceAll(/([a-z0-9])([A-Z])/gu, "$1_$2")
+    .replaceAll(/[^A-Za-z0-9]+/gu, "_")
+    .replaceAll(/^_+|_+$/gu, "")
+    .toUpperCase();
 
 export type JsonSchema =
   | boolean
@@ -602,7 +605,7 @@ export const mountDevFunctionEndpoints = (
   }
 ): void => {
   gateway.get("/_voke/contract", () =>
-    json(createFunctionContractArtifact(options.project, options.functions))
+    ok(createFunctionContractArtifact(options.project, options.functions))
   );
   gateway.post("/_voke/functions/:functionName/invoke", async (c) => {
     const artifact = createFunctionContractArtifact(
@@ -616,7 +619,7 @@ export const mountDevFunctionEndpoints = (
       body.contractFingerprint !== undefined &&
       body.contractFingerprint !== artifact.fingerprint
     ) {
-      return jsonError(
+      return errorResponse(
         `Remote Function contract drift for "${options.project}". Run \`voke remote generate ${options.project}\`.`,
         { code: "CONTRACT_DRIFT", status: 409 }
       );
@@ -627,14 +630,14 @@ export const mountDevFunctionEndpoints = (
     ] as InvokableFunctionDefinition | undefined;
 
     if (definition?.kind !== "invokable") {
-      return jsonError(`Remote Function not found: ${functionName}`, {
+      return errorResponse(`Remote Function not found: ${functionName}`, {
         code: "NOT_FOUND",
         status: 404,
       });
     }
 
     try {
-      return json(
+      return ok(
         await invokeRegistryFunction(
           options.functions,
           definition,
@@ -646,9 +649,15 @@ export const mountDevFunctionEndpoints = (
         )
       );
     } catch (error) {
-      return jsonError(error instanceof Error ? error.message : String(error), {
-        status: error instanceof InvokeError ? 400 : 500,
-      });
+      const isInvokeError = error instanceof InvokeError;
+
+      return errorResponse(
+        error instanceof Error ? error.message : String(error),
+        {
+          code: isInvokeError ? "BAD_REQUEST" : "INTERNAL_SERVER_ERROR",
+          status: isInvokeError ? 400 : 500,
+        }
+      );
     }
   });
 };

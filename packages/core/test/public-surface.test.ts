@@ -81,9 +81,10 @@ test("keeps the stable root runtime surface intentional", () => {
     "loadVokeConfig",
     "route",
     "runRequestAuthorizer",
-    "toEnvKey",
     "voke",
   ]);
+  // toEnvKey is an AWS binding-name helper: it lives in @voke/aws only.
+  expect("toEnvKey" in voke).toBe(false);
 });
 
 test("keeps AWS authoring in @voke/aws", async () => {
@@ -94,24 +95,45 @@ test("keeps AWS authoring in @voke/aws", async () => {
     "bindResource",
     "createAuthorizers",
     "createAwsClientConfig",
-    "createAwsLambdaHandler",
     "createAwsLambdaInvokeTransport",
     "createLambdaHandlers",
     "createResourceBindingName",
     "createSqsEventHandler",
-    "handleAwsLambdaRequest",
     "jwtAuthorizer",
     "lambdaAuthorizer",
     "parameter",
     "requestAuthorizer",
     "secret",
     "sqs",
-    "sqsEventSource",
-    "sqsMessageBatch",
     "toEnvKey",
   ]);
   expect("dynamodbTable" in voke).toBe(false);
   expect("sqsQueue" in voke).toBe(false);
+});
+
+test("keeps CloudFormation synthesis and resource builders in @voke/aws/cloudformation", async () => {
+  const cloudformation = await importPackage("@voke/aws/cloudformation");
+
+  expect(Object.keys(cloudformation).toSorted()).toEqual([
+    "dynamodbTable",
+    "eventBus",
+    "s3Bucket",
+    "secret",
+    "snsTopic",
+    "sqsQueue",
+    "ssmParameter",
+    "synthesizeCloudFormation",
+  ]);
+});
+
+test("keeps build helpers in @voke/build", async () => {
+  const build = await importPackage("@voke/build");
+
+  expect(Object.keys(build).toSorted()).toEqual([
+    "createBuildPlan",
+    "handlerModule",
+  ]);
+  expect("createBuildPlan" in voke).toBe(false);
 });
 
 test("publishes only stable package subpaths", () => {
@@ -151,8 +173,6 @@ test("keeps HTTP helpers in @voke/http", async () => {
   expect(Object.keys(httpHelpers).toSorted()).toEqual([
     "created",
     "error",
-    "json",
-    "jsonError",
     "noContent",
     "ok",
     "response",
@@ -231,6 +251,9 @@ test("keeps first-party examples on the Function-first Gateway API", async () =>
     "resetLocalFunctions",
     "sqsEventSource",
     "sqsMessageBatch",
+    "createAwsLambdaHandler",
+    "handleAwsLambdaRequest",
+    "jsonError",
   ]) {
     expect(combinedExamples).not.toContain(removedApi);
   }
@@ -247,6 +270,9 @@ test("keeps first-party teaching surfaces off removed authoring names", async ()
     "new Voke",
     "sqsEventSource",
     "sqsMessageBatch",
+    "createAwsLambdaHandler",
+    "handleAwsLambdaRequest",
+    "jsonError",
   ]) {
     expect(combinedSurfaces).not.toContain(removedApi);
   }

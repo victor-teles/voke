@@ -106,7 +106,7 @@ export const createDevPlan = async (
   const region = overrides.region ?? config.region;
   const stage = overrides.stage ?? config.stage;
   const origin = createDevOrigin(config, overrides);
-  const hasResources = Object.keys(config.cloudFormation.resources).length > 0;
+  const hasResources = Object.keys(config.resources).length > 0;
   const providerEnvironment = createProviderLocalEnvironment(config, {
     endpoint: overrides.endpoint,
     entrypoint,
@@ -120,7 +120,7 @@ export const createDevPlan = async (
     entrypoint,
     environment: {
       ...providerEnvironment,
-      ...config.cloudFormation.environment,
+      ...config.environment,
       ...config.dev.environment,
       ...remoteEnvironment(config.remotes ?? {}),
       VOKE_DEV_ORIGIN: origin,

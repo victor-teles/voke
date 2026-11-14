@@ -18,18 +18,26 @@ export default defineConfig({
 
 ## Core fields
 
-| Field            | Purpose                                                                       |
-| ---------------- | ----------------------------------------------------------------------------- |
-| `name`           | Service name used for generated resource names and deployment commands.       |
-| `stage`          | Deployment stage, such as `local`, `dev`, or `prod`.                          |
-| `region`         | AWS region for synthesized and deployed resources.                            |
-| `entrypoint`     | Project entrypoint; synth and build import it to discover the Functions.      |
-| `build`          | Bundle `entrypoints`, `outdir`, and `external` modules (AWS SDK by default).  |
-| `provider`       | The Provider, such as `aws()` from `@voke/aws`. Required for synth and build. |
-| `remotes`        | Remote Function Registry targets for local cross-project invocation.          |
-| `cloudFormation` | Resource and output declarations for template synthesis.                      |
-| `runtime`        | Runtime options, including Lambda runtime selection.                          |
-| `local`          | Local provider configuration for Floci-backed AWS workflows.                  |
+Each setting has exactly one spelling.
+
+| Field                | Purpose                                                                          |
+| -------------------- | -------------------------------------------------------------------------------- |
+| `name`               | Service name used for generated resource names and deployment commands.          |
+| `stage`              | Deployment stage, such as `local`, `dev`, or `prod`. Falls back to `VOKE_STAGE`. |
+| `region`             | AWS region for synthesized and deployed resources.                               |
+| `entrypoint`         | Project entrypoint; synth and build import it to discover the Functions.         |
+| `provider`           | The Provider, such as `aws()` from `@voke/aws`. Required for synth and build.    |
+| `resources`          | Infrastructure resources, such as `sqsQueue()` from `@voke/aws/cloudformation`.  |
+| `environment`        | Environment variables set on every deployed Function.                            |
+| `build`              | Bundle `entrypoints`, `outdir`, and `external` modules (AWS SDK by default).     |
+| `cloudFormation.out` | Where `voke synth` writes the template.                                          |
+| `runtime`            | Runtime options, including Lambda runtime selection.                             |
+| `local`              | Local provider configuration for Floci-backed AWS workflows.                     |
+| `remotes`            | Remote Function Registry targets for local cross-project invocation.             |
+| `api.name`           | Name of the HTTP API. Defaults to `name`.                                        |
+| `dev`                | `voke dev` entrypoint and environment overrides.                                 |
+
+The config file must use a default export: `export default defineConfig({ ... })`.
 
 ## Resource bindings
 

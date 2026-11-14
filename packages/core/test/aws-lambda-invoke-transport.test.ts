@@ -96,10 +96,10 @@ test("default AWS runtime invokes Lambda with parsed payload and trace metadata"
     StatusCode: 200,
   };
 
-  const { defineFunction, defineFunctions, withInvokeTrace } =
+  const { fn, createFunctions, withInvokeTrace } =
     await import("../src/invoke");
-  const functions = defineFunctions({
-    getUser: defineFunction({
+  const functions = createFunctions({
+    getUser: fn({
       handler: (payload) => ({
         id: payload.id,
         name: "local",
@@ -144,9 +144,9 @@ test("default AWS runtime returns accepted shape for async Lambda invokes", asyn
     StatusCode: 202,
   };
 
-  const { defineFunction, defineFunctions } = await import("../src/invoke");
-  const functions = defineFunctions({
-    getUser: defineFunction({
+  const { fn, createFunctions } = await import("../src/invoke");
+  const functions = createFunctions({
+    getUser: fn({
       handler: (payload) => ({
         id: payload.id,
         name: "local",
@@ -191,9 +191,9 @@ test("default AWS runtime uses registry key when no deployed name is configured"
     StatusCode: 200,
   };
 
-  const { defineFunction, defineFunctions } = await import("../src/invoke");
-  const functions = defineFunctions({
-    getUser: defineFunction({
+  const { fn, createFunctions } = await import("../src/invoke");
+  const functions = createFunctions({
+    getUser: fn({
       handler: (payload) => ({
         id: payload.id,
         name: "local",
@@ -221,9 +221,9 @@ test("default AWS runtime uses registry key when no deployed name is configured"
 });
 
 test("default AWS runtime converts SDK and Lambda failures into invoke errors", async () => {
-  const { defineFunction, defineFunctions } = await import("../src/invoke");
-  const functions = defineFunctions({
-    getUser: defineFunction({
+  const { fn, createFunctions } = await import("../src/invoke");
+  const functions = createFunctions({
+    getUser: fn({
       handler: (payload) => ({
         id: payload.id,
         name: "local",
@@ -263,9 +263,9 @@ test("default AWS runtime converts SDK and Lambda failures into invoke errors", 
 });
 
 test("default AWS runtime converts SDK timeouts into invoke errors", async () => {
-  const { defineFunction, defineFunctions } = await import("../src/invoke");
-  const functions = defineFunctions({
-    getUser: defineFunction({
+  const { fn, createFunctions } = await import("../src/invoke");
+  const functions = createFunctions({
+    getUser: fn({
       handler: (payload) => ({
         id: payload.id,
         name: "local",

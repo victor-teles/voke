@@ -2,6 +2,8 @@
 
 This inventory defines the intended stable API surface for the first stable Voke release. New exports should be added deliberately, with tests that explain why the symbol belongs in that surface.
 
+Each setting has one spelling and each API has one name ([opinionated-framework ADR](./adr/0007-opinionated-framework.md)). Removed spellings are not kept as aliases. `packages/core/test/public-surface.test.ts` is the single test that pins every package's export list.
+
 ## Root Package: `voke`
 
 Use the root package for the common Function-first Gateway authoring path:
@@ -70,7 +72,6 @@ The CLI, compatibility adapters, and low-level Lambda adapter modules are implem
 - `voke/aws`
 - `voke/aws-lambda`
 - `voke/app`
-- `voke/api`
 - `voke/build`
 - `voke/cloudformation`
 - `voke/http`

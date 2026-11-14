@@ -454,3 +454,55 @@ shows only blocks whose sole key is `out` (inspect each hit).
   config, which conflicts with the rule that AWS-only settings live in provider options
   (`aws({ ... })`). This plan keeps it unchanged; plan 005 or a follow-up should decide whether it
   becomes `aws({ cloudFormation: { out } })` or a provider-neutral synth output setting.
+
+## Execution notes (2026-11-14)
+
+Done on branch `feature/one-spelling-per-setting`, stacked on plan 003's branch (PR #53, open). Uncommitted.
+Gates: `bun run check` 0 errors, `bun run typecheck` 18/18, `bun run test` 23/23 tasks (core 222,
+`@voke/aws` 38, `@voke/build` 4, `@voke/remote` 2, examples all green).
+
+**Intentional root API change:** `toEnvKey` is no longer exported from `voke`; use `@voke/aws`.
+`@voke/remote` has a private copy.
+
+Delivered, per step:
+
+1. `resources` and `environment` are top-level only; `cloudFormation` holds only `out`. The resolved config
+   exposes `config.resources` and `config.environment`. `cloudFormation.resources` /
+   `cloudFormation.environment` are rejected with the top-level replacement. `SynthesizeCloudFormationOptions`
+   is `VokeConfigInput & { functions? }`. Examples, README, getting started and the migrator template moved.
+2. Config files need `export default`; the stage reads `VOKE_STAGE` only (no `STAGE`).
+3. `fn` and `createFunctions` are the declared names; `defineFunction`/`defineFunctions` are gone (tests
+   renamed mechanically, 11 files).
+4. `api()` (`core/src/api.ts`), `routeModule`, the `routes` option, and exported `createGateway` /
+   `createApiApp` / `getApiAppConfig` are gone; `voke()` builds the Gateway through a private helper.
+   `core/src/e2e.ts` (frozen until 010) now accepts `{ app }` instead of `VokeApi`.
+5. `@voke/aws` no longer exports `sqsEventSource`, `sqsMessageBatch`, `createAwsLambdaHandler`,
+   `handleAwsLambdaRequest` (types `AwsLambda*` stay). `@voke/http` no longer exports `json`, `jsonError`
+   (and the unused `JsonBody`/`JsonErrorBody` types). `CONTEXT.md` SQS lines name `sqs()`.
+6. `core/test/public-surface.test.ts` owns every export list; `package-boundaries.test.ts` and
+   `aws-package-boundaries.test.ts` are deleted.
+7. Config reference is one table, one spelling per setting; `docs/stable-public-surface.md` states the rule;
+   migration doc describes the top-level config.
+
+Deleted tests (each covered a removed item):
+
+- `api.test.ts`: "wraps a Hono app with a default name and handler" (`api()`), "uses createApiApp config
+  metadata when wrapping a Hono app" (`createApiApp`/`api()`).
+- `package-boundaries.test.ts` (5) and `aws-package-boundaries.test.ts` (2): duplicate export-list
+  assertions; the build and `@voke/aws/cloudformation` lists moved into `public-surface.test.ts`.
+
+Ported, not deleted: the Lambda v2 GET/POST tests now go through `voke()` + `createLambdaHandlers`;
+"composes route modules and exposes config/context helpers" became "exposes config and Lambda context
+helpers to Gateway middleware" (the `routeModule` part was the removed item); SQS tests use `sqs()`; the
+fn() mixed-SQS guard test takes its event source and batch schema from a real `sqs()` definition.
+
+Added: removal-message, `VOKE_STAGE`, default-export tests in `error-design.test.ts`; type checks in
+`config-typecheck.ts`; `packages/remote/test/dev-endpoints.test.ts` pins the 200/409/404/400/500 envelopes
+after the `jsonError` replacement (its `test` script no longer passes `--pass-with-no-tests`).
+
+Evidence greps: the only remaining hits for removed names are the guard lists in `public-surface.test.ts`
+and the removal tests themselves. Out-of-scope touches: `packages/aws/test/route-auth.test.ts` (local helper
+renamed from `createGateway`), `packages/remote/package.json` (test script).
+
+Drift note: the STOP condition about core `cloudformation.ts`/`aws-lambda.ts` existing was reconciled with
+plan 009 D5 — they are retained on purpose until 010, and this plan made no edits to them.

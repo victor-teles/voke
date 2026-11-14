@@ -1,22 +1,22 @@
 import { expect, test } from "bun:test";
 
-import {
-  createSqsEventHandler,
-  sqsEventSource,
-  sqsMessageBatch,
-} from "@voke/aws";
+import { createSqsEventHandler, sqs } from "@voke/aws";
 
-import { createGateway } from "../src/app";
-import type { GatewayOptions } from "../src/app";
+import { voke } from "../src/app";
+import type { VokeOptions } from "../src/app";
 import { VokeConfigError, VokeRuntimeVariableError } from "../src/errors";
 import {
-  defineFunction,
-  defineFunctions,
+  fn,
+  createFunctions,
   http,
   InvokeError,
   withInvokeTrace,
 } from "../src/invoke";
-import type { InvokeTransport, StandardSchemaV1 } from "../src/invoke";
+import type {
+  FunctionRegistry,
+  InvokeTransport,
+  StandardSchemaV1,
+} from "../src/invoke";
 import { createVariableProvider, createVariableSource } from "../src/variables";
 
 const passthroughSchema = <TValue>(): StandardSchemaV1<TValue, TValue> => ({
@@ -27,13 +27,14 @@ const passthroughSchema = <TValue>(): StandardSchemaV1<TValue, TValue> => ({
   },
 });
 
-const activateFunctions = <
-  TFunctions extends NonNullable<GatewayOptions["functions"]>,
->(
+const activateFunctions = <TFunctions extends FunctionRegistry>(
   functions: TFunctions,
-  options: Omit<GatewayOptions, "functions"> = {}
+  options: VokeOptions = {}
 ): TFunctions => {
-  createGateway({ ...options, functions });
+  voke(functions, {
+    ...options,
+    config: { name: "api", ...options.config },
+  });
 
   return functions;
 };
@@ -93,8 +94,8 @@ const userOutputSchema: StandardSchemaV1<
 
 test("invokes registry functions with typed payloads and parsed results", async () => {
   const functions = activateFunctions(
-    defineFunctions({
-      getUser: defineFunction({
+    createFunctions({
+      getUser: fn({
         handler: (payload) => ({
           id: payload.id,
           name: "Victor",
@@ -119,8 +120,8 @@ test("reads declared Runtime Variables during local Function invocation", async 
     }),
   });
   const functions = activateFunctions(
-    defineFunctions({
-      readSecret: defineFunction({
+    createFunctions({
+      readSecret: fn({
         handler: async (_payload, context) =>
           await context.variables.apiKey.text(),
         output: stringSchema,
@@ -144,8 +145,8 @@ test("uses Gateway Runtime Variable overrides during local Function invocation",
     load: () => ({ status: "found", value: "provider-value" }),
   });
   const functions = activateFunctions(
-    defineFunctions({
-      readSecret: defineFunction({
+    createFunctions({
+      readSecret: fn({
         handler: async (_payload, context) =>
           await context.variables.apiKey.text(),
         output: stringSchema,
@@ -190,8 +191,8 @@ test("caches Runtime Variables by warm Function and variable key", async () => {
     kind: "secret",
   });
   const functions = activateFunctions(
-    defineFunctions({
-      first: defineFunction({
+    createFunctions({
+      first: fn({
         handler: async (_payload, context) =>
           `${await context.variables.apiKey.text()}/${await context.variables.otherKey.text()}`,
         output: stringSchema,
@@ -200,7 +201,7 @@ test("caches Runtime Variables by warm Function and variable key", async () => {
           otherKey: sharedSource,
         },
       }),
-      second: defineFunction({
+      second: fn({
         handler: async (_payload, context) =>
           await context.variables.apiKey.text(),
         output: stringSchema,
@@ -236,8 +237,8 @@ test("loads beforeHandler Runtime Variables in parallel before running handlers"
     },
   });
   const functions = activateFunctions(
-    defineFunctions({
-      readSecret: defineFunction({
+    createFunctions({
+      readSecret: fn({
         handler: async (_payload, context) => {
           handlerStarted = true;
 
@@ -278,8 +279,8 @@ test("blocks handlers on required beforeHandler Runtime Variable failures", asyn
     load: () => ({ status: "missing" }),
   });
   const functions = activateFunctions(
-    defineFunctions({
-      readSecret: defineFunction({
+    createFunctions({
+      readSecret: fn({
         handler: () => {
           handlerStarted = true;
 
@@ -313,7 +314,7 @@ test("reads declared Runtime Variables from route and SQS Function contexts", as
     }),
   });
   const functions = activateFunctions(
-    defineFunctions({
+    createFunctions({
       api: http({
         routes: (route) =>
           route.get("/secret", {
@@ -327,14 +328,14 @@ test("reads declared Runtime Variables from route and SQS Function contexts", as
           }),
         },
       }),
-      processMessage: defineFunction({
-        events: [sqsEventSource("events")],
+      processMessage: sqs({
         handler: async (_batch, context) => {
           const value = await context.variables.queueKey.text();
 
           return { batchItemFailures: [{ itemIdentifier: value }] };
         },
-        input: sqsMessageBatch(passthroughSchema<{ id: string }>()),
+        message: passthroughSchema<{ id: string }>(),
+        queue: "events",
         variables: {
           queueKey: createVariableSource("test", {
             id: "queue-key",
@@ -366,8 +367,8 @@ test("reads declared Runtime Variables from route and SQS Function contexts", as
 
 test("uses registry keys as stable function identities and keeps helpers non-enumerable", async () => {
   const functions = activateFunctions(
-    defineFunctions({
-      getUser: defineFunction({
+    createFunctions({
+      getUser: fn({
         handler: (payload) => ({
           id: payload.id,
           name: "Victor",
@@ -391,8 +392,8 @@ test("uses registry keys as stable function identities and keeps helpers non-enu
 
 test("validates function results after invoking a function", async () => {
   const functions = activateFunctions(
-    defineFunctions({
-      createInvoice: defineFunction({
+    createFunctions({
+      createInvoice: fn({
         handler: () => ({
           id: "",
         }),
@@ -426,8 +427,8 @@ test("validates function results after invoking a function", async () => {
 
 test("supports zero-input functions with no payload or undefined", async () => {
   const functions = activateFunctions(
-    defineFunctions({
-      ping: defineFunction({
+    createFunctions({
+      ping: fn({
         handler: () => ({ ok: true }),
         output: passthroughSchema<{ ok: boolean }>(),
       }),
@@ -443,8 +444,8 @@ test("supports zero-input functions with no payload or undefined", async () => {
 test("supports async local invocation mode", async () => {
   let processed = false;
   const functions = activateFunctions(
-    defineFunctions({
-      sendEmail: defineFunction({
+    createFunctions({
+      sendEmail: fn({
         handler: () => {
           processed = true;
           return { ok: true };
@@ -466,8 +467,8 @@ test("supports async local invocation mode", async () => {
 test("reports async local invocation failures through an injected callback", async () => {
   const errors: Error[] = [];
   const functions = activateFunctions(
-    defineFunctions({
-      failEmail: defineFunction({
+    createFunctions({
+      failEmail: fn({
         handler: () => {
           throw new Error("email provider unavailable");
         },
@@ -500,8 +501,8 @@ test("reports async local invocation failures through an injected callback", asy
 
 test("propagates tracing metadata to local functions", async () => {
   const functions = activateFunctions(
-    defineFunctions({
-      createAudit: defineFunction({
+    createFunctions({
+      createAudit: fn({
         handler: (_payload, context) => context.trace,
         output: passthroughSchema<Record<string, unknown>>(),
       }),
@@ -534,9 +535,8 @@ test("sends SQS events to event source functions with minimal messages", async (
       version: 1,
     },
   };
-  const functions = defineFunctions({
-    processOrder: defineFunction({
-      events: [sqsEventSource("ordersQueue")],
+  const functions = createFunctions({
+    processOrder: sqs({
       handler: (event) => {
         for (const message of event.messages) {
           handled.push(message.body.orderId);
@@ -544,7 +544,8 @@ test("sends SQS events to event source functions with minimal messages", async (
 
         return event.ok();
       },
-      input: sqsMessageBatch(orderMessageSchema),
+      message: orderMessageSchema,
+      queue: "ordersQueue",
     }),
   });
 
@@ -557,11 +558,19 @@ test("sends SQS events to event source functions with minimal messages", async (
 });
 
 test("rejects SQS event source functions mixed with HTTP routes or invokable output", () => {
+  // fn() guards the generic Function shape; take a real SQS event source and batch schema
+  // from sqs() and try to combine them with routes or an output contract.
+  const { events, input } = sqs({
+    handler: (batch) => batch.ok(),
+    message: userInputSchema,
+    queue: "ordersQueue",
+  });
+
   expect(() =>
-    defineFunction({
-      events: [sqsEventSource("ordersQueue")],
+    fn({
+      events,
       handler: (event: { ok: () => unknown }) => event.ok(),
-      input: sqsMessageBatch(userInputSchema),
+      input,
       routes: [
         {
           handler: () => ({ ok: true }),
@@ -573,10 +582,10 @@ test("rejects SQS event source functions mixed with HTTP routes or invokable out
     } as never)
   ).toThrow(VokeConfigError);
   expect(() =>
-    defineFunction({
-      events: [sqsEventSource("ordersQueue")],
+    fn({
+      events,
       handler: (event: { ok: () => unknown }) => event.ok(),
-      input: sqsMessageBatch(userInputSchema),
+      input,
       output: userOutputSchema,
     } as never)
   ).toThrow(VokeConfigError);
@@ -584,9 +593,8 @@ test("rejects SQS event source functions mixed with HTTP routes or invokable out
 
 test("automatically reports invalid SQS message bodies as per-message failures", async () => {
   const handled: string[] = [];
-  const functions = defineFunctions({
-    processOrder: defineFunction({
-      events: [sqsEventSource("ordersQueue")],
+  const functions = createFunctions({
+    processOrder: sqs({
       handler: (event) => {
         for (const message of event.messages) {
           handled.push(message.body.id);
@@ -594,7 +602,8 @@ test("automatically reports invalid SQS message bodies as per-message failures",
 
         return event.ok();
       },
-      input: sqsMessageBatch(userInputSchema),
+      message: userInputSchema,
+      queue: "ordersQueue",
     }),
   });
 
@@ -613,9 +622,8 @@ test("automatically reports invalid SQS message bodies as per-message failures",
 });
 
 test("combines invalid SQS message failures with handler-reported failures", async () => {
-  const functions = defineFunctions({
-    processOrder: defineFunction({
-      events: [sqsEventSource("ordersQueue")],
+  const functions = createFunctions({
+    processOrder: sqs({
       handler: (event) => {
         const result = event.batchResult();
 
@@ -627,7 +635,8 @@ test("combines invalid SQS message failures with handler-reported failures", asy
 
         return result;
       },
-      input: sqsMessageBatch(userInputSchema),
+      message: userInputSchema,
+      queue: "ordersQueue",
     }),
   });
 
@@ -650,12 +659,10 @@ test("combines invalid SQS message failures with handler-reported failures", asy
 
 test("can include invalid SQS message bodies for manual handling", async () => {
   const seen: string[] = [];
-  const functions = defineFunctions({
-    processOrder: defineFunction({
-      events: [sqsEventSource("ordersQueue")],
+  const functions = createFunctions({
+    processOrder: sqs({
       handler: (event) => {
         const result = event.batchResult();
-
         for (const message of event.messages) {
           if (message.valid) {
             seen.push(message.body.id);
@@ -664,12 +671,11 @@ test("can include invalid SQS message bodies for manual handling", async () => {
             result.fail(message);
           }
         }
-
         return result;
       },
-      input: sqsMessageBatch(userInputSchema, {
-        invalidMessageBody: "include",
-      }),
+      invalidMessageBody: "include",
+      message: userInputSchema,
+      queue: "ordersQueue",
     }),
   });
 
@@ -688,9 +694,8 @@ test("can include invalid SQS message bodies for manual handling", async () => {
 
 test("handles deployed AWS SQS events through the Voke adapter", async () => {
   const handled: string[] = [];
-  const functions = defineFunctions({
-    processOrder: defineFunction({
-      events: [sqsEventSource("ordersQueue")],
+  const functions = createFunctions({
+    processOrder: sqs({
       handler: (event) => {
         for (const message of event.messages) {
           handled.push(message.body.id);
@@ -698,7 +703,8 @@ test("handles deployed AWS SQS events through the Voke adapter", async () => {
 
         return event.ok();
       },
-      input: sqsMessageBatch(userInputSchema),
+      message: userInputSchema,
+      queue: "ordersQueue",
     }),
   });
   const handler = createSqsEventHandler({
@@ -755,18 +761,18 @@ test("handles deployed AWS SQS events through the Voke adapter", async () => {
 });
 
 test("deployed SQS adapter fails clearly for incompatible functions and handler failures", async () => {
-  const functions = defineFunctions({
-    getUser: defineFunction({
+  const functions = createFunctions({
+    getUser: fn({
       handler: (payload) => ({ id: payload.id, name: "Victor" }),
       input: userInputSchema,
       output: userOutputSchema,
     }),
-    processOrder: defineFunction({
-      events: [sqsEventSource("ordersQueue")],
+    processOrder: sqs({
       handler: () => {
         throw new Error("processor unavailable");
       },
-      input: sqsMessageBatch(userInputSchema),
+      message: userInputSchema,
+      queue: "ordersQueue",
     }),
   });
   const event = {
@@ -815,8 +821,8 @@ test("invokes AWS Lambda through an injected transport", async () => {
       });
     },
   };
-  const functions = defineFunctions({
-    getUser: defineFunction({
+  const functions = createFunctions({
+    getUser: fn({
       handler: (payload) => ({
         id: payload.id,
         name: "local",
@@ -850,8 +856,8 @@ test("invokes AWS Lambda through an injected transport", async () => {
 });
 
 test("requires an injected transport for AWS runtime invocation", async () => {
-  const functions = defineFunctions({
-    worker: defineFunction({
+  const functions = createFunctions({
+    worker: fn({
       handler: ({ id }: { id: string }) => ({ id }),
       input: passthroughSchema<{ id: string }>(),
       name: "deployed-worker",
@@ -870,8 +876,8 @@ test("requires an injected transport for AWS runtime invocation", async () => {
 });
 
 test("fails predictably when AWS transport returns an error", async () => {
-  const functions = defineFunctions({
-    getUser: defineFunction({
+  const functions = createFunctions({
+    getUser: fn({
       handler: (payload) => ({
         id: payload.id,
         name: "local",
@@ -916,8 +922,8 @@ test("supports async AWS Lambda invocation mode", async () => {
         statusCode: 202,
       }),
   };
-  const functions = defineFunctions({
-    sendEmail: defineFunction({
+  const functions = createFunctions({
+    sendEmail: fn({
       handler: (payload) => payload,
       input: stringSchema,
       output: stringSchema,
@@ -936,8 +942,8 @@ test("supports async AWS Lambda invocation mode", async () => {
 test("retries transient invoke failures and enforces timeout", async () => {
   let attempts = 0;
   const functions = activateFunctions(
-    defineFunctions({
-      flaky: defineFunction({
+    createFunctions({
+      flaky: fn({
         handler: () => {
           attempts += 1;
 
@@ -949,7 +955,7 @@ test("retries transient invoke failures and enforces timeout", async () => {
         },
         output: passthroughSchema<{ ok: boolean }>(),
       }),
-      slow: defineFunction({
+      slow: fn({
         handler: async () => {
           await Bun.sleep(50);
           return { ok: true };
@@ -982,8 +988,8 @@ test("retries failed transport errors", async () => {
       throw new Error("socket closed");
     },
   };
-  const functions = defineFunctions({
-    syncWorker: defineFunction({
+  const functions = createFunctions({
+    syncWorker: fn({
       handler: () => ({ ok: true }),
       output: passthroughSchema<{ ok: boolean }>(),
     }),
