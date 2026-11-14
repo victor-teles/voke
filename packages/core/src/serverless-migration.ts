@@ -1948,10 +1948,12 @@ const createSqsFunctionTemplate = (
   const runtime = fn.runtime ?? undefined;
   const supportedRuntime =
     runtime === "nodejs22.x" || runtime === "nodejs24.x" ? runtime : undefined;
-  const runtimeLine =
+  // voke build generates the Lambda entry for every Function, so only an explicit runtime
+  // carries over from the Serverless service.
+  const synthesisBlock =
     supportedRuntime === undefined
       ? ""
-      : `\n    runtime: ${tsString(supportedRuntime)},`;
+      : `\n  synthesis: {\n    runtime: ${tsString(supportedRuntime)},\n  },`;
   const eventSources = sqsEvents.map((event) => {
     const { queue } = resolveSqsEventSource(event, resourceDeclarations);
 
@@ -1975,11 +1977,7 @@ const messageSchema: StandardSchemaV1<unknown, unknown> = {
 
 // Original Serverless handler: ${fn.handler ?? "not specified"}
 export const ${exportName} = sqs({
-  name: ${tsString(fn.name)},
-  synthesis: {
-    entrypoint: ${tsString(`./src/functions/${kebabCase(fn.name)}.ts`)},
-    handler: ${tsString(`${exportName}.handler`)},${runtimeLine}
-  },
+  name: ${tsString(fn.name)},${synthesisBlock}
   message: messageSchema,
   ${eventSources.length === 1 ? `queue: ${eventSources[0] ?? '""'}` : `queues: [${eventSources.join(", ")}]`},
   handler: async (payload) => {
@@ -2003,10 +2001,12 @@ const createFunctionTemplate = (
   const runtime = fn.runtime ?? undefined;
   const supportedRuntime =
     runtime === "nodejs22.x" || runtime === "nodejs24.x" ? runtime : undefined;
-  const runtimeLine =
+  // voke build generates the Lambda entry for every Function, so only an explicit runtime
+  // carries over from the Serverless service.
+  const synthesisBlock =
     supportedRuntime === undefined
       ? ""
-      : `\n    runtime: ${tsString(supportedRuntime)},`;
+      : `\n  synthesis: {\n    runtime: ${tsString(supportedRuntime)},\n  },`;
   const eventTypes = fn.events
     .filter((event) => event.type === "sqs" || event.type === "eventBridge")
     .map((event) => event.type);
@@ -2024,11 +2024,7 @@ const outputSchema: StandardSchemaV1<unknown, unknown> = {
 
 // Original Serverless handler: ${fn.handler ?? "not specified"}
 export const ${exportName} = fn({
-  name: ${tsString(fn.name)},
-  synthesis: {
-    entrypoint: ${tsString(`./src/functions/${kebabCase(fn.name)}.ts`)},
-    handler: ${tsString(`${exportName}.handler`)},${runtimeLine}
-  },
+  name: ${tsString(fn.name)},${synthesisBlock}
   handler: async (payload: unknown) => {
     return {
       data: {
@@ -2105,15 +2101,7 @@ const createConfigTemplate = (service: ServerlessService): string => {
       )
     ),
   };
-  const workerFunctions = Object.values(service.functions).filter(
-    hasWorkerEvent
-  );
   const resources = createResourceDeclarations(service).generated;
-  const vokeImports = ["defineConfig"];
-  const functionImport =
-    workerFunctions.length === 0
-      ? ""
-      : '\nimport { functions } from "./src/functions";';
   const resourceImports =
     resources.length === 0
       ? ""
@@ -2127,16 +2115,19 @@ const createConfigTemplate = (service: ServerlessService): string => {
     resourceEntries.length === 0
       ? ""
       : `\n    resources: {\n${resourceEntries.join("\n")}\n    },`;
-  const functionsBlock = workerFunctions.length === 0 ? "" : "  functions,\n";
 
-  return `import { ${vokeImports.join(", ")} } from "voke";${functionImport}${resourceImports}
+  // Functions live in the entrypoint (src/index.ts); the config holds project metadata,
+  // the Provider, and infrastructure resources.
+  return `import { aws } from "@voke/aws";
+import { defineConfig } from "voke";${resourceImports}
 
 export default defineConfig({
   name: ${tsString(service.service)},
+  provider: aws(),
   stage: ${tsString(service.provider.stage ?? "local")},
   region: ${tsString(service.provider.region ?? "us-east-1")},
   entrypoint: "./src/index.ts",
-${functionsBlock}  cloudFormation: {
+  cloudFormation: {
     environment: ${stringifyObject(environment, 4).replaceAll("\n", "\n    ")},${resourceBlock}
   },
 });
@@ -2186,7 +2177,6 @@ ${routeFunctionBlock}});
 
 const service = voke(functions, { config });
 
-export const handler = service.handler;
 export default service;
 `;
 };
@@ -2198,6 +2188,7 @@ const createTsconfig = (): Record<string, YamlValue> => ({
 
 const createPackageJson = (name: string): Record<string, YamlValue> => ({
   dependencies: {
+    "@voke/aws": "workspace:*",
     hono: "^4.0.0",
     voke: "workspace:*",
   },

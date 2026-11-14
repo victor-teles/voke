@@ -16,6 +16,7 @@ test("publishes AWS provider helpers from @voke/aws", async () => {
     "createAwsClientConfig",
     "createAwsLambdaHandler",
     "createAwsLambdaInvokeTransport",
+    "createLambdaHandlers",
     "createResourceBindingName",
     "createSqsEventHandler",
     "handleAwsLambdaRequest",

@@ -9,11 +9,23 @@ const writeProviderConfig = async (
   name: string
 ): Promise<string> => {
   const path = `${directory}/voke.config.ts`;
+  const entrypoint = `${directory}/src/index.ts`;
 
   await Bun.$`mkdir -p ${directory}`;
+  // synth imports the entrypoint to discover the Functions it declares.
+  await Bun.write(
+    entrypoint,
+    `import { createFunctions, http, route } from "${import.meta.dir}/../src/index.ts";
+
+export const functions = createFunctions({
+  http: http({ routes: [route.get("/health", { handler: () => "ok" })] }),
+});
+`
+  );
   await Bun.write(
     path,
     `export default {
+  entrypoint: ${JSON.stringify(entrypoint)},
   name: ${JSON.stringify(name)},
   provider: {
     name: "test",

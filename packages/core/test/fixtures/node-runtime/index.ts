@@ -1,4 +1,4 @@
-import { aws, bindResource } from "@voke/aws";
+import { aws, bindResource, sqs } from "@voke/aws";
 
 import { createFunctions, fn, http, route, voke } from "../../../src/index";
 import type { StandardSchemaV1 } from "../../../src/schema";
@@ -27,7 +27,9 @@ const messageSchema: StandardSchemaV1<
 
 const usersTable = bindResource("usersTable", "name");
 
-const functions = createFunctions({
+export const processedOrders: string[] = [];
+
+export const functions = createFunctions({
   greet: fn({
     handler: (payload) => ({ message: `Hello, ${payload.name}` }),
     input: greetingSchema,
@@ -47,13 +49,21 @@ const functions = createFunctions({
       }),
     ],
   }),
+  processOrder: sqs({
+    handler: (batch) => {
+      for (const message of batch.messages) {
+        processedOrders.push(message.body.name);
+      }
+
+      return batch.ok();
+    },
+    message: greetingSchema,
+    queue: "ordersQueue",
+  }),
 });
 
 const gateway = voke(functions, {
-  config: { name: "node-runtime" },
-  provider: aws(),
+  config: { name: "node-runtime", provider: aws() },
 });
-
-export const { handler } = gateway;
 
 export default gateway;

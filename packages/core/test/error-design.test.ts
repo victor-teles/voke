@@ -136,3 +136,27 @@ plugins:
     "Unsupported Serverless event kafka on function worker: kafka is not an automatic Voke migration target. Recreate the trigger, permissions, batching, and failure behavior manually before cutting over."
   );
 });
+
+const reject = (input: Record<string, unknown>) => () =>
+  defineConfig({ name: "removed", ...input } as Parameters<
+    typeof defineConfig
+  >[0]);
+
+test("rejects the removed config-first and single-function settings with a path", () => {
+  expect(reject({ functions: {} })).toThrow(VokeConfigError);
+  expect(reject({ functions: {} })).toThrow(
+    "Invalid Voke config at functions: Functions are declared in the project entrypoint, not in voke.config.ts"
+  );
+  expect(reject({ handler: "index.handler" })).toThrow(
+    'Invalid Voke config at handler: "handler" was removed'
+  );
+  expect(reject({ cloudFormation: { handler: "index.handler" } })).toThrow(
+    "Invalid Voke config at cloudFormation.handler"
+  );
+  expect(reject({ api: { routes: ["$default"] } })).toThrow(
+    "Invalid Voke config at api.routes"
+  );
+  expect(reject({ api: { function: "api" } })).toThrow(
+    "Invalid Voke config at api.function"
+  );
+});

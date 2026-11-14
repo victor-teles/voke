@@ -8,11 +8,11 @@ voke migrate serverless ./serverless.yml --out ./voke-migration
 
 The command writes a small Voke project with:
 
-- `src/index.ts` for a generated Function-first Gateway.
+- `src/index.ts` for a generated Function-first Gateway. It is the project entrypoint and owns the Function Registry, including any worker Functions; `voke build` generates their Lambda handlers.
 - `src/routes/*.ts` for Route Builder declarations from HTTP API and REST API events.
 - `src/functions/*.ts` for SQS Event Source Functions and EventBridge worker skeletons.
 - `src/functions/index.ts` for the generated Function Registry when workers exist.
-- `voke.config.ts` for app, build, and CloudFormation synthesis settings.
+- `voke.config.ts` for app settings, the `aws()` Provider, and CloudFormation resources. It does not list Functions.
 - `MIGRATION_REPORT.md` for generated files, converted behavior, manual work grouped by risk, plugin notes, unknown fields, and compatibility projections.
 - `SERVERLESS_COMPATIBILITY.md` for the compatibility matrix with status, confidence, generated output, and manual work.
 

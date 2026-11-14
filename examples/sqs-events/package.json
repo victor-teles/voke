@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "voke build ./src/functions.ts",
+    "build": "voke build",
     "test": "bun test",
     "typecheck": "bunx tsgo --project tsconfig.json --noEmit",
     "clean": "rm -rf dist coverage"

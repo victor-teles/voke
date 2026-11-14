@@ -10,11 +10,11 @@ import {
 } from "voke";
 
 import { sqsQueue } from "../src/cloudformation";
-import { aws, createAwsClientConfig } from "../src/index";
+import { aws, createAwsClientConfig, createLambdaHandlers } from "../src/index";
 
-test("adds an AWS Lambda handler to a Voke Gateway", async () => {
+test("serves a Gateway's routes through the generated AWS Lambda handler", async () => {
   const functions = createFunctions({
-    api: http({
+    http: http({
       routes: [
         route.get("/health", {
           handler: () => ({ ok: true }),
@@ -24,20 +24,15 @@ test("adds an AWS Lambda handler to a Voke Gateway", async () => {
   });
 
   const gateway = voke(functions, {
-    config: { name: "health-api" },
-    provider: aws(),
-  }) as ReturnType<typeof voke<typeof functions>> & {
-    handler: (
-      event: {
-        rawPath: string;
-        requestContext: { http: { method: string; path: string } };
-        version: "2.0";
-      },
-      context?: object
-    ) => Promise<{ body?: string; statusCode: number }>;
-  };
+    config: { name: "health-api", provider: aws() },
+  });
+  const handler = createLambdaHandlers({ default: gateway }).http as (event: {
+    rawPath: string;
+    requestContext: { http: { method: string; path: string } };
+    version: "2.0";
+  }) => Promise<{ body?: string; statusCode: number }>;
 
-  const response = await gateway.handler({
+  const response = await handler({
     rawPath: "/health",
     requestContext: { http: { method: "GET", path: "/health" } },
     version: "2.0",

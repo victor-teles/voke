@@ -1,14 +1,15 @@
 #!/usr/bin/env bun
 
 import packageJson from "../package.json";
-import { createBuildPlan } from "./build";
 import { defineConfig, loadVokeConfig } from "./config";
 import type { VokeConfig } from "./config";
 import { createDevPlan } from "./dev";
 import { VokeError } from "./errors";
+import type { FunctionRegistry, FunctionRegistryInput } from "./invoke";
 import { createLocalBootstrapPlan, LocalProviderError } from "./local";
 import type { LocalProvider } from "./local";
 import { createInternalModel } from "./model";
+import { loadProject } from "./project";
 import { generateRemoteModules } from "./remote";
 import { writeServerlessMigration } from "./serverless-migration";
 
@@ -512,6 +513,8 @@ export const synth = async (options: {
   stage?: string;
   region?: string;
   entrypoint?: string;
+  /** The Function Registry discovered from the project entrypoint (see loadProject). */
+  functions?: FunctionRegistry | FunctionRegistryInput;
   out?: string;
 }): Promise<string> => {
   const config = defineConfig({
@@ -533,7 +536,7 @@ export const synth = async (options: {
 
   const template = synthesize({
     config,
-    model: createInternalModel(config),
+    model: createInternalModel({ ...config, functions: options.functions }),
   });
   const out = options.out ?? config.cloudFormation.out;
   const directory = out.split("/").slice(0, -1).join("/");
@@ -550,15 +553,36 @@ export const synth = async (options: {
 export const build = async (
   config: VokeConfig,
   options: {
-    entrypoints?: string[];
+    /** The project entrypoint that declares the Functions. Defaults to `config.entrypoint`. */
+    entrypoint?: string;
+    functions: FunctionRegistry | FunctionRegistryInput;
     outdir?: string;
     run?: CommandRunner;
-  } = {}
+  }
 ): Promise<void> => {
-  const plan = createBuildPlan(config, {
-    entrypoints: options.entrypoints,
-    outdir: options.outdir,
+  const createPlan = config.provider?.build?.plan;
+
+  if (createPlan === undefined) {
+    throw new CliUsageError(
+      config.provider === undefined
+        ? "No provider configured for build."
+        : `Provider "${config.provider.name}" does not support build.`
+    );
+  }
+
+  const plan = createPlan({
+    build:
+      options.outdir === undefined
+        ? config.build
+        : { ...config.build, outdir: options.outdir },
+    config,
+    entrypoint: options.entrypoint ?? config.entrypoint,
+    functions: options.functions,
   });
+
+  for (const [path, contents] of Object.entries(plan.sources)) {
+    await Bun.write(path, contents);
+  }
 
   await (options.run ?? runCommand)(plan.command);
 
@@ -721,9 +745,11 @@ const commandHandlers: Record<string, CommandHandler> = {
   build: async (_args, flags, options) => {
     const config = await loadConfigFromFlags(flags);
     const entrypoint = flags.positional[0] ?? flags.values.entrypoint;
+    const project = await loadProject({ config, entrypoint });
 
     await build(config, {
-      entrypoints: entrypoint === undefined ? undefined : [entrypoint],
+      entrypoint: entrypoint ?? config.entrypoint,
+      functions: project.functions,
       outdir: flags.positional[1] ?? flags.values.outdir,
       run: options.run ?? runCommand,
     });
@@ -777,9 +803,13 @@ const commandHandlers: Record<string, CommandHandler> = {
   },
   synth: async (_args, flags) => {
     const config = await loadConfigFromFlags(flags);
+    const entrypoint = flags.values.entrypoint ?? flags.positional[0];
+    const project = await loadProject({ config, entrypoint });
+
     await synth({
       config,
-      entrypoint: flags.values.entrypoint ?? flags.positional[0],
+      entrypoint,
+      functions: project.functions,
       name: flags.values.name,
       out: flags.values.out ?? flags.positional[1],
       region: flags.values.region,

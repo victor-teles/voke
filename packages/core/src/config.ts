@@ -2,11 +2,6 @@ import type { Context } from "hono";
 
 import type { VokeEnv } from "./context";
 import { VokeConfigError } from "./errors";
-import type {
-  AnyFunctionDefinition,
-  FunctionRegistry,
-  FunctionRegistryInput,
-} from "./invoke";
 import { resolveLocalProvider } from "./local-provider";
 import type { LocalProvider, LocalProviderInput } from "./local-provider";
 import type {
@@ -27,7 +22,6 @@ export interface VokeConfig {
   build: VokeBuildConfig;
   cloudFormation: VokeCloudFormationConfig;
   dev: VokeDevConfig;
-  functions: FunctionRegistry | FunctionRegistryInput;
   local: VokeLocalConfig;
   provider?: VokeProvider;
   remotes?: Record<string, VokeRemoteConfig>;
@@ -36,9 +30,6 @@ export interface VokeConfig {
 
 export interface VokeApiConfig {
   name: string;
-  protocol: "http";
-  function: string;
-  routes: string[];
 }
 
 export interface VokeBuildConfig {
@@ -50,7 +41,6 @@ export interface VokeBuildConfig {
 
 export interface VokeCloudFormationConfig {
   out: string;
-  handler: string;
   environment: Record<string, string>;
   resources: Record<string, VokeResourceInput>;
 }
@@ -101,21 +91,16 @@ export interface VokeConfigInput {
   build?: Partial<VokeBuildConfig>;
   cloudFormation?: Partial<VokeCloudFormationConfig>;
   dev?: Partial<VokeDevConfig>;
-  functions?: FunctionRegistry | FunctionRegistryInput;
   local?: Partial<VokeLocalConfigInput>;
   provider?: VokeProvider;
   remotes?: Record<string, VokeRemoteConfig | VokeRemoteConfigInput>;
   runtime?: Partial<VokeRuntimeConfig>;
-  handler?: string;
   environment?: Record<string, string>;
   resources?: Record<string, VokeResourceInput>;
 }
 
 const defineApiConfig = (input: VokeConfigInput): VokeApiConfig => ({
-  function: input.api?.function ?? "api",
   name: input.api?.name ?? input.name,
-  protocol: input.api?.protocol ?? "http",
-  routes: input.api?.routes ?? ["$default"],
 });
 
 export const createHandlerNameFromEntrypoint = (entrypoint: string): string => {
@@ -129,32 +114,74 @@ const unique = (values: string[]): string[] => [...new Set(values)];
 
 const defaultBuildExternal = ["@aws-sdk/*"];
 
-const assertNoBuildTarget = (input: VokeConfigInput): void => {
-  if (input.build !== undefined && "target" in input.build) {
-    throw VokeConfigError.validation([
-      {
-        message:
-          '"build.target" was removed; Voke always builds an ESM bundle for the Lambda Node.js runtime',
-        path: "build.target",
-      },
-    ]);
+const functionsInEntrypointMessage =
+  "Functions are declared in the project entrypoint, not in voke.config.ts. Export them from the entrypoint: export default voke(functions, { config }) or export const functions = createFunctions({ ... })";
+const generatedHandlerMessage =
+  "was removed; Voke generates one Lambda handler per Function from the project entrypoint";
+
+// Settings removed by ADR 0007 (opinionated framework). They fail loudly instead of being ignored,
+// because a silently ignored setting would change what gets deployed.
+const removedSettings = (
+  input: VokeConfigInput
+): { message: string; path: string }[] => {
+  const raw = input as unknown as Record<string, unknown> & {
+    api?: Record<string, unknown>;
+    build?: Record<string, unknown>;
+    cloudFormation?: Record<string, unknown>;
+  };
+  const issues: { message: string; path: string }[] = [];
+
+  if ("functions" in raw) {
+    issues.push({ message: functionsInEntrypointMessage, path: "functions" });
+  }
+
+  if ("handler" in raw) {
+    issues.push({
+      message: `"handler" ${generatedHandlerMessage}`,
+      path: "handler",
+    });
+  }
+
+  if (raw.cloudFormation !== undefined && "handler" in raw.cloudFormation) {
+    issues.push({
+      message: `"cloudFormation.handler" ${generatedHandlerMessage}`,
+      path: "cloudFormation.handler",
+    });
+  }
+
+  for (const key of ["function", "routes", "protocol"]) {
+    if (raw.api !== undefined && key in raw.api) {
+      issues.push({
+        message: `"api.${key}" was removed; HTTP routes come from the route-backed Functions in the project entrypoint`,
+        path: `api.${key}`,
+      });
+    }
+  }
+
+  if (raw.build !== undefined && "target" in raw.build) {
+    issues.push({
+      message:
+        '"build.target" was removed; Voke always builds an ESM bundle for the Lambda Node.js runtime',
+      path: "build.target",
+    });
+  }
+
+  return issues;
+};
+
+const assertNoRemovedSettings = (input: VokeConfigInput): void => {
+  const issues = removedSettings(input);
+
+  if (issues.length > 0) {
+    throw VokeConfigError.validation(issues);
   }
 };
 
 const defineBuildConfig = (input: VokeConfigInput): VokeBuildConfig => {
-  assertNoBuildTarget(input);
-
   const entrypoint = input.entrypoint ?? "./src/index.ts";
-  const functionEntrypoints = Object.entries(input.functions ?? {})
-    .filter(([key]) => key !== "invoke")
-    .map(([, definition]) => definition as AnyFunctionDefinition)
-    .map((definition) => definition.synthesis?.entrypoint)
-    .filter((value): value is string => value !== undefined);
 
   return {
-    entrypoints: unique(
-      input.build?.entrypoints ?? [entrypoint, ...functionEntrypoints]
-    ),
+    entrypoints: unique(input.build?.entrypoints ?? [entrypoint]),
     external: [...(input.build?.external ?? defaultBuildExternal)],
     outdir: input.build?.outdir ?? "./dist",
   };
@@ -170,10 +197,6 @@ const defineCloudFormationConfig = (
       ...input.environment,
       ...cloudFormation.environment,
     },
-    handler:
-      cloudFormation.handler ??
-      input.handler ??
-      createHandlerNameFromEntrypoint(input.entrypoint ?? "./src/index.ts"),
     out: cloudFormation.out ?? "./dist/cloudformation.json",
     resources: {
       ...input.resources,
@@ -226,6 +249,8 @@ const defineRemotesConfig = (
 };
 
 export const defineConfig = (input: VokeConfigInput): VokeConfig => {
+  assertNoRemovedSettings(input);
+
   const stage =
     input.stage ?? readEnv("VOKE_STAGE") ?? readEnv("STAGE") ?? "local";
   const remotes = defineRemotesConfig(input, stage);
@@ -236,7 +261,6 @@ export const defineConfig = (input: VokeConfigInput): VokeConfig => {
     cloudFormation: defineCloudFormationConfig(input),
     dev: defineDevConfig(input),
     entrypoint: input.entrypoint ?? "./src/index.ts",
-    functions: input.functions ?? {},
     local: defineLocalConfig(input),
     name: input.name,
     ...(input.provider === undefined ? {} : { provider: input.provider }),

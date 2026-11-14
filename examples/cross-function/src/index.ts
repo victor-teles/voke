@@ -1,6 +1,7 @@
 import { schema } from "@voke/schema";
 import { createFunctions, http, route, voke } from "voke";
 
+import config from "../voke.config";
 import { getUser } from "./functions";
 
 const userParams = schema.object({
@@ -69,7 +70,7 @@ const registry = createFunctions({
 functionRuntime.current = registry;
 
 const gateway = voke(registry, {
-  config: { name: "cross-function-api" },
+  config,
 });
 
 export default gateway;

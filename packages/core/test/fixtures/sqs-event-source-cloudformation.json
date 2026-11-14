@@ -2,10 +2,10 @@
   "AWSTemplateFormatVersion": "2010-09-09",
   "Description": "Voke stack for orders-worker (prod)",
   "Outputs": {
-    "FunctionName": {
+    "ProcessOrdersFunctionName": {
       "Description": "processOrders Lambda function name",
       "Value": {
-        "Ref": "Function"
+        "Ref": "ProcessOrdersFunction"
       }
     },
     "OrdersQueueUrl": {
@@ -42,7 +42,7 @@
       "Properties": {},
       "Type": "AWS::SQS::Queue"
     },
-    "FunctionRole": {
+    "ProcessOrdersFunctionRole": {
       "Properties": {
         "AssumeRolePolicyDocument": {
           "Statement": [
@@ -96,7 +96,7 @@
       },
       "Type": "AWS::IAM::Role"
     },
-    "Function": {
+    "ProcessOrdersFunction": {
       "Metadata": {
         "VokeDeployedName": "orders-worker-prod-processOrders",
         "VokeEntrypoint": "./src/functions/process-orders.ts",
@@ -121,13 +121,13 @@
         "FunctionName": "orders-worker-prod-processOrders",
         "Handler": "process-orders.handler",
         "Role": {
-          "Fn::GetAtt": ["FunctionRole", "Arn"]
+          "Fn::GetAtt": ["ProcessOrdersFunctionRole", "Arn"]
         },
         "Runtime": "nodejs22.x"
       },
       "Type": "AWS::Lambda::Function"
     },
-    "FunctionOrdersQueueEventSourceMapping": {
+    "ProcessOrdersFunctionOrdersQueueEventSourceMapping": {
       "Properties": {
         "BatchSize": 10,
         "Enabled": true,
@@ -135,14 +135,14 @@
           "Fn::GetAtt": ["OrdersQueue", "Arn"]
         },
         "FunctionName": {
-          "Ref": "Function"
+          "Ref": "ProcessOrdersFunction"
         },
         "FunctionResponseTypes": ["ReportBatchItemFailures"],
         "MaximumBatchingWindowInSeconds": 0
       },
       "Type": "AWS::Lambda::EventSourceMapping"
     },
-    "FunctionPriorityQueueEventSourceMapping": {
+    "ProcessOrdersFunctionPriorityQueueEventSourceMapping": {
       "Properties": {
         "BatchSize": 5,
         "Enabled": false,
@@ -150,7 +150,7 @@
           "Fn::GetAtt": ["PriorityQueue", "Arn"]
         },
         "FunctionName": {
-          "Ref": "Function"
+          "Ref": "ProcessOrdersFunction"
         },
         "FunctionResponseTypes": ["ReportBatchItemFailures"],
         "MaximumBatchingWindowInSeconds": 30

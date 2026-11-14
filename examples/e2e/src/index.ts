@@ -1,8 +1,8 @@
-import { aws } from "@voke/aws";
 import { created } from "@voke/http";
 import { schema } from "@voke/schema";
 import { createFunctions, http, route, voke } from "voke";
 
+import config from "../voke.config";
 import { sendWelcomeEmail } from "./functions";
 
 const createUserBody = schema.object({
@@ -56,8 +56,7 @@ const registry = createFunctions({
 functionRuntime.current = registry;
 
 const gateway = voke(registry, {
-  config: { name: "e2e-api" },
-  provider: aws(),
+  config,
 });
 
 export default gateway;

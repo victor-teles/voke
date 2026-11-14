@@ -303,16 +303,10 @@ test("creates a local bootstrap plan by synthesizing from Voke config", async ()
   const template = await Bun.file(templatePath).json();
 
   expect(template.Description).toBe("Voke stack for orders-api (local)");
-  expect(template.Resources.Function.Metadata.VokeEntrypoint).toBe(
-    "./src/index.ts"
-  );
-  expect(
-    template.Resources.Function.Properties.Environment.Variables.LOG_LEVEL
-  ).toBe("info");
-  expect(
-    template.Resources.Function.Properties.Environment.Variables
-      .VOKE_RESOURCE_ORDERS_TABLE_NAME
-  ).toEqual({
+  // Local bootstrap provisions infrastructure only; Functions run in the local Gateway.
+  expect(template.Resources.OrdersTable.Type).toBe("AWS::DynamoDB::Table");
+  expect(template.Resources.Function).toBeUndefined();
+  expect(template.Outputs.OrdersTableName.Value).toEqual({
     Ref: "OrdersTable",
   });
   expect(plan.environment.AWS_REGION).toBe("sa-east-1");
@@ -436,12 +430,8 @@ export default defineConfig({
   const template = await Bun.file(templatePath).json();
 
   expect(template.Description).toBe("Voke stack for jobs-api (local)");
-  expect(
-    template.Resources.Function.Properties.Environment.Variables
-      .VOKE_RESOURCE_JOBS_QUEUE_URL
-  ).toEqual({
-    Ref: "JobsQueue",
-  });
+  expect(template.Resources.JobsQueue.Type).toBe("AWS::SQS::Queue");
+  expect(template.Resources.Function).toBeUndefined();
   expect(plan.commands[0]).toContain("jobs-api-local");
 });
 

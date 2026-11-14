@@ -24,14 +24,13 @@ const synthesize = (functions: ReturnType<typeof createFunctions>) => {
   const provider = aws();
   const config = defineConfig({
     cloudFormation: { resources: { signingKey: secretResource() } },
-    functions,
     name: "variables-api",
     provider,
   });
 
   return provider.synthesis?.synthesize?.({
     config,
-    model: createVokeModel(config),
+    model: createVokeModel({ ...config, functions }),
   }) as {
     Resources: Record<
       string,
@@ -54,7 +53,7 @@ const statementResources = (role: RoleResource | undefined): string[] =>
 
 test("gives each Function its own role with only its Runtime Variable permissions", () => {
   const functions = createFunctions({
-    api: http({
+    http: http({
       routes: [route.get("/health", { handler: () => ({ ok: true }) })],
       variables: { apiKey: secret("/voke/api-key") },
     }),

@@ -1,60 +1,73 @@
 {
   "AWSTemplateFormatVersion": "2010-09-09",
   "Description": "Voke stack for snapshot-api (test)",
+  "Outputs": {
+    "ApiUrl": {
+      "Description": "HTTP API URL",
+      "Value": {
+        "Fn::Sub": "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/test"
+      }
+    },
+    "FunctionName": {
+      "Description": "http Lambda function name",
+      "Value": {
+        "Ref": "Function"
+      }
+    }
+  },
   "Resources": {
     "FunctionRole": {
-      "Type": "AWS::IAM::Role",
       "Properties": {
         "AssumeRolePolicyDocument": {
-          "Version": "2012-10-17",
           "Statement": [
             {
+              "Action": "sts:AssumeRole",
               "Effect": "Allow",
               "Principal": {
                 "Service": "lambda.amazonaws.com"
-              },
-              "Action": "sts:AssumeRole"
+              }
             }
-          ]
+          ],
+          "Version": "2012-10-17"
         },
         "ManagedPolicyArns": [
           "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
         ]
-      }
+      },
+      "Type": "AWS::IAM::Role"
     },
     "Function": {
-      "Type": "AWS::Lambda::Function",
       "Metadata": {
-        "VokeDeployedName": "snapshot-api-test",
+        "VokeDeployedName": "snapshot-api-test-http",
         "VokeEntrypoint": "./src/index.ts",
-        "VokeFunction": "api",
+        "VokeFunction": "http",
         "VokeInvokable": false,
-        "VokeRoutes": ["$default"]
+        "VokeRoutes": ["GET /health"]
       },
       "Properties": {
-        "FunctionName": "snapshot-api-test",
-        "Runtime": "nodejs22.x",
-        "Handler": "index.handler",
-        "Role": {
-          "Fn::GetAtt": ["FunctionRole", "Arn"]
-        },
         "Code": {
           "ZipFile": "export const handler = async () => ({ statusCode: 501, body: 'Build and upload this Voke function before deploying.' });"
         },
         "Environment": {
           "Variables": {}
-        }
-      }
+        },
+        "FunctionName": "snapshot-api-test-http",
+        "Handler": "index.http",
+        "Role": {
+          "Fn::GetAtt": ["FunctionRole", "Arn"]
+        },
+        "Runtime": "nodejs22.x"
+      },
+      "Type": "AWS::Lambda::Function"
     },
     "Api": {
-      "Type": "AWS::ApiGatewayV2::Api",
       "Properties": {
         "Name": "snapshot-api-test",
         "ProtocolType": "HTTP"
-      }
+      },
+      "Type": "AWS::ApiGatewayV2::Api"
     },
-    "Integration": {
-      "Type": "AWS::ApiGatewayV2::Integration",
+    "HttpIntegration": {
       "Properties": {
         "ApiId": {
           "Ref": "Api"
@@ -64,32 +77,32 @@
           "Fn::GetAtt": ["Function", "Arn"]
         },
         "PayloadFormatVersion": "2.0"
-      }
+      },
+      "Type": "AWS::ApiGatewayV2::Integration"
     },
-    "Route": {
-      "Type": "AWS::ApiGatewayV2::Route",
+    "HttpGETHealthRoute": {
       "Properties": {
         "ApiId": {
           "Ref": "Api"
         },
-        "RouteKey": "$default",
+        "RouteKey": "GET /health",
         "Target": {
-          "Fn::Sub": "integrations/${Integration}"
+          "Fn::Sub": "integrations/${HttpIntegration}"
         }
-      }
+      },
+      "Type": "AWS::ApiGatewayV2::Route"
     },
     "Stage": {
-      "Type": "AWS::ApiGatewayV2::Stage",
       "Properties": {
         "ApiId": {
           "Ref": "Api"
         },
-        "StageName": "test",
-        "AutoDeploy": true
-      }
+        "AutoDeploy": true,
+        "StageName": "test"
+      },
+      "Type": "AWS::ApiGatewayV2::Stage"
     },
     "Permission": {
-      "Type": "AWS::Lambda::Permission",
       "Properties": {
         "Action": "lambda:InvokeFunction",
         "FunctionName": {
@@ -99,21 +112,8 @@
         "SourceArn": {
           "Fn::Sub": "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/*/*"
         }
-      }
-    }
-  },
-  "Outputs": {
-    "ApiUrl": {
-      "Description": "HTTP API URL",
-      "Value": {
-        "Fn::Sub": "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/test"
-      }
-    },
-    "FunctionName": {
-      "Description": "api Lambda function name",
-      "Value": {
-        "Ref": "Function"
-      }
+      },
+      "Type": "AWS::Lambda::Permission"
     }
   }
 }

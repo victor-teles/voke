@@ -2,10 +2,10 @@
   "AWSTemplateFormatVersion": "2010-09-09",
   "Description": "Voke stack for worker-api (test)",
   "Outputs": {
-    "FunctionName": {
+    "SendWelcomeEmailFunctionName": {
       "Description": "sendWelcomeEmail Lambda function name",
       "Value": {
-        "Ref": "Function"
+        "Ref": "SendWelcomeEmailFunction"
       }
     },
     "EventsQueueUrl": {
@@ -26,7 +26,7 @@
       "Properties": {},
       "Type": "AWS::SQS::Queue"
     },
-    "FunctionRole": {
+    "SendWelcomeEmailFunctionRole": {
       "Properties": {
         "AssumeRolePolicyDocument": {
           "Statement": [
@@ -68,7 +68,7 @@
       },
       "Type": "AWS::IAM::Role"
     },
-    "Function": {
+    "SendWelcomeEmailFunction": {
       "Metadata": {
         "VokeDeployedName": "sendWelcomeEmail",
         "VokeEntrypoint": "./src/functions/send-welcome-email.ts",
@@ -92,7 +92,7 @@
         "FunctionName": "sendWelcomeEmail",
         "Handler": "send-welcome-email.handler",
         "Role": {
-          "Fn::GetAtt": ["FunctionRole", "Arn"]
+          "Fn::GetAtt": ["SendWelcomeEmailFunctionRole", "Arn"]
         },
         "Runtime": "nodejs24.x"
       },

@@ -37,7 +37,7 @@ const user = await functions.invoke("getUser", { id: "usr_1" });
 
 Runtime Variables are per-Function implementation dependencies for values loaded at runtime. They do not change a Function Contract, and they are not exposed to generated remote clients.
 
-Use provider-specific builders for app code. The first-party AWS builders live on `voke/aws`:
+Use provider-specific builders for app code. The first-party AWS builders live in `@voke/aws`:
 
 ```ts
 import { createFunctions, fn, voke } from "voke";
@@ -96,7 +96,7 @@ Values cache by warm Function runtime and Runtime Variable key. Use `cache: fals
 
 Local and test resolution checks Function-scoped overrides, project defaults, `VOKE_VARIABLE_<FUNCTION>_<KEY>`, `VOKE_VARIABLE_<KEY>`, then the provider. Override values are strings so `text()` and `json(schema?)` behave the same across overrides, environment fallback, and providers.
 
-Provider authors can use `voke/variables` to create provider objects and provider-specific builders. Providers are registered at the Gateway/test/runtime boundary, and unknown third-party providers fail before handler execution when Voke has enough context.
+Provider authors can use `createVariableProvider` and `createVariableSource` from `voke` to create provider objects and provider-specific builders. Providers are registered at the Gateway/test/runtime boundary, and unknown third-party providers fail before handler execution when Voke has enough context.
 
 ## Remote Function Registries
 
@@ -295,3 +295,19 @@ Each message body is serialized as JSON locally, parsed as JSON in the SQS runti
 Voke enables Lambda partial batch failure reporting for every synthesized SQS Event Source mapping. `batch.ok()` returns `{ batchItemFailures: [] }` unless validation already marked messages as failed, and `batch.batchResult().fail(message)` adds explicit per-message failures.
 
 The v1 SQS boundary is intentionally small: Event Source Functions cannot mix with HTTP routes or invokable output contracts, event-source options are limited to batch size, maximum batching window, and enabled state, and DLQ/redrive configuration is deferred to the queue resource lifecycle.
+
+## How Functions become Lambda handlers
+
+The project entrypoint (`entrypoint` in `voke.config.ts`, `./src/index.ts` by default) is the only place Functions are declared. It exports either a Gateway (`export default voke(functions, { config })`) or, for projects without HTTP routes, the registry itself (`export const functions = createFunctions({ ... })`). `voke.config.ts` does not accept Functions.
+
+`voke synth` and `voke build` import the entrypoint to discover the Functions. While it loads, `process.env.VOKE_SYNTH` is `"1"`, so guard side effects such as opening connections or starting servers:
+
+```ts
+if (process.env.VOKE_SYNTH !== "1") {
+  await connectToDatabase();
+}
+```
+
+`voke build` then generates `.voke/build/index.ts`, which exports one Lambda handler per Function, and bundles it to `dist/index.js` with `dist/voke-manifest.json` listing each Function's handler. You never write Lambda handlers yourself.
+
+Handler export names come from registry keys: a key that is a valid identifier keeps its spelling (`http` becomes `index.http`), and other keys become camelCase (`process-order` becomes `index.processOrder`). Renaming a registry key renames its Lambda handler. Deployed Lambda names are `<name>-<stage>-<key>` unless a Function sets `name`.

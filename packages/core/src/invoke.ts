@@ -3,6 +3,7 @@ import type { Context, Hono, MiddlewareHandler } from "hono";
 import packageJson from "../package.json";
 import type {
   AuthorizerRegistryInput,
+  AuthorizerRequest,
   RequestAuthorizerFunctionDefinition,
   RequestAuthorizerHandler,
 } from "./authorizers";
@@ -10,6 +11,7 @@ import type { VokeNodeRuntime } from "./config";
 import type { VokeEnv } from "./context";
 import { VokeConfigError } from "./errors";
 import { json, jsonError } from "./http";
+import type { VokeProvider } from "./provider";
 import { Voke } from "./route-builder";
 import { readEnv, sleep } from "./runtime-env";
 import {
@@ -269,7 +271,8 @@ export type RouteAuthorizerReference = "none" | string;
 
 export interface RouteAuthContext {
   readonly context: Record<string, unknown>;
-  readonly source: "lambda";
+  /** "lambda" for Request/Lambda authorizer results, "jwt" for verified JWT claims. */
+  readonly source: "jwt" | "lambda";
 }
 
 export type RouteMethod =
@@ -981,6 +984,33 @@ const activatedFunctionDefinitions = new WeakMap<
 >();
 const reservedFunctionRegistryKeys = new Set(["invoke", "route", "sendEvent"]);
 
+const functionKinds: ReadonlySet<string> = new Set<FunctionKind>([
+  "authorizer",
+  "event",
+  "invokable",
+  "route",
+]);
+
+const isFunctionDefinition = (value: unknown): value is AnyFunctionDefinition =>
+  typeof value === "object" &&
+  value !== null &&
+  "key" in value &&
+  "kind" in value &&
+  typeof value.kind === "string" &&
+  functionKinds.has(value.kind);
+
+/**
+ * The Function definitions of a registry, in declaration order. Membership is decided by shape,
+ * so registry methods (`invoke`, `route`, `sendEvent`) are never entries.
+ */
+export const functionRegistryEntries = (
+  registry: FunctionRegistry | FunctionRegistryInput | object
+): [string, AnyFunctionDefinition][] =>
+  Object.entries(registry).filter(
+    (entry): entry is [string, AnyFunctionDefinition] =>
+      isFunctionDefinition(entry[1])
+  );
+
 const currentTrace = (): InvokeTrace => traceStack.at(-1) ?? {};
 
 export const activateFunctionRegistry = (
@@ -1017,18 +1047,11 @@ export const activateFunctionRegistry = (
 
   activatedFunctionRegistries.set(registry, activation);
 
-  for (const value of Object.values(registry)) {
-    if (
-      typeof value === "object" &&
-      value !== null &&
-      "kind" in value &&
-      "key" in value
-    ) {
-      activatedFunctionDefinitions.set(
-        value as BaseFunctionDefinition,
-        activation
-      );
-    }
+  for (const [, definition] of functionRegistryEntries(registry)) {
+    activatedFunctionDefinitions.set(
+      definition as BaseFunctionDefinition,
+      activation
+    );
   }
 };
 
@@ -1362,6 +1385,60 @@ const routeAuthorizerName = (
   return authorizer === "none" ? undefined : authorizer;
 };
 
+export interface RequestAuthorizerOutcome {
+  readonly authorized: boolean;
+  /** The validated authorizer context; empty when the request is not authorized. */
+  readonly context: Record<string, unknown>;
+}
+
+/**
+ * Runs a Request Authorizer Function the way every runtime does: an invoke context with its
+ * Runtime Variables loaded, a boolean `authorized`, and `context` validated against the Function's
+ * `context` schema. Throws InvokeError for an invalid result. Shared by local route auth and the
+ * deployed authorizer adapter.
+ */
+export const runRequestAuthorizer = async (
+  definition: RequestAuthorizerFunctionDefinition,
+  request: AuthorizerRequest
+): Promise<RequestAuthorizerOutcome> => {
+  const handler = definition.handler as RequestAuthorizerHandler;
+  const runtimeContext = createInvokeContext(
+    definition as unknown as AnyFunctionDefinition,
+    {}
+  );
+  await loadRuntimeVariablesBeforeHandler(runtimeContext.variables);
+  const result = await handler(request, runtimeContext);
+
+  if (typeof result.authorized !== "boolean") {
+    throw new InvokeError("Invalid authorizer result", {
+      code: "INVALID_RESULT",
+    });
+  }
+
+  if (!result.authorized) {
+    return { authorized: false, context: {} };
+  }
+
+  const context =
+    definition.context === undefined
+      ? (result.context ?? {})
+      : await parseWithSchema(
+          definition.context as StandardSchemaV1<
+            unknown,
+            Record<string, unknown>
+          >,
+          result.context,
+          (message, cause, issues) =>
+            new InvokeError(`Invalid authorizer context: ${message}`, {
+              cause,
+              code: "INVALID_RESULT",
+              issues,
+            })
+        );
+
+  return { authorized: true, context };
+};
+
 const evaluateLocalAuthorizer = async (
   route: AnyRouteDefinition,
   definition: AnyFunctionDefinition,
@@ -1414,51 +1491,17 @@ const evaluateLocalAuthorizer = async (
   }
 
   try {
-    const handler = target.handler as RequestAuthorizerHandler;
-    const runtimeContext = createInvokeContext(
-      target as AnyFunctionDefinition,
-      {}
-    );
-    await loadRuntimeVariablesBeforeHandler(runtimeContext.variables);
-    const result = await handler(
-      {
-        headers,
-        raw: request,
-        request,
-      },
-      runtimeContext
+    const result = await runRequestAuthorizer(
+      target as RequestAuthorizerFunctionDefinition,
+      { headers, raw: request, request }
     );
 
-    if (typeof result.authorized !== "boolean") {
-      return jsonError("Invalid authorizer result", {
-        code: "INTERNAL_SERVER_ERROR",
-        status: 500,
-      });
-    }
-
-    if (result.authorized !== true) {
+    if (!result.authorized) {
       return jsonError("Forbidden", { code: "FORBIDDEN", status: 403 });
     }
 
-    const context =
-      target.context === undefined
-        ? (result.context ?? {})
-        : await parseWithSchema(
-            target.context as StandardSchemaV1<
-              unknown,
-              Record<string, unknown>
-            >,
-            result.context,
-            (message, cause, issues) =>
-              new InvokeError(`Invalid authorizer context: ${message}`, {
-                cause,
-                code: "INVALID_RESULT",
-                issues,
-              })
-          );
-
     return {
-      context,
+      context: result.context,
       source: "lambda",
     };
   } catch (error) {
@@ -1469,20 +1512,49 @@ const evaluateLocalAuthorizer = async (
   }
 };
 
+// A Provider may report that the platform already authorized the request (for example API
+// Gateway ran the Lambda authorizer before invoking this Function); then the authorizer does not
+// run a second time. Otherwise the route's authorizer is evaluated locally.
+const resolveRouteAuth = async (
+  route: AnyRouteDefinition,
+  definition: AnyFunctionDefinition,
+  registry: FunctionRegistry | FunctionRegistryInput,
+  context: Context<VokeEnv>,
+  provider: VokeProvider | undefined
+): Promise<Response | RouteAuthContext | undefined> => {
+  if (routeAuthorizerName(route, definition) === undefined) {
+    return undefined;
+  }
+
+  const platformAuth = provider?.runtime?.routeAuth?.({ env: context.env });
+
+  if (platformAuth !== undefined) {
+    return platformAuth;
+  }
+
+  return await evaluateLocalAuthorizer(
+    route,
+    definition,
+    registry,
+    context.req.raw,
+    contextHeaders(context)
+  );
+};
+
 const mountRoute = (
   app: Hono<VokeEnv>,
   route: AnyRouteDefinition,
   definition: AnyFunctionDefinition,
-  registry: FunctionRegistry | FunctionRegistryInput
+  registry: FunctionRegistry | FunctionRegistryInput,
+  provider: VokeProvider | undefined
 ): void => {
   app.on([route.method], [route.path], ...route.middleware, async (context) => {
-    const headers = contextHeaders(context);
-    const auth = await evaluateLocalAuthorizer(
+    const auth = await resolveRouteAuth(
       route,
       definition,
       registry,
-      context.req.raw,
-      headers
+      context,
+      provider
     );
 
     if (auth instanceof Response) {
@@ -1947,20 +2019,16 @@ const findRoute = (
 
 export const mountFunctionRoutes = (
   app: Hono<VokeEnv>,
-  registry: FunctionRegistry | FunctionRegistryInput
+  registry: FunctionRegistry | FunctionRegistryInput,
+  provider?: VokeProvider
 ): void => {
-  for (const [key, definition] of Object.entries(registry)) {
-    if (
-      key === "invoke" ||
-      key === "route" ||
-      definition.routes === undefined ||
-      definition.routes.length === 0
-    ) {
+  for (const [, definition] of functionRegistryEntries(registry)) {
+    if (definition.routes === undefined || definition.routes.length === 0) {
       continue;
     }
 
     for (const route of definition.routes) {
-      mountRoute(app, route, definition, registry);
+      mountRoute(app, route, definition, registry, provider);
     }
   }
 };
@@ -1970,13 +2038,8 @@ export const assertUniqueFunctionRoutes = (
 ): void => {
   const routes = new Map<string, string>();
 
-  for (const [key, definition] of Object.entries(registry)) {
-    if (
-      key === "invoke" ||
-      key === "route" ||
-      definition.routes === undefined ||
-      definition.routes.length === 0
-    ) {
+  for (const [key, definition] of functionRegistryEntries(registry)) {
+    if (definition.routes === undefined || definition.routes.length === 0) {
       continue;
     }
 
@@ -2015,7 +2078,7 @@ const schemaObjectKeys = (schema: unknown): readonly string[] | undefined => {
 export const assertRouteParamSchemas = (
   registry: FunctionRegistry | FunctionRegistryInput
 ): void => {
-  for (const definition of Object.values(registry)) {
+  for (const [, definition] of functionRegistryEntries(registry)) {
     if (definition.routes === undefined || definition.routes.length === 0) {
       continue;
     }
@@ -2106,11 +2169,7 @@ export const formatDevFunctionSummary = (
   const invokableFunctions: string[] = [];
   const eventFunctions: string[] = [];
 
-  for (const [key, definition] of Object.entries(registry)) {
-    if (key === "invoke" || key === "route" || key === "sendEvent") {
-      continue;
-    }
-
+  for (const [key, definition] of functionRegistryEntries(registry)) {
     if (definition.kind === "event") {
       const eventDefinition = definition as EventFunctionDefinition;
 
