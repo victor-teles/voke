@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "voke build",
+    "deploy": "voke deploy",
+    "remove": "voke remove",
     "test": "bun test",
     "typecheck": "bunx tsgo --project tsconfig.json --noEmit",
     "clean": "rm -rf dist coverage"

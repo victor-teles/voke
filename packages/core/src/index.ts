@@ -41,6 +41,8 @@ export {
 } from "./invoke";
 export {
   VokeConfigError,
+  VokeDeployError,
+  VokeError,
   VokeModelError,
   VokeResourceBindingError,
   VokeRuntimeVariableError,
@@ -85,6 +87,10 @@ export {
   type BuildPlanOutput,
   type ProviderBuildCapability,
   type ProviderBuildInput,
+  type ProviderDeployCapability,
+  type ProviderDeployInput,
+  type ProviderDeployResult,
+  type ProviderRemoveInput,
   type ProviderExtensionRecord,
   type ProviderInvokeCapability,
   type ProviderLocalCapability,

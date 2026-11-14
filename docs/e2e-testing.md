@@ -92,6 +92,8 @@ The same helper can target a deployed stack by passing `baseUrl`:
 const client = createTestClient({ baseUrl: Bun.env.VOKE_E2E_API_URL! });
 ```
 
+After `voke deploy --stage <stage>`, the API URL is in `.voke/outputs/<stage>.json` under `outputs.ApiUrl`. It has no stage suffix (`https://<api-id>.execute-api.<region>.amazonaws.com`), because each stage is its own stack on the HTTP API `$default` stage.
+
 ## Stack Test Context
 
 `createStackTestContext()` prepares local AWS environment variables, resource bindings, CloudFormation output helpers, and deterministic seed commands.

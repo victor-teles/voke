@@ -106,7 +106,7 @@
       },
       "Properties": {
         "Code": {
-          "ZipFile": "export const handler = async () => ({ statusCode: 501, body: 'Build and upload this Voke function before deploying.' });"
+          "ZipFile": "exports.handler = async () => ({ statusCode: 501, body: \"Build and upload this Voke function before deploying.\" });"
         },
         "Environment": {
           "Variables": {

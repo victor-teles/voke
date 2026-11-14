@@ -19,7 +19,7 @@ test("prepares a Local Floci E2E context and seed plan", () => {
   const context = createStackTestContext({ template });
   const deployedContext = createStackTestContext({
     outputs: {
-      ApiUrl: "https://example.execute-api.us-east-1.amazonaws.com/local",
+      ApiUrl: "https://example.execute-api.us-east-1.amazonaws.com",
     },
     template,
   });
@@ -38,7 +38,7 @@ test("prepares a Local Floci E2E context and seed plan", () => {
   );
   expect(context.resource("usersTable", "name")).toBe("UsersTable");
   expect(deployedContext.output("ApiUrl")).toBe(
-    "https://example.execute-api.us-east-1.amazonaws.com/local"
+    "https://example.execute-api.us-east-1.amazonaws.com"
   );
   expect(seedPlan.commands).toHaveLength(2);
   expect(seedPlan.commands[0]).toEqual([

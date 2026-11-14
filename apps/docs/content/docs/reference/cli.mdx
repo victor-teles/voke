@@ -38,11 +38,13 @@ Synthesizes the CloudFormation template for the configured project.
 ## Deploy and remove
 
 ```bash
-voke deploy --name hello-api --stage local --template ./dist/cloudformation.json
-voke remove --name hello-api --stage local
+voke deploy [--stage dev] [--region us-east-1] [--config voke.config.ts] [--dry-run]
+voke remove [--stage dev] [--region us-east-1] [--config voke.config.ts] [--yes]
 ```
 
-Deploys or removes the synthesized stack.
+`voke deploy` builds the project, uploads it, and deploys the stage through the configured Provider, then prints the outputs (API URL first) and writes `.voke/outputs/<stage>.json`. `--dry-run` previews the changes without applying them. The stage `local` is reserved for the local emulator.
+
+`voke remove` deletes the stage after you type its stack name to confirm; `--yes` skips the prompt and is required outside a terminal.
 
 ## Local AWS
 

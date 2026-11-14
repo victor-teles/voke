@@ -1,5 +1,6 @@
 export { VokeError } from "./errors/base";
 export { VokeConfigError, type VokeConfigErrorOptions } from "./errors/config";
+export { VokeDeployError, type VokeDeployErrorOptions } from "./errors/deploy";
 export { VokeModelError, type VokeModelErrorOptions } from "./errors/model";
 export {
   VokeResourceBindingError,

@@ -1,6 +1,7 @@
 export type VokeErrorCode =
   | "CLI_USAGE_ERROR"
   | "CONFIG_ERROR"
+  | "DEPLOY_ERROR"
   | "MODEL_ERROR"
   | "RESOURCE_BINDING_ERROR"
   | "RUNTIME_VARIABLE_ERROR";

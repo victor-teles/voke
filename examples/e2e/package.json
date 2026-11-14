@@ -7,6 +7,8 @@
     "test": "bun test",
     "typecheck": "bunx tsgo --project tsconfig.json --noEmit",
     "build": "voke build",
+    "deploy": "voke deploy",
+    "remove": "voke remove",
     "clean": "rm -rf dist coverage"
   },
   "dependencies": {

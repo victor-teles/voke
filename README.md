@@ -81,10 +81,12 @@ voke dev [entrypoint]
 voke build [entrypoint] [outdir]
 voke create api <name> [directory]
 voke synth [entrypoint] [out] --config voke.config.ts
-voke deploy --name hello-api --stage local --template ./dist/cloudformation.json
-voke remove --name hello-api --stage local
+voke deploy --stage dev
+voke remove --stage dev
 voke migrate serverless [serverless.yml] --out ./voke-migration
 ```
+
+`voke deploy --stage dev` builds, packages, uploads, and deploys the project through the Provider in `voke.config.ts`, then prints the API URL; add `--dry-run` to preview the changes. `voke remove --stage dev` deletes the stage after you confirm it (or with `--yes`). See the deploy guide for what gets created and the permissions needed.
 
 `voke build` writes one ESM bundle per entrypoint for the AWS Lambda Node.js runtime, plus a `package.json` with `"type": "module"` so Lambda loads it as an ES module. The AWS SDK (`@aws-sdk/*`) stays external because the Lambda runtime provides it; set `build.external: []` in `voke.config.ts` to bundle a pinned SDK version instead.
 

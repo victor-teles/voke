@@ -590,64 +590,6 @@ export default defineConfig({
   });
 });
 
-test("experimental deploy and remove CLI commands default to voke.config.ts", async () => {
-  const directory = tempPath(`voke-deploy-config-${crypto.randomUUID()}`);
-  const configPath = `${directory}/voke.config.ts`;
-  const calls: string[][] = [];
-
-  await Bun.$`mkdir -p ${directory}`;
-  await Bun.write(
-    configPath,
-    `import { defineConfig } from "${import.meta.dir}/../src/index.ts";
-
-export default defineConfig({
-  name: "configured-deploy",
-  stage: "qa",
-  region: "sa-east-1",
-  cloudFormation: {
-    out: "${directory}/template.json",
-  },
-});
-`
-  );
-
-  await runCli(["experimental", "deploy", "--config", configPath], {
-    run: (command) => {
-      calls.push(command);
-    },
-  });
-  await runCli(["experimental", "remove", "--config", configPath], {
-    run: (command) => {
-      calls.push(command);
-    },
-  });
-
-  expect(calls).toEqual([
-    [
-      "aws",
-      "cloudformation",
-      "deploy",
-      "--stack-name",
-      "configured-deploy-qa",
-      "--template-file",
-      `${directory}/template.json`,
-      "--capabilities",
-      "CAPABILITY_IAM",
-      "--region",
-      "sa-east-1",
-    ],
-    [
-      "aws",
-      "cloudformation",
-      "delete-stack",
-      "--stack-name",
-      "configured-deploy-qa",
-      "--region",
-      "sa-east-1",
-    ],
-  ]);
-});
-
 test("runs create and build through the CLI parser", async () => {
   const directory = tempPath(`voke-cli-api-${crypto.randomUUID()}`);
   const buildDirectory = tempPath(`voke-cli-build-${crypto.randomUUID()}`);
@@ -761,7 +703,7 @@ test("synthesizes a CloudFormation template with API, Lambda, IAM, resources, bi
     Resource: { "Fn::GetAtt": ["OrdersTable", "Arn"] },
   });
   expect(apiUrlOutput.Value).toEqual({
-    "Fn::Sub": `https://\${Api}.execute-api.\${AWS::Region}.amazonaws.com/prod`,
+    "Fn::Sub": `https://\${Api}.execute-api.\${AWS::Region}.amazonaws.com`,
   });
   expect(ordersTableOutput.Value).toEqual({ Ref: "OrdersTable" });
 });
@@ -810,11 +752,10 @@ test("creates typed AWS resource bindings and client config from environment", (
   setEnv("VOKE_AWS_ENDPOINT_URL", previous.endpoint);
 });
 
-test("runs synth and experimental deploy/remove through the CLI parser", async () => {
+test("runs synth through the CLI parser with config overrides", async () => {
   const directory = tempPath(`voke-cfn-${crypto.randomUUID()}`);
   const templatePath = `${directory}/template.json`;
   const configPath = `${directory}/voke.config.ts`;
-  const commands: string[][] = [];
 
   await Bun.$`mkdir -p ${directory}`;
   await Bun.write(
@@ -843,57 +784,7 @@ export default defineConfig({
     "--out",
     templatePath,
   ]);
-  await runCli(
-    [
-      "experimental",
-      "deploy",
-      "--name",
-      "orders-api",
-      "--stage",
-      "prod",
-      "--template",
-      templatePath,
-    ],
-    {
-      run: (command) => {
-        commands.push(command);
-      },
-    }
-  );
-  await runCli(
-    ["experimental", "remove", "--name", "orders-api", "--stage", "prod"],
-    {
-      run: (command) => {
-        commands.push(command);
-      },
-    }
-  );
-
   const template = await Bun.file(templatePath).json();
 
   expect(template.Resources.Function.Type).toBe("AWS::Lambda::Function");
-  expect(commands).toEqual([
-    [
-      "aws",
-      "cloudformation",
-      "deploy",
-      "--stack-name",
-      "orders-api-prod",
-      "--template-file",
-      templatePath,
-      "--capabilities",
-      "CAPABILITY_IAM",
-      "--region",
-      "us-east-1",
-    ],
-    [
-      "aws",
-      "cloudformation",
-      "delete-stack",
-      "--stack-name",
-      "orders-api-prod",
-      "--region",
-      "us-east-1",
-    ],
-  ]);
 });

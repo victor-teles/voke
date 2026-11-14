@@ -16,7 +16,9 @@
     "clean": "rm -rf dist coverage"
   },
   "dependencies": {
+    "@aws-sdk/client-cloudformation": "^3.1053.0",
     "@aws-sdk/client-lambda": "^3.1050.0",
+    "@aws-sdk/client-s3": "^3.1053.0",
     "@aws-sdk/client-secrets-manager": "^3.1053.0",
     "@aws-sdk/client-ssm": "^3.1053.0",
     "@voke/build": "workspace:*",

@@ -79,3 +79,13 @@ const response = await gateway.request("/health");
 voke build ./src/index.ts ./dist
 voke synth ./src/index.ts ./dist/cloudformation.json --config voke.config.ts
 ```
+
+## Deploy
+
+With AWS credentials configured and `provider: aws()` in `voke.config.ts`:
+
+```bash
+voke deploy --stage dev
+```
+
+Voke prints the API URL when the deploy finishes. Remove the stage with `voke remove --stage dev`. See the deploy guide for details.

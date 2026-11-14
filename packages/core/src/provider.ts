@@ -56,6 +56,48 @@ export interface BuildPlan {
   sources: Record<string, string>;
 }
 
+export interface ProviderDeployInput {
+  config: VokeConfig;
+  model: VokeModel;
+  /** Build output directory produced by the Provider build plan. */
+  artifactDirectory: string;
+  /** Files in artifactDirectory that belong to the deployable artifact (from the build plan). */
+  artifactFiles: readonly string[];
+  stage: string;
+  /** Opaque Provider region; the Provider applies its own default when absent. */
+  region?: string;
+  /** Plan the deployment and report the changes without applying them. */
+  dryRun: boolean;
+  output: (line: string) => void;
+}
+
+export interface ProviderDeployResult {
+  /** Deployment identifier, for display and the outputs file. */
+  id: string;
+  region?: string;
+  status: "deployed" | "dry-run" | "unchanged";
+  /** Provider outputs; "ApiUrl" is printed first when present. */
+  outputs: Record<string, string>;
+}
+
+export interface ProviderRemoveInput {
+  config: VokeConfig;
+  stage: string;
+  region?: string;
+  output: (line: string) => void;
+}
+
+/**
+ * Deploys a built project and removes a deployed stage. The CLI owns stage resolution, the
+ * build, confirmation and the outputs file; the Provider owns everything platform-specific.
+ */
+export interface ProviderDeployCapability {
+  deploy?: (input: ProviderDeployInput) => Promise<ProviderDeployResult>;
+  remove?: (
+    input: ProviderRemoveInput
+  ) => Promise<{ status: "absent" | "removed" }>;
+}
+
 export interface ProviderBuildInput {
   build: VokeBuildConfig;
   config: VokeConfig;
@@ -85,6 +127,7 @@ export interface ProviderLocalCapability<TWorkflow = unknown> {
 
 export interface VokeProvider {
   build?: ProviderBuildCapability;
+  deploy?: ProviderDeployCapability;
   invoke?: ProviderInvokeCapability;
   local?: ProviderLocalCapability;
   name: string;
@@ -95,6 +138,7 @@ export interface VokeProvider {
 
 export type VokeProviderCapability =
   | ProviderBuildCapability
+  | ProviderDeployCapability
   | ProviderInvokeCapability
   | ProviderLocalCapability
   | ProviderRuntimeCapability

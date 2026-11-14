@@ -661,3 +661,47 @@ Record the outputs. Without authorization, report this step as not run.
   - credential and permission error messages
   - that `remove` cannot run unconfirmed
   - that core gained no AWS import
+
+## Execution notes (2026-11-14)
+
+Done except Step 9, on branch `feature/one-command-deploy`, stacked on plan 008 (PR #54, open). Uncommitted.
+Gates: `bun run check` 0 errors, `bun run typecheck` 18/18, `bun run test` 23/23 tasks (core 228, `@voke/aws`
+51, `@voke/build` 4, `@voke/remote` 2, examples green). With `AWS_ACCESS_KEY_ID`, `AWS_PROFILE` and
+`AWS_ENDPOINT_URL` unset, `@voke/aws` and core tests pass (no test reaches AWS).
+
+**Step 9 (real AWS) was not run:** no operator authorization or credentials were given.
+
+Delivered:
+
+- Core: `ProviderDeployCapability { deploy, remove }` with neutral `ProviderDeployInput`/`Result`/
+  `ProviderRemoveInput`; `VokeDeployError` (`DEPLOY_ERROR`); `VokeError` exported.
+- CLI: `voke deploy [--stage] [--region] [--config] [--dry-run]`, `voke remove [... --yes]`; boolean flags
+  (`dry-run`, `force`, `help`, `verbose`, `yes`, also `--flag=false`); stage `--stage` → `VOKE_STAGE` →
+  config; `local` refused without an endpoint; outputs printed `ApiUrl` first and written to
+  `.voke/outputs/<stage>.json` (not on dry run); remove confirms by typing `<name>-<stage>` (injectable
+  `confirm`/`interactive` in `CliOptions`), `--yes`, refusal outside a terminal. The `experimental` group and
+  the AWS-CLI deploy/remove are gone; `build()` now returns its plan.
+- `@voke/aws`: deterministic zip (`zip.ts`, verified with `unzip -p`/`unzip -Z`), `DeployAwsClients` seam
+  with lazy CloudFormation/S3 SDKs and credential-error mapping, `deployAwsStack`/`removeAwsStack`
+  (bootstrap stack + private encrypted bucket, content-addressed bundle and template, change-set state
+  machine, dry run, event following, failure reasons), `aws().deploy`. Synthesis: optional `artifact`
+  (`S3Bucket`/`S3Key`), CommonJS placeholder, `$default` stage, `ApiUrl` without suffix.
+- Docs: ADR `docs/adr/0008-deploy-provider-capability.md` (0008 was free), `guides/deploy.mdx` (+ nav),
+  README, CLI reference, getting started, e2e-testing; example `deploy`/`remove` scripts.
+
+Deviations and findings:
+
+- **Bootstrap template is inline** (`templateBody` on `ChangeSetInput`): the artifact bucket it creates cannot
+  hold its own template.
+- **Handlers come from `voke-manifest.json` at deploy time.** Plan 003 found that with explicit per-Function
+  entrypoints the generated entry is not at the archive root; `deployAwsStack` patches each Function's
+  `Handler` from the manifest, so deployed handlers always match the bundle.
+- **Following a stack also polls its status**, so a deleted stack (not describable by name) or a terminal
+  status between event polls ends the wait; a stack left in `REVIEW_IN_PROGRESS` by a dry run is created
+  again, and a dry-run CREATE deletes its empty stack.
+- **`CAPABILITY_IAM` only**: plan 009's per-Function roles set no `RoleName`.
+- Contract tests live in a new `packages/core/test/deploy-cli.test.ts` instead of `cli-contract.test.ts`; the
+  two `experimental` tests were removed from `cli-contract.test.ts`, and `api.test.ts` lost its
+  `experimental` config test (covered by the new contract tests) and kept its synth half.
+- `zip.ts` disables `no-bitwise` and `unicorn/prefer-math-trunc` with a stated reason (binary format;
+  `>>> 0` is an unsigned conversion).
