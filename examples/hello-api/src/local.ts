@@ -1,27 +1,17 @@
-import {
-  createLocalAwsEnvironment,
-  createLocalBootstrapPlan,
-  floci,
-} from "@voke/aws/local";
-import { createVokeModel } from "voke";
+import { awsEmulator, readLocalStackOutputs } from "@voke/aws/local";
 
 import config from "../voke.config";
 
-const provider = floci();
+// `provider: aws()` in voke.config.ts uses the AWS Emulator as its Local AWS Provider.
+export const localProvider = awsEmulator();
 
-export const flociCompose = provider.composeConfig({
-  dataDirectory: ".voke/local/data",
-  region: "us-east-1",
-});
-
-export const localEnvironment = createLocalAwsEnvironment({ provider });
-
-export const createHelloApiLocalBootstrapPlan = () =>
-  createLocalBootstrapPlan({
-    model: createVokeModel(config),
-    name: config.name,
-    provider,
-    region: config.region ?? "us-east-1",
-    stage: config.stage ?? "local",
-    templatePath: ".voke/local/cloudformation.json",
+/**
+ * The resource bindings `voke local bootstrap` wrote for this stack, or undefined when the local
+ * resources are not provisioned (run `voke local start && voke local bootstrap`).
+ */
+export const readLocalBindings = () =>
+  readLocalStackOutputs({
+    endpoint: localProvider.defaults.endpoint,
+    provider: localProvider.name,
+    stack: `${config.name}-${config.stage}`,
   });

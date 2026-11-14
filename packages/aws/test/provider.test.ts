@@ -11,6 +11,7 @@ import {
 
 import { sqsQueue } from "../src/cloudformation";
 import { aws, createAwsClientConfig, createLambdaHandlers } from "../src/index";
+import { floci } from "../src/local";
 
 test("serves a Gateway's routes through the generated AWS Lambda handler", async () => {
   const functions = createFunctions({
@@ -56,8 +57,8 @@ test("synthesizes CloudFormation through the AWS provider capability", () => {
   expect(template?.Description).toBe("Voke stack for provider-api (local)");
 });
 
-test("provides AWS local dev environment through the provider capability", () => {
-  const provider = aws();
+test("provides AWS local dev environment through the provider capability", async () => {
+  const provider = aws({ local: floci() });
   const config = defineConfig({
     name: "orders-api",
     provider,
@@ -67,7 +68,7 @@ test("provides AWS local dev environment through the provider capability", () =>
     },
   });
   const model = createVokeModel(config);
-  const environment = provider.local?.devEnvironment?.({
+  const environment = await provider.local?.devEnvironment?.({
     config,
     endpoint: "http://localhost:9999",
     model,

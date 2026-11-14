@@ -120,6 +120,21 @@ const seedPlan = context.createSeedPlan({
 
 Run the returned `seedPlan.commands` with `seedPlan.environment` when a test suite needs to seed Floci before requests.
 
+The stack test context still targets Floci: it is synchronous and derives resource names, while the AWS Emulator's names come from its stack outputs. With the AWS Emulator (the default for `aws()`), read the names that `voke local bootstrap` wrote:
+
+```ts
+import { readLocalStackOutputs } from "@voke/aws/local";
+
+const bindings = await readLocalStackOutputs({
+  endpoint: "https://127.0.0.1:9297",
+  provider: "aws-emulator",
+  stack: "orders-api-local",
+});
+// bindings.VOKE_RESOURCE_ORDERS_TABLE_NAME === "orders-api-local-OrdersTable-..."
+```
+
+Run such tests with the emulator's environment, as `voke dev` does, and build AWS SDK clients with `createAwsClientConfig()`.
+
 The context uses Floci by default. Pass `local` to run it against another Local AWS Provider, the same one you give `aws({ local })`:
 
 ```ts

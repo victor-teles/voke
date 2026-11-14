@@ -1,5 +1,6 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { spawn } from "node:child_process";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { dirname, join, resolve as resolvePath } from "node:path";
 
 import type {
   ProviderLocalWorkflow,
@@ -7,7 +8,10 @@ import type {
   VokeModel,
 } from "voke";
 
-import { synthesizeCloudFormationFromModel } from "./cloudformation-synthesis";
+import {
+  resourceOutputBindings,
+  synthesizeCloudFormationFromModel,
+} from "./cloudformation-synthesis";
 import type {
   CloudFormationResource,
   CloudFormationTemplate,
@@ -21,25 +25,34 @@ import type {
   LocalAwsEnvironmentOptions,
   LocalBootstrapPlan,
   LocalProvider,
+  LocalProviderLifecycleOptions,
 } from "./local-provider";
 import { createResourceBindingName } from "./resources";
 
 export {
+  awsEmulator,
+  type AwsEmulatorDependencies,
+  type AwsEmulatorOptions,
+} from "./local-aws-emulator";
+export {
   floci,
   LocalProviderError,
   type FlociComposeOptions,
+  type FlociLocalProvider,
   type FlociLocalProviderOptions,
   type LocalAwsEnvironment,
   type LocalAwsEnvironmentOptions,
   type LocalBootstrapPlan,
   type LocalProvider,
   type LocalProviderBootstrapPlanOptions,
-  type LocalProviderCommandOptions,
   type LocalProviderComposeOptions,
   type LocalProviderDefaults,
+  type LocalProviderLifecycleOptions,
 } from "./local-provider";
 
 interface LocalBootstrapPlanBaseOptions {
+  /** The Local AWS Provider's state directory; see `LocalAwsEnvironmentOptions.directory`. */
+  directory?: string;
   endpoint?: string;
   name: string;
   provider: LocalProvider;
@@ -158,7 +171,7 @@ const resourceBindingFor = (
 
 export const createLocalAwsEnvironment = (
   options: LocalAwsEnvironmentOptions & { provider: LocalProvider }
-): LocalAwsEnvironment => {
+): LocalAwsEnvironment | Promise<LocalAwsEnvironment> => {
   const { provider, ...environmentOptions } = options;
 
   return provider.environment(environmentOptions);
@@ -201,7 +214,8 @@ export const createLocalBootstrapPlan = async (
       : options.template;
   const templatePath =
     options.templatePath ?? ".voke/local/cloudformation.json";
-  const environment = createLocalAwsEnvironment({
+  const environment = await createLocalAwsEnvironment({
+    directory: options.directory,
     endpoint: options.endpoint,
     provider: options.provider,
     region: options.region,
@@ -222,7 +236,92 @@ export const createLocalBootstrapPlan = async (
   });
 };
 
-const defaultComposePath = ".voke/local/docker-compose.yml";
+/** Where `voke local bootstrap` writes stack outputs for `voke dev`, relative to the project. */
+export const localOutputsPath = join(".voke", "local", "outputs.json");
+
+/** `.voke/local/outputs.json`: the bindings of a local stack and what they belong to. */
+export interface LocalStackOutputs {
+  bindings: Record<string, string>;
+  endpoint: string;
+  provider: string;
+  region: string;
+  stack: string;
+}
+
+/** Runs a command and returns its stdout; the core runner does not return output. */
+export type CaptureCommand = (
+  command: string[],
+  options: { env: Record<string, string>; unsetEnv: readonly string[] }
+) => Promise<string>;
+
+const captureCommand: CaptureCommand = async (command, options) => {
+  const env: Record<string, string | undefined> = { ...process.env };
+
+  for (const name of options.unsetEnv) {
+    Reflect.deleteProperty(env, name);
+  }
+
+  const [program = "", ...args] = command;
+  const child = spawn(program, args, {
+    env: { ...env, ...options.env },
+    stdio: ["ignore", "pipe", "inherit"],
+  });
+  const chunks: Buffer[] = [];
+
+  child.stdout.on("data", (chunk: Buffer) => {
+    chunks.push(chunk);
+  });
+
+  // oxlint-disable-next-line promise/avoid-new -- adapts the child process exit event
+  const exitCode = await new Promise<number | null>((resolve, reject) => {
+    child.on("error", reject);
+    child.on("close", resolve);
+  });
+
+  if (exitCode !== 0) {
+    throw new Error(`Command failed (${exitCode}): ${command.join(" ")}`);
+  }
+
+  return Buffer.concat(chunks).toString("utf-8");
+};
+
+export interface LocalWorkflowDependencies {
+  capture: CaptureCommand;
+  /** The project directory. Default: the current directory. */
+  cwd: () => string;
+  output: (line: string) => void;
+}
+
+const defaultWorkflowDependencies: LocalWorkflowDependencies = {
+  capture: captureCommand,
+  cwd: () => process.cwd(),
+  output: (line) => {
+    console.log(line);
+  },
+};
+
+/** The outputs file, if it belongs to this provider, stack and endpoint; stale files are ignored. */
+export const readLocalStackOutputs = async (
+  expected: Omit<LocalStackOutputs, "bindings" | "region">,
+  cwd: string = process.cwd()
+): Promise<Record<string, string> | undefined> => {
+  let outputs: Partial<LocalStackOutputs>;
+
+  try {
+    outputs = JSON.parse(
+      await readFile(resolvePath(cwd, localOutputsPath), "utf-8")
+    ) as Partial<LocalStackOutputs>;
+  } catch {
+    return undefined;
+  }
+
+  const matches =
+    outputs.provider === expected.provider &&
+    outputs.stack === expected.stack &&
+    outputs.endpoint === expected.endpoint;
+
+  return matches ? outputs.bindings : undefined;
+};
 
 const runLocalCommand = async (
   provider: LocalProvider,
@@ -232,7 +331,10 @@ const runLocalCommand = async (
   env?: Record<string, string>
 ): Promise<void> => {
   try {
-    await context.run(command, { env });
+    await context.run(command, {
+      env,
+      unsetEnv: provider.unsetEnvironment ?? [],
+    });
   } catch (error) {
     throw new LocalProviderError({
       cause: error,
@@ -248,31 +350,160 @@ const runLocalCommand = async (
   }
 };
 
-/**
- * `voke local start|stop|reset|bootstrap` for a Local AWS Provider. `start` writes the compose file
- * (`--compose`, `--data`, `--hostname`, `--image`, `--port`, `--region`) before starting it;
- * `bootstrap` provisions the project's resources from its model (`--endpoint`, `--template`).
- */
-// The extra `voke local` flags this workflow reads; voke rejects any other flag.
-const localWorkflowFlags = {
-  compose: `Docker Compose file. Default: ${defaultComposePath}`,
-  data: "Emulator data directory. Default: .voke/local/data",
+const commonWorkflowFlags = {
   endpoint: "Local AWS endpoint for bootstrap",
-  hostname: "Emulator hostname",
-  image: "Emulator container image",
-  port: "Emulator port",
   template:
     "Template written by bootstrap. Default: .voke/local/cloudformation.json",
 } as const;
 
+interface StackDescriptionJson {
+  Stacks?: { Outputs?: { OutputKey?: string; OutputValue?: string }[] }[];
+}
+
+/** Maps the stack's outputs to `VOKE_RESOURCE_*` variables through the model's resources. */
+const bindingsFromOutputs = (
+  model: VokeModel,
+  description: StackDescriptionJson
+): Record<string, string> => {
+  const variables = resourceOutputBindings(model);
+  const bindings: Record<string, string> = {};
+
+  for (const output of description.Stacks?.[0]?.Outputs ?? []) {
+    const variable =
+      output.OutputKey === undefined ? undefined : variables[output.OutputKey];
+
+    if (variable !== undefined && output.OutputValue !== undefined) {
+      bindings[variable] = output.OutputValue;
+    }
+  }
+
+  return bindings;
+};
+
+/**
+ * `voke local start|stop|reset|bootstrap` for a Local AWS Provider. Providers that bind from stack
+ * outputs get a resources-only template; bootstrap writes the outputs to `.voke/local/outputs.json`
+ * for `voke dev`, and stop and reset delete it because the emulator's state is gone.
+ */
 export const createLocalWorkflow = (
-  provider: LocalProvider
+  provider: LocalProvider,
+  dependencies: Partial<LocalWorkflowDependencies> = {}
 ): ProviderLocalWorkflow => {
-  const composePath = (context: ProviderLocalWorkflowContext): string =>
-    context.options.compose ?? defaultComposePath;
+  const deps = { ...defaultWorkflowDependencies, ...dependencies };
+  const lifecycleOf = (
+    context: ProviderLocalWorkflowContext
+  ): LocalProviderLifecycleOptions => ({
+    directory: resolvePath(deps.cwd(), ".voke", "local", provider.name),
+    options: context.options,
+    region: context.config.region,
+  });
+  const removeOutputs = async (): Promise<void> => {
+    await rm(resolvePath(deps.cwd(), localOutputsPath), { force: true });
+  };
+  const runAll = async (
+    context: ProviderLocalWorkflowContext,
+    localCommand: string,
+    commands: string[][]
+  ): Promise<void> => {
+    for (const command of commands) {
+      await runLocalCommand(provider, context, localCommand, command);
+    }
+  };
+  const bootstrapFromOutputs = async (
+    context: ProviderLocalWorkflowContext
+  ): Promise<void> => {
+    const { config, model } = context;
+    const stack = `${config.name}-${config.stage}`;
+    const environment = await createLocalAwsEnvironment({
+      directory: lifecycleOf(context).directory,
+      endpoint: context.options.endpoint,
+      provider,
+      region: config.region,
+    });
+    const plan = await createLocalBootstrapPlan({
+      directory: lifecycleOf(context).directory,
+      endpoint: context.options.endpoint,
+      name: config.name,
+      provider,
+      region: config.region,
+      stage: config.stage,
+      template: synthesizeCloudFormationFromModel(model, {
+        scope: "resources",
+      }),
+      templatePath:
+        context.options.template ?? ".voke/local/cloudformation.json",
+    });
+
+    for (const command of plan.commands) {
+      await runLocalCommand(
+        provider,
+        context,
+        "bootstrap",
+        command,
+        environment
+      );
+    }
+
+    const describe = [
+      "aws",
+      "cloudformation",
+      "describe-stacks",
+      "--stack-name",
+      stack,
+      "--region",
+      config.region,
+      "--output",
+      "json",
+    ];
+    let description: StackDescriptionJson;
+
+    try {
+      description = JSON.parse(
+        await deps.capture(describe, {
+          env: environment,
+          unsetEnv: provider.unsetEnvironment ?? [],
+        })
+      ) as StackDescriptionJson;
+    } catch (error) {
+      throw new LocalProviderError({
+        cause: error,
+        command: describe,
+        message: localProviderFailureMessage({
+          cause: error,
+          command: describe,
+          localCommand: "bootstrap",
+          provider,
+        }),
+        provider: provider.name,
+      });
+    }
+
+    const bindings = bindingsFromOutputs(model, description);
+    const outputs: LocalStackOutputs = {
+      bindings,
+      endpoint: environment.AWS_ENDPOINT_URL,
+      provider: provider.name,
+      region: config.region,
+      stack,
+    };
+
+    await writeFileCreatingDirectory(
+      resolvePath(deps.cwd(), localOutputsPath),
+      `${JSON.stringify(outputs, null, 2)}\n`
+    );
+
+    for (const [variable, value] of Object.entries(bindings)) {
+      deps.output(`${variable}=${value}`);
+    }
+  };
 
   return {
     bootstrap: async (context) => {
+      if (provider.bindings === "outputs") {
+        await bootstrapFromOutputs(context);
+        return;
+      }
+
       const { config } = context;
       const plan = await createLocalBootstrapPlan({
         endpoint: context.options.endpoint,
@@ -295,42 +526,45 @@ export const createLocalWorkflow = (
         );
       }
     },
-    flags: localWorkflowFlags,
+    flags: { ...commonWorkflowFlags, ...provider.flags },
     reset: async (context) => {
-      await runLocalCommand(
-        provider,
-        context,
-        "reset",
-        provider.resetCommand({ composePath: composePath(context) })
-      );
+      const lifecycle = lifecycleOf(context);
+
+      await runAll(context, "reset", provider.resetCommands(lifecycle));
+      await removeOutputs();
+      await provider.waitUntilReady?.(lifecycle);
     },
     start: async (context) => {
-      const { options } = context;
+      const lifecycle = lifecycleOf(context);
 
-      await writeFileCreatingDirectory(
-        composePath(context),
-        provider.composeConfig({
-          dataDirectory: options.data ?? ".voke/local/data",
-          hostname: options.hostname,
-          image: options.image,
-          port: options.port === undefined ? undefined : Number(options.port),
-          region: options.region,
+      for (const [path, contents] of Object.entries(
+        provider.files(lifecycle)
+      )) {
+        await writeFileCreatingDirectory(path, contents);
+      }
+
+      await provider.prepareStart?.(lifecycle, (command, options) =>
+        context.run(command, {
+          ...options,
+          unsetEnv: provider.unsetEnvironment ?? [],
         })
       );
-      await runLocalCommand(
-        provider,
-        context,
-        "start",
-        provider.startCommand({ composePath: composePath(context) })
-      );
+      await runAll(context, "start", provider.startCommands(lifecycle));
+      await provider.waitUntilReady?.(lifecycle);
+
+      if (provider.bindings === "outputs") {
+        deps.output(`${provider.name} endpoint: ${provider.defaults.endpoint}`);
+        deps.output(`State: ${lifecycle.directory}`);
+        deps.output("Next: voke local bootstrap");
+      }
     },
     stop: async (context) => {
-      await runLocalCommand(
-        provider,
+      await runAll(
         context,
         "stop",
-        provider.stopCommand({ composePath: composePath(context) })
+        provider.stopCommands(lifecycleOf(context))
       );
+      await removeOutputs();
     },
   };
 };

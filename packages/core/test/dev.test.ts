@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 
 import { aws } from "@voke/aws";
 import { dynamodbTable, sqsQueue } from "@voke/aws/cloudformation";
+import { floci } from "@voke/aws/local";
 import type { LocalProvider } from "@voke/aws/local";
 
 import { runCli } from "../src/cli";
@@ -28,7 +29,7 @@ test("creates a config-first Bun hot reload dev plan with local bindings", async
         LOG_LEVEL: "debug",
       },
       name: "orders-api",
-      provider: aws(),
+      provider: aws({ local: floci() }),
       region: "sa-east-1",
       resources: {
         eventsQueue: sqsQueue(),
@@ -82,11 +83,11 @@ test("dev plan uses the configured local provider", async () => {
   const directory = tempPath(`voke-dev-custom-provider-${crypto.randomUUID()}`);
   const entrypoint = `${directory}/src/api.ts`;
   const provider: LocalProvider = {
+    bindings: "guessed",
     bootstrapPlan: ({ environment }) => ({
       commands: [],
       environment,
     }),
-    composeConfig: () => "",
     defaults: {
       accountId: "111111111111",
       endpoint: "http://localhost:9999",
@@ -103,10 +104,11 @@ test("dev plan uses the configured local provider", async () => {
       VOKE_INVOKE_RUNTIME: "local",
       VOKE_LOCAL_PROVIDER: "custom-local-aws",
     }),
+    files: () => ({}),
     name: "custom-local-aws",
-    resetCommand: () => [],
-    startCommand: () => [],
-    stopCommand: () => [],
+    resetCommands: () => [],
+    startCommands: () => [],
+    stopCommands: () => [],
   };
 
   await Bun.$`mkdir -p ${directory}/src`;
@@ -288,10 +290,11 @@ test("dev CLI reads config by default and lets flags override one-off runs", asy
     `import { defineConfig } from "${import.meta.dir}/../src/index";
 import { sqsQueue } from "${import.meta.dir}/../../aws/src/cloudformation";
 import { aws } from "${import.meta.dir}/../../aws/src/index";
+import { floci } from "${import.meta.dir}/../../aws/src/local";
 
 export default defineConfig({
   name: "dev-api",
-  provider: aws(),
+  provider: aws({ local: floci() }),
   stage: "local",
   region: "sa-east-1",
   entrypoint: "${apiEntrypoint}",

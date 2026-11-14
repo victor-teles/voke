@@ -15,6 +15,7 @@ import {
   resolveFunctionLambdaSettings,
 } from "./lambda-settings";
 import type { AwsLambdaSettings } from "./lambda-settings";
+import { createResourceBindingName } from "./resources";
 
 export type CloudFormationValue =
   | string
@@ -926,12 +927,43 @@ export interface SynthesisOptions {
   artifact?: SynthesisArtifact;
   /** `aws({ lambda })` settings. Defaults to `defaultAwsLambdaSettings`. */
   lambda?: AwsLambdaSettings;
+  /**
+   * `"resources"` keeps only the declared resources and their outputs: no roles, Functions, APIs,
+   * permissions, log groups or event source mappings. Local AWS Providers whose Lambda cannot run
+   * a Voke bundle provision this, while Function code runs in the local Gateway. Default `"all"`.
+   */
+  scope?: "all" | "resources";
 }
 
+/** The model without its Functions and APIs, keeping the resource outputs. */
+const resourcesOnly = (model: VokeModel): VokeModel => ({
+  ...model,
+  apis: {},
+  functions: {},
+  outputs: Object.fromEntries(
+    Object.entries(model.outputs).filter(
+      ([, output]) => "resource" in output.source
+    )
+  ),
+});
+
+/** Stack output name → the `VOKE_RESOURCE_<NAME>_<ATTR>` variable its value binds. */
+export const resourceOutputBindings = (
+  model: VokeModel
+): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(model.resources).map(([name, resource]) => [
+      `${toLogicalId(name)}${resourceProvider(resource).outputName}`,
+      createResourceBindingName(name, resource.binding.attribute),
+    ])
+  );
+
 export const synthesizeCloudFormationFromModel = (
-  model: VokeModel,
+  fullModel: VokeModel,
   options: SynthesisOptions = {}
 ): CloudFormationTemplate => {
+  const model =
+    options.scope === "resources" ? resourcesOnly(fullModel) : fullModel;
   const apiRoutes = model.apis.http?.routes ?? [];
   const lambdaSettings = options.lambda ?? defaultAwsLambdaSettings;
   // The Function keyed "http" owns the bare Function/FunctionRole/Permission logical ids; every

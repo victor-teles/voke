@@ -27,11 +27,11 @@ const scratchPath = (name: string): string =>
   join(tmpdir(), `${name}-${crypto.randomUUID()}`);
 
 const customProvider: LocalProvider = {
+  bindings: "guessed",
   bootstrapPlan: (options) => ({
     commands: [["customctl", "apply", options.name, options.templatePath]],
     environment: options.environment,
   }),
-  composeConfig: () => "services:\n  custom:\n    image: custom/aws\n",
   defaults: {
     accountId: "111111111111",
     endpoint: "http://localhost:9999",
@@ -48,14 +48,28 @@ const customProvider: LocalProvider = {
     VOKE_INVOKE_RUNTIME: "local",
     VOKE_LOCAL_PROVIDER: "custom-local-aws",
   }),
+  files: ({ options }) => ({
+    [options.compose ?? "compose.yml"]:
+      "services:\n  custom:\n    image: custom/aws\n",
+  }),
   name: "custom-local-aws",
-  resetCommand: ({ composePath }) => ["customctl", "reset", composePath],
-  startCommand: ({ composePath }) => ["customctl", "start", composePath],
-  stopCommand: ({ composePath }) => ["customctl", "stop", composePath],
+  resetCommands: ({ options }) => [
+    ["customctl", "reset", options.compose ?? ""],
+  ],
+  startCommands: ({ options }) => [
+    ["customctl", "start", options.compose ?? ""],
+  ],
+  stopCommands: ({ options }) => [["customctl", "stop", options.compose ?? ""]],
 };
 
-test("creates a Floci-ready local AWS environment", () => {
-  const env = createLocalAwsEnvironment({
+const lifecycle = (options: Record<string, string> = {}) => ({
+  directory: "/project/.voke/local/floci",
+  options,
+  region: "us-east-1",
+});
+
+test("creates a Floci-ready local AWS environment", async () => {
+  const env = await createLocalAwsEnvironment({
     endpoint: "http://localhost:4566",
     provider: floci(),
     region: "sa-east-1",
@@ -151,7 +165,7 @@ test("exposes Floci as the default Local AWS Provider contract", async () => {
     secretAccessKey: "local-secret",
     sessionToken: "local-session",
   });
-  const environment = provider.environment();
+  const environment = await provider.environment();
   const plan = await provider.bootstrapPlan({
     environment,
     name: "orders-api",
@@ -179,29 +193,24 @@ test("exposes Floci as the default Local AWS Provider contract", async () => {
     VOKE_LOCAL_PROVIDER: "floci",
   });
   expect(provider.composeConfig()).toContain(".voke/local/floci:/app/data");
-  expect(provider.startCommand({ composePath: "compose.yml" })).toEqual([
-    "docker",
-    "compose",
-    "-f",
-    "compose.yml",
-    "up",
-    "-d",
+  const compose = lifecycle({ compose: "compose.yml" });
+
+  expect(provider.bindings).toBe("guessed");
+  expect(provider.unsetEnvironment).toBeUndefined();
+  expect(provider.startCommands(compose)).toEqual([
+    ["docker", "compose", "-f", "compose.yml", "up", "-d"],
   ]);
-  expect(provider.stopCommand({ composePath: "compose.yml" })).toEqual([
-    "docker",
-    "compose",
-    "-f",
-    "compose.yml",
-    "down",
+  expect(provider.stopCommands(compose)).toEqual([
+    ["docker", "compose", "-f", "compose.yml", "down"],
   ]);
-  expect(provider.resetCommand({ composePath: "compose.yml" })).toEqual([
-    "docker",
-    "compose",
-    "-f",
-    "compose.yml",
-    "down",
-    "-v",
+  expect(provider.resetCommands(compose)).toEqual([
+    ["docker", "compose", "-f", "compose.yml", "down", "-v"],
   ]);
+  expect(provider.files(lifecycle())).toEqual({
+    ".voke/local/docker-compose.yml": provider.composeConfig({
+      dataDirectory: ".voke/local/data",
+    }),
+  });
   expect(plan.commands[0]).toContain("orders-api-local");
   expect(plan.environment.VOKE_LOCAL_PROVIDER).toBe("floci");
 });
@@ -390,7 +399,7 @@ test("delegates local environment and bootstrap to a custom Local AWS Provider",
     },
   });
 
-  const environment = createLocalAwsEnvironment({
+  const environment = await createLocalAwsEnvironment({
     provider: customProvider,
     region: "us-west-2",
   });
@@ -467,7 +476,7 @@ test("the local workflow writes the compose file and runs start, stop, reset and
       calls.push({ command, options });
     },
   };
-  const workflow = createLocalWorkflow(floci());
+  const workflow = createLocalWorkflow(floci(), { cwd: () => directory });
 
   try {
     await workflow.start(context);
@@ -504,7 +513,9 @@ test("the local workflow writes the compose file and runs start, stop, reset and
 
 test("wraps failing Floci commands in LocalProviderError with Docker Compose guidance", async () => {
   const config = defineConfig({ name: "orders-api" });
-  const failure = await createLocalWorkflow(floci())
+  const failure = await createLocalWorkflow(floci(), {
+    cwd: () => scratchPath("voke-floci-stop"),
+  })
     .stop({
       config,
       model: createVokeModel(config),
@@ -517,6 +528,6 @@ test("wraps failing Floci commands in LocalProviderError with Docker Compose gui
 
   expect(failure).toBeInstanceOf(LocalProviderError);
   expect((failure as Error).message).toBe(
-    'Voke local stop failed while running: docker compose -f compose.yml down. docker not found\nFloci is Voke\'s default optional local AWS provider. Make sure Docker Compose is installed and Docker is running, then retry "voke local stop". You can also pass a Local AWS Provider: aws({ local: ... })'
+    'Voke local stop failed while running: docker compose -f compose.yml down. docker not found\nFloci is an optional Local AWS Provider. Make sure Docker Compose is installed and Docker is running, then retry "voke local stop". You can also pass another Local AWS Provider: aws({ local: ... })'
   );
 });

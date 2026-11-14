@@ -93,7 +93,7 @@ voke local stop
 voke local reset
 ```
 
-Runs the local workflow of the configured Provider. With `aws()`, this is Floci unless you pass another Local AWS Provider: `aws({ local: ... })`.
+Runs the local workflow of the configured Provider. With `aws()`, this is the AWS Emulator in Docker; `aws({ local: floci() })` selects Floci. `voke local start --rebuild` rebuilds the emulator image. See the Local AWS guide.
 
 ## Remote code generation
 

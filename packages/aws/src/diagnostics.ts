@@ -155,7 +155,12 @@ const checkLocalTool = async (
   localProvider: LocalProvider,
   deps: AwsDiagnosticsDependencies
 ): Promise<DiagnosticResult | undefined> => {
-  const [tool] = localProvider.startCommand({ composePath: "" });
+  const [tool] =
+    localProvider.startCommands({
+      directory: "",
+      options: {},
+      region: "",
+    })[0] ?? [];
 
   if (tool === undefined) {
     return undefined;

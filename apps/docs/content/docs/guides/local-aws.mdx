@@ -1,0 +1,51 @@
+---
+title: Local AWS
+description: Run your project's AWS resources locally on the official AWS Emulator, with Function code in the local Gateway.
+---
+
+With `provider: aws()`, Voke's Local AWS Provider is the official AWS Emulator, run in Docker.
+
+```bash
+voke local start       # build the emulator image once, then start it
+voke local bootstrap   # create the project's resources and record their names
+voke dev               # run your Functions locally against those resources
+voke local stop        # stop the emulator; its state is gone
+```
+
+## What runs where
+
+- **Resources run in the emulator.** `voke local bootstrap` deploys a template with only the resources you declare (tables, queues, buckets, ...) through the emulator's CloudFormation. It writes their generated names to `.voke/local/outputs.json`.
+- **Functions run in the local Gateway.** `voke dev` runs your code with Bun, as usual, and sets `VOKE_RESOURCE_*` bindings from that file. Bootstrap does not create Lambdas, APIs or SQS triggers in the emulator: its Lambda runtime cannot load a Voke bundle yet, and an emulator SQS trigger would consume your messages.
+
+## Good to know
+
+- The first `voke local start` builds a local image of about 1.2 GB. `voke local start --rebuild` refreshes it.
+- State is in memory. `voke local stop` and `voke local reset` discard it, so run `voke local bootstrap` again after a restart.
+- Credentials are generated per run and kept in `.voke/local/aws-emulator/`. Voke passes them by file path and never prints them. Your real AWS credentials and profile are removed from local commands and from `voke dev`.
+- The emulator listens on `https://127.0.0.1:9297`, on loopback only. Change the port with `aws({ local: awsEmulator({ port: 9300 }) })`.
+- Telemetry is off. Opt in with `awsEmulator({ telemetry: true })`.
+
+## Create every AWS SDK client with `createAwsClientConfig()`
+
+```ts
+import { createAwsClientConfig } from "@voke/aws";
+import { SQSClient } from "@aws-sdk/client-sqs";
+
+const sqs = new SQSClient(createAwsClientConfig());
+```
+
+Locally, it sets an explicit `endpoint`. This matters: SQS queue URLs carry the real AWS host, so a client without an explicit endpoint would send queue calls to real AWS.
+
+## Use Floci instead
+
+Floci keeps state between restarts and uses a smaller image:
+
+```ts
+import { aws } from "@voke/aws";
+import { floci } from "@voke/aws/local";
+
+export default defineConfig({
+  name: "hello-api",
+  provider: aws({ local: floci() }),
+});
+```

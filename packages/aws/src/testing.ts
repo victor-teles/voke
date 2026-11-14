@@ -142,6 +142,15 @@ export const createStackTestContext = (
     provider: options.local ?? floci(),
     region: options.region,
   });
+
+  // The stack test context is synchronous and still Floci-shaped; the AWS Emulator's environment
+  // depends on its running state, so it needs an async, outputs-based context (a follow-up).
+  if (environment instanceof Promise) {
+    throw new TypeError(
+      "createStackTestContext needs a Local AWS Provider with a synchronous environment, such as floci()."
+    );
+  }
+
   const bindings = createLocalResourceBindings(options.template, {
     accountId: options.accountId,
     endpoint: environment.AWS_ENDPOINT_URL,

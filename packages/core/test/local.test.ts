@@ -2,16 +2,13 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import {
-  createLocalAwsEnvironment,
-  floci,
-  LocalProviderError,
-} from "@voke/aws/local";
+import { floci, LocalProviderError } from "@voke/aws/local";
 
 import { CliUsageError, runCli, runCommand } from "../src/cli";
 import { tempPath } from "./support/temp";
 
 const awsIndex = `${import.meta.dir}/../../aws/src/index.ts`;
+const awsLocal = `${import.meta.dir}/../../aws/src/local.ts`;
 const coreIndex = `${import.meta.dir}/../src/index.ts`;
 const directories: string[] = [];
 
@@ -39,14 +36,16 @@ const customProviderSource = `{
     VOKE_INVOKE_RUNTIME: "local",
     VOKE_LOCAL_PROVIDER: "custom-local-aws",
   }),
-  composeConfig: () => "services:\\n  custom:\\n    image: custom/aws\\n",
+  bindings: "guessed",
+  files: ({ options }) => ({ [options.compose]: "services:\\n  custom:\\n    image: custom/aws\\n" }),
   bootstrapPlan: ({ environment, name, templatePath }) => ({
     commands: [["customctl", "apply", name, templatePath]],
     environment,
   }),
-  startCommand: ({ composePath }) => ["customctl", "start", composePath],
-  stopCommand: ({ composePath }) => ["customctl", "stop", composePath],
-  resetCommand: ({ composePath }) => ["customctl", "reset", composePath],
+  flags: { compose: "Compose file" },
+  startCommands: ({ options }) => [["customctl", "start", options.compose]],
+  stopCommands: ({ options }) => [["customctl", "stop", options.compose]],
+  resetCommands: ({ options }) => [["customctl", "reset", options.compose]],
 }`;
 
 /** Writes a voke.config.ts whose Provider is `provider` (source text). */
@@ -62,6 +61,7 @@ const writeProject = async (
   await writeFile(
     configPath,
     `import { aws } from "${awsIndex}";
+import { floci } from "${awsLocal}";
 import { defineConfig } from "${coreIndex}";
 
 export default defineConfig({
@@ -73,6 +73,9 @@ export default defineConfig({
 
   return { configPath, directory };
 };
+
+// Floci's environment is synchronous.
+const flociEnvironment = () => floci().environment();
 
 const recordingRunner = () => {
   const calls: { command: string[]; env?: Record<string, string> }[] = [];
@@ -86,7 +89,10 @@ const recordingRunner = () => {
 };
 
 test("runs local start, stop, reset, and bootstrap through the CLI parser", async () => {
-  const { configPath, directory } = await writeProject("configured", "aws()");
+  const { configPath, directory } = await writeProject(
+    "configured",
+    "aws({ local: floci() })"
+  );
   const composePath = join(directory, "docker-compose.yml");
   const templatePath = join(directory, "template.json");
   const { calls, run } = recordingRunner();
@@ -140,7 +146,7 @@ test("runs local start, stop, reset, and bootstrap through the CLI parser", asyn
         "--region",
         "us-east-1",
       ],
-      env: createLocalAwsEnvironment({ provider: floci() }),
+      env: flociEnvironment(),
     },
     {
       command: ["docker", "compose", "-f", composePath, "down"],
@@ -217,7 +223,10 @@ const failingRun = () => {
 };
 
 test("wraps Floci local start failures with actionable Docker Compose guidance", async () => {
-  const { configPath, directory } = await writeProject("orders-api", "aws()");
+  const { configPath, directory } = await writeProject(
+    "orders-api",
+    "aws({ local: floci() })"
+  );
   const composePath = join(directory, "docker-compose.yml");
   const start = () =>
     runCli(
@@ -230,12 +239,15 @@ test("wraps Floci local start failures with actionable Docker Compose guidance",
   await expect(start()).rejects.toThrow(LocalProviderError);
   await expect(start()).rejects.toThrow(
     `Voke local start failed while running: docker compose -f ${composePath} up -d. docker is not running
-Floci is Voke's default optional local AWS provider. Make sure Docker Compose is installed and Docker is running, then retry "voke local start". You can also pass a Local AWS Provider: aws({ local: ... })`
+Floci is an optional Local AWS Provider. Make sure Docker Compose is installed and Docker is running, then retry "voke local start". You can also pass another Local AWS Provider: aws({ local: ... })`
   );
 });
 
 test("wraps Floci bootstrap failures with start guidance and preserves env", async () => {
-  const { configPath, directory } = await writeProject("orders-api", "aws()");
+  const { configPath, directory } = await writeProject(
+    "orders-api",
+    "aws({ local: floci() })"
+  );
   const templatePath = join(directory, "template.json");
   let commandEnv: Record<string, string> | undefined;
 
@@ -259,10 +271,10 @@ test("wraps Floci bootstrap failures with start guidance and preserves env", asy
       }
     )
   ).rejects.toThrow(
-    `Floci is Voke's default optional local AWS provider. Make sure Floci is running with "voke local start", then retry "voke local bootstrap". You can also pass a Local AWS Provider: aws({ local: ... })`
+    `Floci is an optional Local AWS Provider. Make sure Floci is running with "voke local start", then retry "voke local bootstrap". You can also pass another Local AWS Provider: aws({ local: ... })`
   );
 
-  expect(commandEnv).toEqual(createLocalAwsEnvironment({ provider: floci() }));
+  expect(commandEnv).toEqual(flociEnvironment());
 });
 
 test("wraps custom Local AWS Provider failures without Floci-specific guidance", async () => {

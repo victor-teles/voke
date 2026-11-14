@@ -1,0 +1,15 @@
+# Use the AWS Emulator as the default Local AWS Provider
+
+AWS released an official local emulator on 2026-11-11. It answers AWS API calls with AWS's own validation, starts in about three seconds, and its CloudFormation provisions the resources a Voke project declares. Voke makes it the default Local AWS Provider: `aws()` uses `awsEmulator()`, and Floci stays available as `aws({ local: floci() })` for projects that want persistent local state or a smaller image.
+
+Resources run in the emulator and Function code runs in the local Gateway. Tested with emulator 1.0.367, the emulator's Lambda runtime cannot load a Voke bundle: it reports Node 22 but has no `fetch`, `Request`, `Response`, `ReadableStream` or `structuredClone`, and no `node:module`, `node:http`, `node:https`, `node:zlib` or `node:async_hooks`. The Gateway is built on Hono, which needs `Request`/`Response`, and the bundle fails at import. So `voke local bootstrap` deploys a resources-only template, with no IAM role, Lambda, API or event source mapping. Event source mappings are left out on purpose: in the emulator they would deliver queue messages to a placeholder function and delete them.
+
+Resource bindings come from stack outputs, not from guessed names. CloudFormation generates physical names such as `hello-api-local-UsersTable-EF186B141961`, so bootstrap reads the stack outputs and writes them to `.voke/local/outputs.json`, keyed by `VOKE_RESOURCE_<NAME>_<ATTR>`. `voke dev` uses that file only when its provider, stack and endpoint match the current project; otherwise it binds nothing and says to run `voke local start && voke local bootstrap`. Floci keeps its derived names.
+
+State is project-local. The emulator writes its per-run credentials, CA and config under `.voke/local/aws-emulator/<port>/`, mounted into the container. Voke passes those files by path (`AWS_SHARED_CREDENTIALS_FILE`, `AWS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`) and never reads or prints the keys. Commands and the `voke dev` child run without the caller's `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` and `AWS_PROFILE`, so local work cannot reach a real account. The container publishes its port on `127.0.0.1` only.
+
+Telemetry is off for emulators Voke starts (`-t off`); `awsEmulator({ telemetry: true })` opts in. Version 1 runs the emulator in Docker on every platform, from the Dockerfile AWS documents, built once into a local image (about 1.2 GB) and rebuilt with `voke local start --rebuild`. A native Linux binary and attaching to an emulator the user started are follow-ups.
+
+Bootstrap uses the AWS CLI (`aws cloudformation deploy`, then `describe-stacks`) with the emulator's environment. The deploy capability's SDK client cannot yet trust the emulator's per-run CA or load its credentials file without new dependencies, so the CLI path shipped; moving to the SDK drops the AWS CLI prerequisite.
+
+`createAwsClientConfig()` returns an explicit `endpoint` whenever a Local AWS Provider is configured. This is a safety guarantee: SQS queue URLs carry the real AWS host, and the JavaScript SDK sends queue calls to that host unless the client has an explicit endpoint.

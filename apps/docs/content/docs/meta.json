@@ -7,6 +7,7 @@
     "guides/functions",
     "guides/gateway-testing",
     "guides/deploy",
+    "guides/local-aws",
     "guides/serverless-migration",
     "---Reference---",
     "reference/config",
