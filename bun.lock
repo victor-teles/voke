@@ -100,6 +100,8 @@
       "version": "0.0.0",
       "dependencies": {
         "@aws-sdk/client-lambda": "^3.1050.0",
+        "@aws-sdk/client-secrets-manager": "^3.1053.0",
+        "@aws-sdk/client-ssm": "^3.1053.0",
         "@voke/http": "workspace:*",
         "hono": "^4.0.0",
         "voke": "workspace:*",
@@ -128,11 +130,6 @@
       "version": "0.0.0",
       "bin": {
         "voke": "./src/cli.ts",
-      },
-      "dependencies": {
-        "@aws-sdk/client-lambda": "^3.1050.0",
-        "@aws-sdk/client-secrets-manager": "^3.1053.0",
-        "@aws-sdk/client-ssm": "^3.1053.0",
       },
       "devDependencies": {
         "@types/bun": "latest",

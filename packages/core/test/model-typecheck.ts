@@ -1,11 +1,8 @@
-import { sqsQueue } from "../src/cloudformation";
+import { sqsEventSource, sqsMessageBatch } from "@voke/aws";
+import { sqsQueue } from "@voke/aws/cloudformation";
+
 import { defineConfig } from "../src/config";
-import {
-  defineFunction,
-  defineFunctions,
-  sqsEventSource,
-  sqsMessageBatch,
-} from "../src/invoke";
+import { defineFunction, defineFunctions } from "../src/invoke";
 import type { SqsMessageBatch, StandardSchemaV1 } from "../src/invoke";
 import { createInternalModel } from "../src/model";
 import type {

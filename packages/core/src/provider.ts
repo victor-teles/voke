@@ -2,6 +2,7 @@ import type { BuildPlan } from "./build";
 import type { VokeBuildConfig, VokeConfig } from "./config";
 import type { InvokeTransport } from "./invoke";
 import type { VokeModel, VokeModelRecord } from "./model";
+import type { RuntimeVariableProvider } from "./variables";
 
 export interface ProviderExtensionRecord {
   provider: string;
@@ -14,6 +15,8 @@ export interface ProviderRuntimeCapability<TGatewayExtension = object> {
     app: { fetch: (request: Request) => Response | Promise<Response> };
     config: VokeConfig;
   }) => TGatewayExtension;
+  /** Runtime Variable providers this Provider supplies to every activated Function Registry. */
+  variables?: () => readonly RuntimeVariableProvider[];
 }
 
 export interface ProviderInvokeCapability {

@@ -2,8 +2,8 @@ import { expect, test } from "bun:test";
 
 import { createVokeModel } from "voke";
 
+import { sqsQueue } from "../src/cloudformation";
 import { synthesizeCloudFormationFromModel } from "../src/cloudformation-synthesis";
-import { sqsQueue } from "../src/index";
 
 test("AWS resource helpers store CloudFormation metadata as provider extension records", () => {
   const model = createVokeModel({

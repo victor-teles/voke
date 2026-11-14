@@ -9,7 +9,8 @@ import {
   voke,
 } from "voke";
 
-import { aws, createAwsClientConfig, sqsQueue } from "../src/index";
+import { sqsQueue } from "../src/cloudformation";
+import { aws, createAwsClientConfig } from "../src/index";
 
 test("adds an AWS Lambda handler to a Voke Gateway", async () => {
   const functions = createFunctions({

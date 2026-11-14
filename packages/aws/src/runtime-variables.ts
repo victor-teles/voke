@@ -1,17 +1,16 @@
-import {
+import type {
   GetSecretValueCommand,
   SecretsManagerClient,
 } from "@aws-sdk/client-secrets-manager";
-import { GetParameterCommand, SSMClient } from "@aws-sdk/client-ssm";
+import type { GetParameterCommand, SSMClient } from "@aws-sdk/client-ssm";
+import {
+  createVariableProvider,
+  createVariableSource,
+  VokeRuntimeVariableError,
+} from "voke";
+import type { RuntimeVariableOptions, RuntimeVariableProvider } from "voke";
 
-import { createResourceBindingName } from "./bindings";
-import { VokeRuntimeVariableError } from "./errors";
-import { readEnv } from "./runtime-env";
-import { createVariableProvider, createVariableSource } from "./variables";
-import type {
-  RuntimeVariableOptions,
-  RuntimeVariableProvider,
-} from "./variables";
+import { createResourceBindingName } from "./resources";
 
 export const awsRuntimeVariableProviderId = "aws";
 
@@ -110,7 +109,7 @@ const secretIdFromSource = (
     return source.secretId;
   }
 
-  return readEnv(createResourceBindingName(source.resource, "id")) ?? "";
+  return process.env[createResourceBindingName(source.resource, "id")] ?? "";
 };
 
 const parameterNameFromSource = (
@@ -123,12 +122,51 @@ const parameterNameFromSource = (
     return source.name;
   }
 
-  return readEnv(createResourceBindingName(source.resource, "name")) ?? "";
+  return process.env[createResourceBindingName(source.resource, "name")] ?? "";
+};
+
+const createSecretsManager = async () => {
+  const sdk = await import("@aws-sdk/client-secrets-manager");
+
+  return {
+    GetSecretValueCommand: sdk.GetSecretValueCommand,
+    client: new sdk.SecretsManagerClient({}),
+  };
+};
+const createSsm = async () => {
+  const sdk = await import("@aws-sdk/client-ssm");
+
+  return {
+    GetParameterCommand: sdk.GetParameterCommand,
+    client: new sdk.SSMClient({}),
+  };
 };
 
 export const createAwsRuntimeVariableProvider = (): RuntimeVariableProvider => {
-  const secrets = new SecretsManagerClient({});
-  const ssm = new SSMClient({});
+  // The SDKs load on first use, so importing @voke/aws or activating a Gateway stays cheap,
+  // and bundles keep @aws-sdk/* external (the Lambda Node.js runtime provides it).
+  let secretsManager:
+    | Promise<{
+        client: SecretsManagerClient;
+        GetSecretValueCommand: typeof GetSecretValueCommand;
+      }>
+    | undefined;
+  let ssm:
+    | Promise<{
+        client: SSMClient;
+        GetParameterCommand: typeof GetParameterCommand;
+      }>
+    | undefined;
+  const loadSecretsManager = () => {
+    secretsManager ??= createSecretsManager();
+
+    return secretsManager;
+  };
+  const loadSsm = () => {
+    ssm ??= createSsm();
+
+    return ssm;
+  };
 
   return createVariableProvider({
     id: awsRuntimeVariableProviderId,
@@ -140,8 +178,9 @@ export const createAwsRuntimeVariableProvider = (): RuntimeVariableProvider => {
           awsSource.kind === "secretsManagerSecret" ||
           awsSource.kind === "secretsManagerSecretResource"
         ) {
-          const result = await secrets.send(
-            new GetSecretValueCommand({
+          const secrets = await loadSecretsManager();
+          const result = await secrets.client.send(
+            new secrets.GetSecretValueCommand({
               SecretId: secretIdFromSource(awsSource),
             })
           );
@@ -160,8 +199,9 @@ export const createAwsRuntimeVariableProvider = (): RuntimeVariableProvider => {
           );
         }
 
-        const result = await ssm.send(
-          new GetParameterCommand({
+        const parameters = await loadSsm();
+        const result = await parameters.client.send(
+          new parameters.GetParameterCommand({
             Name: parameterNameFromSource(awsSource),
             WithDecryption: awsSource.decrypt,
           })

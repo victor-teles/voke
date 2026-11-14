@@ -2,7 +2,8 @@ import { expect, test } from "bun:test";
 
 import { createFunctions, createVokeModel } from "voke";
 
-import { aws, dynamodbTable, sqs, sqsQueue } from "../src/index";
+import { dynamodbTable, sqsQueue } from "../src/cloudformation";
+import { aws, sqs } from "../src/index";
 
 const messageSchema = {
   "~standard": {

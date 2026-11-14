@@ -1,7 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
 
+import { secret } from "@voke/aws";
+
 import { createGateway } from "../src/app";
-import { secret } from "../src/aws";
 import { defineConfig } from "../src/config";
 import type { StandardSchemaV1 } from "../src/invoke";
 import { defineFunction, defineFunctions } from "../src/invoke";

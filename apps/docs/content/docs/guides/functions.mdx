@@ -41,7 +41,7 @@ Use provider-specific builders for app code. The first-party AWS builders live o
 
 ```ts
 import { createFunctions, fn, voke } from "voke";
-import { parameter, secret } from "voke/aws";
+import { parameter, secret } from "@voke/aws";
 
 export const functions = createFunctions({
   checkout: fn({
@@ -82,7 +82,7 @@ export const gateway = voke(functions, {
 Direct `secret(...)` and `parameter(...)` calls reference external AWS names or ARNs. Use `.fromResource(...)` for Voke-managed CloudFormation resource keys:
 
 ```ts
-import { parameter, secret } from "voke/aws";
+import { parameter, secret } from "@voke/aws";
 
 const variables = {
   publicConfig: parameter.fromResource("publicConfig"),

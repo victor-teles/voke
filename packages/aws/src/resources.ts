@@ -1,31 +1,15 @@
+import { VokeResourceBindingError } from "voke";
+
 export interface AwsClientConfig {
   region: string;
   endpoint?: string;
 }
-
-export {
-  dynamodbTable,
-  eventBus,
-  s3Bucket,
-  secret,
-  snsTopic,
-  sqsQueue,
-  ssmParameter,
-  type StackResourceDefinition,
-} from "./cloudformation-synthesis";
 
 export interface ResourceBinding<TValue extends string = string> {
   name: string;
   attribute: string;
   envName: string;
   value: () => TValue;
-}
-
-class VokeResourceBindingError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "VokeResourceBindingError";
-  }
 }
 
 export const toEnvKey = (value: string): string =>

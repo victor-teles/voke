@@ -1,3 +1,4 @@
+// Retained only for local.ts / local-provider.ts / e2e.ts until plan 010 deletes them. Do not add code or importers.
 import { handle } from "hono/aws-lambda";
 import type {
   APIGatewayProxyResult,

@@ -18,29 +18,31 @@ test("publishes AWS provider helpers from @voke/aws", async () => {
     "createAwsLambdaInvokeTransport",
     "createResourceBindingName",
     "createSqsEventHandler",
-    "dynamodbTable",
-    "eventBus",
     "handleAwsLambdaRequest",
     "jwtAuthorizer",
     "lambdaAuthorizer",
+    "parameter",
     "requestAuthorizer",
-    "s3Bucket",
     "secret",
-    "snsTopic",
     "sqs",
     "sqsEventSource",
     "sqsMessageBatch",
-    "sqsQueue",
-    "ssmParameter",
     "toEnvKey",
   ]);
   expect("dynamodbTable" in voke).toBe(false);
 });
 
-test("publishes CloudFormation synthesis from @voke/aws/cloudformation", async () => {
+test("publishes CloudFormation synthesis and resource builders from @voke/aws/cloudformation", async () => {
   const cloudformation = await importPackage("@voke/aws/cloudformation");
 
   expect(Object.keys(cloudformation).toSorted()).toEqual([
+    "dynamodbTable",
+    "eventBus",
+    "s3Bucket",
+    "secret",
+    "snsTopic",
+    "sqsQueue",
+    "ssmParameter",
     "synthesizeCloudFormation",
   ]);
 });

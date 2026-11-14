@@ -1,15 +1,17 @@
 import { expect, test } from "bun:test";
 
 import {
+  aws,
   createAuthorizers,
   jwtAuthorizer,
   lambdaAuthorizer,
   requestAuthorizer,
-} from "../src/authorizers";
-import {
   parameter as runtimeParameter,
   secret as runtimeSecret,
-} from "../src/aws";
+  sqsEventSource,
+  sqsMessageBatch,
+  sqs,
+} from "@voke/aws";
 import {
   dynamodbTable,
   eventBus,
@@ -19,20 +21,22 @@ import {
   sqsQueue,
   ssmParameter,
   synthesizeCloudFormation,
-  synthesizeCloudFormationFromModel,
-} from "../src/cloudformation";
+} from "@voke/aws/cloudformation";
+
+import { defineConfig } from "../src/config";
 import { VokeModelError } from "../src/errors";
-import {
-  defineFunctions,
-  defineFunction,
-  http,
-  sqsEventSource,
-  sqsMessageBatch,
-  sqs,
-} from "../src/invoke";
+import { defineFunctions, defineFunction, http } from "../src/invoke";
 import type { SqsMessageBatch, StandardSchemaV1 } from "../src/invoke";
 import { createInternalModel } from "../src/model";
+import type { VokeModel } from "../src/model";
 import { Voke } from "../src/route-builder";
+
+// Model-level synthesis through the public AWS Provider capability (the path `voke synth` uses).
+const synthesizeCloudFormationFromModel = (model: VokeModel) =>
+  aws().synthesis?.synthesize?.({
+    config: defineConfig({ name: model.service.name }),
+    model,
+  }) as ReturnType<typeof synthesizeCloudFormation>;
 
 const schema = <TValue>(): StandardSchemaV1<TValue, TValue> => ({
   "~standard": {

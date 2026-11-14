@@ -1,16 +1,19 @@
 import { expect, test } from "bun:test";
 
+import {
+  createSqsEventHandler,
+  sqsEventSource,
+  sqsMessageBatch,
+} from "@voke/aws";
+
 import { createGateway } from "../src/app";
 import type { GatewayOptions } from "../src/app";
 import { VokeConfigError, VokeRuntimeVariableError } from "../src/errors";
 import {
-  createSqsEventHandler,
   defineFunction,
   defineFunctions,
   http,
   InvokeError,
-  sqsEventSource,
-  sqsMessageBatch,
   withInvokeTrace,
 } from "../src/invoke";
 import type { InvokeTransport, StandardSchemaV1 } from "../src/invoke";
@@ -727,12 +730,27 @@ test("handles deployed AWS SQS events through the Voke adapter", async () => {
         messageId: "invalid",
         receiptHandle: "receipt-invalid",
       },
+      {
+        attributes: {},
+        awsRegion: "us-east-1",
+        body: "not json",
+        eventSource: "aws:sqs",
+        eventSourceARN: "arn:aws:sqs:us-east-1:123456789012:orders",
+        md5OfBody: "",
+        messageAttributes: {},
+        messageId: "malformed",
+        receiptHandle: "receipt-malformed",
+      },
     ],
   });
 
+  // A malformed body fails only its own message, never the whole batch.
   expect(handled).toEqual(["usr_1"]);
   expect(response).toEqual({
-    batchItemFailures: [{ itemIdentifier: "invalid" }],
+    batchItemFailures: [
+      { itemIdentifier: "invalid" },
+      { itemIdentifier: "malformed" },
+    ],
   });
 });
 

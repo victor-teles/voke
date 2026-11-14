@@ -1,12 +1,11 @@
-import { requestAuthorizer } from "../src/authorizers";
 import {
-  defineFunction,
-  defineFunctions,
-  http,
+  requestAuthorizer,
   sqs,
   sqsEventSource,
   sqsMessageBatch,
-} from "../src/invoke";
+} from "@voke/aws";
+
+import { defineFunction, defineFunctions, http } from "../src/invoke";
 import type {
   AsyncInvokeResult,
   SqsBatchResult,

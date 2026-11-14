@@ -1,13 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { Hono } from "hono";
-import type { LambdaContext, LambdaEvent } from "hono/aws-lambda";
-
-import { api } from "../src/api";
-import { createApiApp, createGateway, routeModule } from "../src/app";
-import { bindResource, createAwsClientConfig } from "../src/aws";
-import { handleAwsLambdaRequest } from "../src/aws-lambda";
-import { createApiProject, runCli } from "../src/cli";
+import { bindResource, createAwsClientConfig } from "@voke/aws";
 import {
   dynamodbTable,
   s3Bucket,
@@ -16,7 +9,14 @@ import {
   sqsQueue,
   synthesizeCloudFormation,
   ssmParameter,
-} from "../src/cloudformation";
+} from "@voke/aws/cloudformation";
+import { Hono } from "hono";
+import type { LambdaContext, LambdaEvent } from "hono/aws-lambda";
+
+import { api } from "../src/api";
+import { createApiApp, createGateway, routeModule } from "../src/app";
+import { handleAwsLambdaRequest } from "../src/aws-lambda";
+import { createApiProject, runCli } from "../src/cli";
 import { defineConfig, getConfig, loadVokeConfig } from "../src/config";
 import { awsContext } from "../src/context";
 import type { VokeEnv } from "../src/context";
@@ -562,7 +562,7 @@ test("loads voke.config.ts default export", async () => {
   await Bun.write(
     configPath,
     `import { defineConfig } from "${import.meta.dir}/../src/index.ts";
-import { sqsQueue } from "${import.meta.dir}/../src/cloudformation.ts";
+import { sqsQueue } from "${import.meta.dir}/../../aws/src/cloudformation.ts";
 
 export default defineConfig({
   name: "configured-api",
@@ -602,7 +602,8 @@ test("synth CLI reads voke.config.ts and writes the configured template path", a
   await Bun.write(
     configPath,
     `import { defineConfig } from "${import.meta.dir}/../src/index.ts";
-import { aws, sqsQueue } from "${import.meta.dir}/../../aws/src/index.ts";
+import { sqsQueue } from "${import.meta.dir}/../../aws/src/cloudformation.ts";
+import { aws } from "${import.meta.dir}/../../aws/src/index.ts";
 
 export default defineConfig({
   name: "configured-synth",

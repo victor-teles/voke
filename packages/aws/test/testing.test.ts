@@ -1,7 +1,10 @@
 import { expect, test } from "bun:test";
 
-import { synthesizeCloudFormation } from "../src/cloudformation";
-import { dynamodbTable, sqsQueue } from "../src/index";
+import {
+  dynamodbTable,
+  sqsQueue,
+  synthesizeCloudFormation,
+} from "../src/cloudformation";
 import { createStackTestContext } from "../src/testing";
 
 test("resolves DynamoDB seed table names through resource bindings", () => {
