@@ -479,8 +479,8 @@ In the `aws()` `local.devEnvironment` (`packages/aws/src/index.ts`):
 
 ## Execution notes (2026-11-14)
 
-Done except the real-emulator e2e, on branch `feature/aws-emulator-local-provider`, stacked on plan 006
-(`feature/first-run-experience`, PR #58, open). Uncommitted. Gates: `bun run check` 0 errors,
+Done except the real-emulator e2e, on branch `feature/aws-emulator-local-provider` (PR #59), stacked on plan 006
+(`feature/first-run-experience`, PR #58, open). Gates: `bun run check` 0 errors,
 `bun run typecheck` 18/18, `bun run test` 23/23 tasks (`@voke/aws` 99, core 243), all without Docker or
 network. `packages/core/src` is unchanged.
 
