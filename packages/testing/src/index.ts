@@ -57,7 +57,12 @@ const requestBody = (
 
 const targetUrl = (target: TestClientTarget, path: string): string => {
   if ("baseUrl" in target) {
-    return new URL(path, target.baseUrl).toString();
+    // Append rather than resolve, so a stage path such as `/prod` survives `/users`.
+    const base = target.baseUrl.endsWith("/")
+      ? target.baseUrl.slice(0, -1)
+      : target.baseUrl;
+
+    return `${base}${path.startsWith("/") ? path : `/${path}`}`;
   }
 
   return new URL(path, "https://localhost").toString();

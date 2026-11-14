@@ -76,11 +76,13 @@ test("provides AWS local dev environment through the provider capability", () =>
   });
 
   expect(environment).toMatchObject({
-    AWS_ENDPOINT_URL: "http://localhost:9999",
-    AWS_REGION: "sa-east-1",
-    VOKE_LOCAL_PROVIDER: "floci",
-    VOKE_RESOURCE_EVENTS_QUEUE_URL:
-      "http://localhost:9999/000000000000/EventsQueue",
+    environment: {
+      AWS_ENDPOINT_URL: "http://localhost:9999",
+      AWS_REGION: "sa-east-1",
+      VOKE_LOCAL_PROVIDER: "floci",
+      VOKE_RESOURCE_EVENTS_QUEUE_URL:
+        "http://localhost:9999/000000000000/EventsQueue",
+    },
   });
 });
 

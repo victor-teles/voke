@@ -399,12 +399,6 @@ test("normalizes project and CloudFormation settings through defineConfig", () =
     environment: {
       LOG_LEVEL: "debug",
     },
-    local: {
-      provider: expect.objectContaining({
-        name: "floci",
-      }),
-      providerOptional: true,
-    },
     name: "orders-api",
     region: "sa-east-1",
     resources: {

@@ -2,8 +2,6 @@ import type { Context } from "hono";
 
 import type { VokeEnv } from "./context";
 import { VokeConfigError } from "./errors";
-import { resolveLocalProvider } from "./local-provider";
-import type { LocalProvider, LocalProviderInput } from "./local-provider";
 import type {
   VokeModelProviderExtensionRecord,
   VokeModelRecord,
@@ -24,7 +22,6 @@ export interface VokeConfig {
   dev: VokeDevConfig;
   /** Environment variables set on every deployed Function. */
   environment: Record<string, string>;
-  local: VokeLocalConfig;
   provider?: VokeProvider;
   remotes?: Record<string, VokeRemoteConfig>;
   /** Infrastructure resources (queues, tables, buckets, ...) the project declares. */
@@ -69,16 +66,6 @@ export interface VokeDevConfig {
   environment: Record<string, string>;
 }
 
-export interface VokeLocalConfig {
-  provider: LocalProvider;
-  providerOptional: boolean;
-}
-
-export interface VokeLocalConfigInput {
-  provider: LocalProviderInput;
-  providerOptional: boolean;
-}
-
 export type VokeNodeRuntime = "nodejs22.x" | "nodejs24.x";
 
 export interface VokeRuntimeConfig {
@@ -94,7 +81,6 @@ export interface VokeConfigInput {
   build?: Partial<VokeBuildConfig>;
   cloudFormation?: Partial<VokeCloudFormationConfig>;
   dev?: Partial<VokeDevConfig>;
-  local?: Partial<VokeLocalConfigInput>;
   provider?: VokeProvider;
   remotes?: Record<string, VokeRemoteConfig | VokeRemoteConfigInput>;
   runtime?: Partial<VokeRuntimeConfig>;
@@ -170,6 +156,14 @@ const removedSettings = (
     }
   }
 
+  if ("local" in raw) {
+    issues.push({
+      message:
+        'local AWS settings moved to the provider: aws({ local: floci() }) from "@voke/aws" and "@voke/aws/local"',
+      path: "local",
+    });
+  }
+
   if (raw.build !== undefined && "target" in raw.build) {
     issues.push({
       message:
@@ -208,11 +202,6 @@ const defineCloudFormationConfig = (
 const defineDevConfig = (input: VokeConfigInput): VokeDevConfig => ({
   entrypoint: input.dev?.entrypoint ?? input.entrypoint ?? "./src/index.ts",
   environment: input.dev?.environment ?? {},
-});
-
-const defineLocalConfig = (input: VokeConfigInput): VokeLocalConfig => ({
-  provider: resolveLocalProvider(input.local?.provider),
-  providerOptional: input.local?.providerOptional ?? true,
 });
 
 const isNodeRuntime = (runtime: string): runtime is VokeNodeRuntime =>
@@ -261,7 +250,6 @@ export const defineConfig = (input: VokeConfigInput): VokeConfig => {
     dev: defineDevConfig(input),
     entrypoint: input.entrypoint ?? "./src/index.ts",
     environment: { ...input.environment },
-    local: defineLocalConfig(input),
     name: input.name,
     ...(input.provider === undefined ? {} : { provider: input.provider }),
     region: input.region ?? readEnv("AWS_REGION") ?? "us-east-1",

@@ -38,7 +38,6 @@ export interface VokeModel {
   functions: Record<string, VokeModelFunction>;
   resources: Record<string, VokeModelResource>;
   outputs: Record<string, VokeModelOutput>;
-  local: VokeModelLocal;
 }
 
 export interface VokeModelService {
@@ -150,15 +149,6 @@ export interface VokeModelOutput {
         resource: string;
         attribute: string;
       };
-}
-
-export interface VokeModelLocal {
-  provider: VokeModelLocalProvider;
-}
-
-export interface VokeModelLocalProvider {
-  adapter: string;
-  optional: boolean;
 }
 
 const toOutputKey = (name: string, attribute: string): string =>
@@ -616,12 +606,6 @@ export const createInternalModel = (input: VokeModelInput): VokeModel => {
       outdir: config.build.outdir,
     },
     functions: modelFunctions,
-    local: {
-      provider: {
-        adapter: config.local.provider.name,
-        optional: config.local.providerOptional,
-      },
-    },
     outputs: {
       ...apiOutputs,
       ...functionOutputs,

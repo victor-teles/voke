@@ -114,15 +114,49 @@ export interface ProviderSynthesisCapability<TArtifact = unknown> {
   synthesize?: (input: { config: VokeConfig; model: VokeModel }) => TArtifact;
 }
 
-export interface ProviderLocalCapability<TWorkflow = unknown> {
+export interface ProviderCommandRunOptions {
+  env?: Record<string, string>;
+  /** Names removed from the inherited process environment before `env` is applied. */
+  unsetEnv?: readonly string[];
+}
+
+export type ProviderCommandRunner = (
+  command: string[],
+  options?: ProviderCommandRunOptions
+) => void | Promise<void>;
+
+export interface ProviderLocalDevEnvironment {
+  environment: Record<string, string>;
+  /** Variables the `voke dev` child must not inherit, such as real cloud credentials. */
+  unsetEnvironment?: readonly string[];
+}
+
+export interface ProviderLocalWorkflowContext {
+  /** Config resolved with the CLI's name, stage and region overrides. */
+  config: VokeConfig;
+  model: VokeModel;
+  /** The remaining `voke local` flags; the Provider reads the ones it understands. */
+  options: Readonly<Record<string, string>>;
+  run: ProviderCommandRunner;
+}
+
+/** The `voke local start|stop|reset|bootstrap` workflow a Provider runs for local development. */
+export interface ProviderLocalWorkflow {
+  bootstrap: (context: ProviderLocalWorkflowContext) => Promise<void>;
+  reset: (context: ProviderLocalWorkflowContext) => Promise<void>;
+  start: (context: ProviderLocalWorkflowContext) => Promise<void>;
+  stop: (context: ProviderLocalWorkflowContext) => Promise<void>;
+}
+
+export interface ProviderLocalCapability {
   devEnvironment?: (input: {
     config: VokeConfig;
     endpoint?: string;
     model: VokeModel;
     region: string;
     stage: string;
-  }) => Record<string, string>;
-  workflow?: (input: { config: VokeConfig; model: VokeModel }) => TWorkflow;
+  }) => ProviderLocalDevEnvironment | Promise<ProviderLocalDevEnvironment>;
+  workflow?: ProviderLocalWorkflow;
 }
 
 export interface VokeProvider {

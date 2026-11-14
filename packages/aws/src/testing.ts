@@ -4,12 +4,16 @@ import {
   createLocalResourceBindings,
 } from "./local";
 import type { LocalAwsEnvironment } from "./local";
+import { floci } from "./local-provider";
+import type { LocalProvider } from "./local-provider";
 import { toEnvKey } from "./resources";
 
 export interface StackTestContextOptions {
   accountId?: string;
   endpoint?: string;
   outputs?: Record<string, string>;
+  /** The Local AWS Provider the stack runs on. Defaults to Floci. */
+  local?: LocalProvider;
   region?: string;
   template: CloudFormationTemplate;
 }
@@ -135,6 +139,7 @@ export const createStackTestContext = (
 ): StackTestContext => {
   const environment = createLocalAwsEnvironment({
     endpoint: options.endpoint,
+    provider: options.local ?? floci(),
     region: options.region,
   });
   const bindings = createLocalResourceBindings(options.template, {

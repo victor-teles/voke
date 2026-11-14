@@ -2,11 +2,11 @@ import { expect, test } from "bun:test";
 
 import { aws } from "@voke/aws";
 import { dynamodbTable, sqsQueue } from "@voke/aws/cloudformation";
+import type { LocalProvider } from "@voke/aws/local";
 
 import { runCli } from "../src/cli";
 import { defineConfig } from "../src/config";
 import { createDevPlan } from "../src/dev";
-import type { LocalProvider } from "../src/local";
 import { tempPath } from "./support/temp";
 
 test("creates a config-first Bun hot reload dev plan with local bindings", async () => {
@@ -61,6 +61,7 @@ test("creates a config-first Bun hot reload dev plan with local bindings", async
       VOKE_RESOURCE_ORDERS_TABLE_NAME: "OrdersTable",
       VOKE_STAGE: "local",
     },
+    unsetEnvironment: [],
   });
 });
 
@@ -114,11 +115,8 @@ test("dev plan uses the configured local provider", async () => {
   const plan = await createDevPlan(
     defineConfig({
       entrypoint,
-      local: {
-        provider,
-      },
       name: "orders-api",
-      provider: aws(),
+      provider: aws({ local: provider }),
       resources: {
         eventsQueue: sqsQueue(),
       },
@@ -194,12 +192,16 @@ test("dev plan delegates provider-specific local environment to provider local c
       name: "provider-local-api",
       provider: {
         local: {
-          devEnvironment: ({ endpoint, region, stage }) => ({
-            CUSTOM_ENDPOINT: endpoint ?? "none",
-            CUSTOM_REGION: region,
-            CUSTOM_STAGE: stage,
-            VOKE_INVOKE_RUNTIME: "custom-local",
-          }),
+          devEnvironment: ({ endpoint, region, stage }) =>
+            Promise.resolve({
+              environment: {
+                CUSTOM_ENDPOINT: endpoint ?? "none",
+                CUSTOM_REGION: region,
+                CUSTOM_STAGE: stage,
+                VOKE_INVOKE_RUNTIME: "custom-local",
+              },
+              unsetEnvironment: ["AWS_PROFILE"],
+            }),
         },
         name: "custom",
         synthesis: {
@@ -222,6 +224,7 @@ test("dev plan delegates provider-specific local environment to provider local c
     VOKE_INVOKE_RUNTIME: "custom-local",
     VOKE_STAGE: "sandbox",
   });
+  expect(plan.unsetEnvironment).toEqual(["AWS_PROFILE"]);
   expect(plan.environment.AWS_ENDPOINT_URL).toBeUndefined();
 });
 

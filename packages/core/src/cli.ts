@@ -8,10 +8,8 @@ import packageJson from "../package.json";
 import { defineConfig, loadVokeConfig } from "./config";
 import type { VokeConfig } from "./config";
 import { createDevPlan } from "./dev";
-import { VokeError } from "./errors";
+import { VokeConfigError, VokeError } from "./errors";
 import type { FunctionRegistry, FunctionRegistryInput } from "./invoke";
-import { createLocalBootstrapPlan, LocalProviderError } from "./local";
-import type { LocalProvider } from "./local";
 import { createInternalModel } from "./model";
 import { loadProject } from "./project";
 import type { BuildPlan, ProviderDeployResult } from "./provider";
@@ -44,6 +42,8 @@ type CommandRunner = (
 interface CommandRunOptions {
   env?: Record<string, string>;
   stdoutFilter?: (line: string) => boolean;
+  /** Names removed from the inherited environment before `env` is applied. */
+  unsetEnv?: readonly string[];
 }
 
 export interface ParsedFlags {
@@ -181,30 +181,6 @@ const parseFlags = (args: string[]): ParsedFlags => {
   return { positional, values };
 };
 
-const writeLocalCompose = async (
-  config: VokeConfig,
-  compose: string,
-  flags: ParsedFlags
-): Promise<void> => {
-  const directory = compose.split("/").slice(0, -1).join("/");
-
-  if (directory !== "") {
-    await Bun.$`mkdir -p ${directory}`;
-  }
-
-  await Bun.write(
-    compose,
-    config.local.provider.composeConfig({
-      dataDirectory: flags.values.data ?? ".voke/local/data",
-      hostname: flags.values.hostname,
-      image: flags.values.image,
-      port:
-        flags.values.port === undefined ? undefined : Number(flags.values.port),
-      region: flags.values.region,
-    })
-  );
-};
-
 const forwardFilteredStdout = async (
   stdout: ReadableStream<Uint8Array>,
   stdoutFilter: (line: string) => boolean
@@ -231,16 +207,25 @@ const forwardFilteredStdout = async (
   }
 };
 
-const runCommand = async (
+const childEnvironment = (
+  options: CommandRunOptions
+): Record<string, string | undefined> => {
+  const env: Record<string, string | undefined> = { ...Bun.env };
+
+  for (const name of options.unsetEnv ?? []) {
+    Reflect.deleteProperty(env, name);
+  }
+
+  return { ...env, ...options.env };
+};
+
+export const runCommand = async (
   command: string[],
   options: CommandRunOptions = {}
 ): Promise<void> => {
   const stdout = options.stdoutFilter === undefined ? "inherit" : "pipe";
   const process = Bun.spawn(command, {
-    env: {
-      ...Bun.env,
-      ...options.env,
-    },
+    env: childEnvironment(options),
     stderr: "inherit",
     stdout,
   });
@@ -262,58 +247,6 @@ const runCommand = async (
 
 const hideBunDevelopmentServerBanner = (line: string): boolean =>
   !line.includes("Started development server:");
-
-const errorMessage = (error: unknown): string => {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return String(error);
-};
-
-const localProviderErrorMessage = (options: {
-  provider: LocalProvider;
-  localCommand: string;
-  command: string[];
-  cause: unknown;
-}): string => {
-  const commandText = options.command.join(" ");
-  const base = `Voke local ${options.localCommand} failed while running: ${commandText}. ${errorMessage(options.cause)}`;
-
-  if (options.provider.name !== "floci") {
-    return `${base}\nLocal provider: ${options.provider.name}. Check this provider's local command configuration.`;
-  }
-
-  if (options.localCommand === "bootstrap") {
-    return `${base}\nFloci is Voke's default optional local AWS provider. Make sure Floci is running with "voke local start", then retry "voke local bootstrap". You can also configure local.provider in voke.config.ts.`;
-  }
-
-  return `${base}\nFloci is Voke's default optional local AWS provider. Make sure Docker Compose is installed and Docker is running, then retry "voke local ${options.localCommand}". You can also configure local.provider in voke.config.ts.`;
-};
-
-const runLocalProviderCommand = async (options: {
-  provider: LocalProvider;
-  localCommand: string;
-  command: string[];
-  run: CommandRunner;
-  env?: Record<string, string>;
-}): Promise<void> => {
-  try {
-    await options.run(options.command, { env: options.env });
-  } catch (error) {
-    throw new LocalProviderError({
-      cause: error,
-      command: options.command,
-      message: localProviderErrorMessage({
-        cause: error,
-        command: options.command,
-        localCommand: options.localCommand,
-        provider: options.provider,
-      }),
-      provider: options.provider.name,
-    });
-  }
-};
 
 const createTestTemplate =
   (): string => `import { expect, test } from "bun:test";
@@ -801,82 +734,53 @@ export const dev = async (
   await (options.run ?? runCommand)(plan.command, {
     env: plan.environment,
     stdoutFilter: hideBunDevelopmentServerBanner,
+    unsetEnv: plan.unsetEnvironment,
   });
 };
 
+const localSubcommands = ["start", "stop", "reset", "bootstrap"] as const;
+
+type LocalSubcommand = (typeof localSubcommands)[number];
+
+const isLocalSubcommand = (
+  value: string | undefined
+): value is LocalSubcommand =>
+  localSubcommands.includes(value as LocalSubcommand);
+
+/** `voke local <start|stop|reset|bootstrap>`, run by the configured Provider's local workflow. */
 export const local = async (
   subcommand: string | undefined,
   flags: ParsedFlags,
   run: CommandRunner = runCommand
 ): Promise<void> => {
-  const compose = flags.values.compose ?? ".voke/local/docker-compose.yml";
-  const config = await loadConfigFromFlags(flags);
-  const {
-    local: { provider },
-  } = config;
-
-  if (subcommand === "start") {
-    await writeLocalCompose(config, compose, flags);
-    await runLocalProviderCommand({
-      command: provider.startCommand({ composePath: compose }),
-      localCommand: "start",
-      provider,
-      run,
-    });
-    return;
+  if (!isLocalSubcommand(subcommand)) {
+    throw new CliUsageError("Usage: voke local <start|stop|reset|bootstrap>");
   }
 
-  if (subcommand === "stop") {
-    await runLocalProviderCommand({
-      command: provider.stopCommand({ composePath: compose }),
-      localCommand: "stop",
-      provider,
-      run,
-    });
-    return;
+  const loaded = await loadConfigFromFlags(flags);
+  const config = defineConfig({
+    ...loaded,
+    entrypoint: flags.values.entrypoint ?? loaded.entrypoint,
+    name: flags.values.name ?? loaded.name,
+    region: flags.values.region ?? loaded.region,
+    stage: flags.values.stage ?? loaded.stage,
+  });
+  const workflow = config.provider?.local?.workflow;
+
+  if (workflow === undefined) {
+    throw new VokeConfigError(
+      config.provider === undefined
+        ? "No provider configured for voke local."
+        : `Provider "${config.provider.name}" does not support voke local.`
+    );
   }
 
-  if (subcommand === "reset") {
-    await runLocalProviderCommand({
-      command: provider.resetCommand({ composePath: compose }),
-      localCommand: "reset",
-      provider,
-      run,
-    });
-    return;
-  }
-
-  if (subcommand === "bootstrap") {
-    const name = flags.values.name ?? config.name;
-    const stage = flags.values.stage ?? config.stage;
-    const region = flags.values.region ?? config.region;
-    const templatePath =
-      flags.values.template ?? ".voke/local/cloudformation.json";
-    const plan = await createLocalBootstrapPlan({
-      config: {
-        ...config,
-        entrypoint: flags.values.entrypoint ?? config.entrypoint,
-      },
-      endpoint: flags.values.endpoint,
-      name,
-      region,
-      stage,
-      templatePath,
-    });
-
-    for (const command of plan.commands) {
-      await runLocalProviderCommand({
-        command,
-        env: plan.environment,
-        localCommand: "bootstrap",
-        provider,
-        run,
-      });
-    }
-    return;
-  }
-
-  throw new CliUsageError("Usage: voke local <start|stop|reset|bootstrap>");
+  await workflow[subcommand]({
+    config,
+    model: createInternalModel(config),
+    options: flags.values,
+    run,
+  });
 };
 
 const remote = async (

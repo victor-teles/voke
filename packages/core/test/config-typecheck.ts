@@ -1,7 +1,9 @@
+import { aws } from "@voke/aws";
+import type { LocalProvider } from "@voke/aws/local";
+
 import { voke } from "../src/app";
 import type { VokeConfigInput } from "../src/config";
 import type { FunctionRegistry } from "../src/invoke";
-import type { LocalProvider } from "../src/local";
 
 declare const assertConfigInput: (config: VokeConfigInput) => void;
 
@@ -63,26 +65,21 @@ assertConfigInput({
   },
 });
 
+// The Local AWS Provider is an AWS Provider option: aws({ local }).
 assertConfigInput({
-  local: {
-    provider: "floci",
-  },
   name: "floci-local-api",
+  provider: aws(),
 });
 
 assertConfigInput({
-  local: {
-    provider: customProvider,
-  },
   name: "custom-local-provider-api",
+  provider: aws({ local: customProvider }),
 });
 
 assertConfigInput({
-  local: {
-    // @ts-expect-error Local providers must be "floci" or a LocalProvider object.
-    provider: "localstack",
-  },
-  name: "unsupported-local-provider-api",
+  // @ts-expect-error local settings moved to aws({ local }).
+  local: { provider: customProvider },
+  name: "core-local-api",
 });
 
 assertConfigInput({

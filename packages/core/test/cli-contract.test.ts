@@ -179,7 +179,7 @@ test("generated API starter responds through the public test client", async () =
   )) as {
     default: { fetch: typeof fetch };
   };
-  const { createTestClient } = await import("../src/e2e");
+  const { createTestClient } = await import("@voke/testing");
   const client = createTestClient(service);
   const response = await client.get("/health");
 

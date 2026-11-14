@@ -195,14 +195,13 @@ test("keeps local AWS provider helpers in @voke/aws/local", async () => {
 
   expect(Object.keys(local).toSorted()).toEqual([
     "LocalProviderError",
-    "createFlociComposeConfig",
-    "createFlociLocalProvider",
     "createLocalAwsEnvironment",
     "createLocalBootstrapPlan",
     "createLocalResourceBindings",
-    "resolveLocalProvider",
+    "createLocalWorkflow",
+    "floci",
   ]);
-  expect("createFlociLocalProvider" in voke).toBe(false);
+  expect("floci" in voke).toBe(false);
 });
 
 test("documents the stable Function-first Gateway vocabulary", async () => {
@@ -248,7 +247,7 @@ test("keeps first-party examples on the Function-first Gateway API", async () =>
     "createFunctionRegistry",
     "defineFunction",
     "defineFunctions",
-    "new Voke",
+    "new Voke(",
     "registerLocalFunction",
     "resetLocalFunctions",
     "sqsEventSource",
@@ -269,7 +268,7 @@ test("keeps first-party teaching surfaces off removed authoring names", async ()
     "createGateway",
     "defineFunction",
     "defineFunctions",
-    "new Voke",
+    "new Voke(",
     "sqsEventSource",
     "sqsMessageBatch",
     "createAwsLambdaHandler",

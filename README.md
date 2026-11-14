@@ -278,9 +278,9 @@ lambdaAuthorizer({
 
 ARN targets are preferred because they make account and region ownership explicit. External Lambda Authorizer targets are bring-your-own-permission in v1; Voke only synthesizes API Gateway invoke permission for local Request Authorizer Functions owned by the same stack.
 
-## Local AWS With Floci
+## Local AWS
 
-Voke local AWS support targets [Floci](https://floci.io/), a local AWS emulator that runs on port `4566` and works with the standard AWS SDK/CLI endpoint variable `AWS_ENDPOINT_URL`.
+`voke local` runs through the configured Provider. With `aws()`, the default Local AWS Provider is [Floci](https://floci.io/), a local AWS emulator that runs on port `4566` and works with the standard AWS SDK/CLI endpoint variable `AWS_ENDPOINT_URL`.
 
 ```bash
 voke local start
@@ -289,17 +289,30 @@ voke local stop
 voke local reset
 ```
 
+To change the Local AWS Provider or its defaults, pass it to `aws()` in `voke.config.ts`:
+
+```ts
+import { aws } from "@voke/aws";
+import { floci } from "@voke/aws/local";
+
+export default defineConfig({
+  name: "hello-api",
+  provider: aws({ local: floci({ endpoint: "http://localhost:4567" }) }),
+});
+```
+
 You can also use the local helpers directly:
 
 ```ts
 import {
-  createFlociComposeConfig,
   createLocalAwsEnvironment,
   createLocalResourceBindings,
+  floci,
 } from "@voke/aws/local";
 
-const compose = createFlociComposeConfig();
-const env = createLocalAwsEnvironment();
+const provider = floci();
+const compose = provider.composeConfig();
+const env = createLocalAwsEnvironment({ provider });
 const bindings = createLocalResourceBindings(template);
 ```
 
@@ -327,7 +340,7 @@ const client = createTestClient(service);
 const response = await client.get("/health");
 ```
 
-Use `functions.invoke(...)` for invokable Functions, `functions.route(...)` for typed Route Builder calls, `gateway.request(...)` for Gateway HTTP requests, `createTestClient()` for Lambda/API Gateway semantics or deployed stack smoke tests, `createStackTestContext()` for CloudFormation outputs and Floci seed plans, and `createInvokeTestClient()` for worker flows.
+Use `functions.invoke(...)` for invokable Functions, `functions.route(...)` for typed Route Builder calls, `gateway.request(...)` for Gateway HTTP requests, `createTestClient()` for in-process app requests or deployed stack smoke tests, `createStackTestContext()` for CloudFormation outputs and Floci seed plans, and `createInvokeTestClient()` for worker flows.
 
 See [docs/e2e-testing.md](./docs/e2e-testing.md) and [examples/e2e](./examples/e2e).
 

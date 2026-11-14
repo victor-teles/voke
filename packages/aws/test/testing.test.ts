@@ -5,6 +5,7 @@ import {
   sqsQueue,
   synthesizeCloudFormation,
 } from "../src/cloudformation";
+import { floci } from "../src/local";
 import { createStackTestContext } from "../src/testing";
 
 test("resolves DynamoDB seed table names through resource bindings", () => {
@@ -59,4 +60,30 @@ test("rejects unsupported DynamoDB seed values instead of stringifying them", ()
   ).toThrow(
     'Unsupported DynamoDB seed attribute "metadata". Expected string, number, boolean, or null.'
   );
+});
+
+test("runs the stack context on the given Local AWS Provider", () => {
+  const template = synthesizeCloudFormation({
+    name: "seed-api",
+    resources: {
+      emailsQueue: sqsQueue(),
+    },
+  });
+  const flociDefaults = floci();
+  const context = createStackTestContext({
+    local: {
+      ...flociDefaults,
+      environment: (options) => ({
+        ...flociDefaults.environment(options),
+        VOKE_LOCAL_PROVIDER: "custom-local-aws",
+      }),
+      name: "custom-local-aws",
+    },
+    template,
+  });
+
+  expect(context.environment.VOKE_LOCAL_PROVIDER).toBe("custom-local-aws");
+  expect(
+    createStackTestContext({ template }).environment.VOKE_LOCAL_PROVIDER
+  ).toBe("floci");
 });
