@@ -17,7 +17,7 @@ Starts the local development workflow for the configured entrypoint.
 voke build [entrypoint] [outdir]
 ```
 
-Builds the Voke project entrypoint for Bun.
+Builds an ESM bundle of the entrypoint for the AWS Lambda Node.js runtime and writes a `package.json` with `"type": "module"` next to it. Modules matching `build.external` stay out of the bundle; the default, `["@aws-sdk/*"]`, uses the AWS SDK that ships with the Lambda runtime. Set `build.external: []` to bundle everything.
 
 ## Project starter
 

@@ -18,10 +18,7 @@ import {
   LocalProviderError,
 } from "../src/local";
 import type { LocalProvider } from "../src/local";
-
-const restoreEnv = (name: string, value?: string): void => {
-  Bun.env[name] = value;
-};
+import { setEnv } from "./support/env";
 
 test("creates a Floci-ready local AWS environment", () => {
   const env = createLocalAwsEnvironment({
@@ -50,7 +47,7 @@ test("uses AWS_ENDPOINT_URL as the standard local AWS SDK endpoint", () => {
   };
 
   Bun.env.AWS_ENDPOINT_URL = "http://localhost:4566";
-  restoreEnv("VOKE_AWS_ENDPOINT_URL");
+  setEnv("VOKE_AWS_ENDPOINT_URL", undefined);
   Bun.env.AWS_REGION = "us-west-2";
 
   expect(createAwsClientConfig()).toEqual({
@@ -58,9 +55,9 @@ test("uses AWS_ENDPOINT_URL as the standard local AWS SDK endpoint", () => {
     region: "us-west-2",
   });
 
-  restoreEnv("AWS_ENDPOINT_URL", previous.endpoint);
-  restoreEnv("VOKE_AWS_ENDPOINT_URL", previous.vokeEndpoint);
-  restoreEnv("AWS_REGION", previous.region);
+  setEnv("AWS_ENDPOINT_URL", previous.endpoint);
+  setEnv("VOKE_AWS_ENDPOINT_URL", previous.vokeEndpoint);
+  setEnv("AWS_REGION", previous.region);
 });
 
 test("generates a Docker Compose file for Floci", () => {

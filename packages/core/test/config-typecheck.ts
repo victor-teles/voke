@@ -82,3 +82,18 @@ assertConfigInput({
   },
   name: "unsupported-local-provider-api",
 });
+
+assertConfigInput({
+  build: {
+    external: [],
+  },
+  name: "bundled-sdk-api",
+});
+
+assertConfigInput({
+  build: {
+    // @ts-expect-error Voke always builds an ESM bundle for the Lambda Node.js runtime.
+    target: "bun",
+  },
+  name: "removed-build-target-api",
+});

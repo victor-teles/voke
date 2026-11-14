@@ -1,5 +1,6 @@
 import { createResourceBindingName } from "./bindings";
 import { VokeResourceBindingError } from "./errors";
+import { readEnv } from "./runtime-env";
 
 export interface AwsClientConfig {
   region: string;
@@ -35,7 +36,7 @@ export const bindResource = <TValue extends string = string>(
     envName,
     name,
     value: () => {
-      const value = Bun.env[envName];
+      const value = readEnv(envName);
 
       if (value === undefined || value === "") {
         throw new VokeResourceBindingError(
@@ -53,14 +54,14 @@ export const createAwsClientConfig = (
 ): AwsClientConfig => {
   const endpoint =
     options.endpoint ??
-    Bun.env.VOKE_AWS_ENDPOINT_URL ??
-    Bun.env.AWS_ENDPOINT_URL;
+    readEnv("VOKE_AWS_ENDPOINT_URL") ??
+    readEnv("AWS_ENDPOINT_URL");
 
   return {
     region:
       options.region ??
-      Bun.env.AWS_REGION ??
-      Bun.env.AWS_DEFAULT_REGION ??
+      readEnv("AWS_REGION") ??
+      readEnv("AWS_DEFAULT_REGION") ??
       "us-east-1",
     ...(endpoint === undefined || endpoint === "" ? {} : { endpoint }),
   };

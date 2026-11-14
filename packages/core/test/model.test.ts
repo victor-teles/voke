@@ -81,7 +81,6 @@ test("builds a small serializable model from normalized config", () => {
       entrypoint: "./src/api.ts",
       entrypoints: ["./src/api.ts"],
       outdir: "./build",
-      target: "bun",
     },
     functions: {
       api: {

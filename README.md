@@ -48,7 +48,7 @@ const gateway = voke(functions, { config });
 export default gateway;
 ```
 
-The default export has an constant `handler` accepts AWS Lambda HTTP API v2 events. For local tests, call the Gateway directly:
+The Gateway exposes `handler` for AWS Lambda HTTP API v2 events, `fetch` for Web-standard servers such as `Bun.serve`, and `request` for tests. For local tests, call the Gateway directly:
 
 ```ts
 const response = await gateway.request("/health");
@@ -85,6 +85,8 @@ voke deploy --name hello-api --stage local --template ./dist/cloudformation.json
 voke remove --name hello-api --stage local
 voke migrate serverless [serverless.yml] --out ./voke-migration
 ```
+
+`voke build` writes one ESM bundle per entrypoint for the AWS Lambda Node.js runtime, plus a `package.json` with `"type": "module"` so Lambda loads it as an ES module. The AWS SDK (`@aws-sdk/*`) stays external because the Lambda runtime provides it; set `build.external: []` in `voke.config.ts` to bundle a pinned SDK version instead.
 
 ## AWS and CloudFormation
 

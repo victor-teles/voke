@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "bun build ./src/functions.ts --outdir ./dist --target bun",
+    "build": "voke build ./src/functions.ts",
     "test": "bun test",
     "typecheck": "bunx tsgo --project tsconfig.json --noEmit",
     "clean": "rm -rf dist coverage"

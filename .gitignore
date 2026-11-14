@@ -35,3 +35,6 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # Finder (MacOS) folder config
 .DS_Store
+
+# Node runtime test output (packages/core/test/node-runtime.test.ts)
+.tmp-node-runtime

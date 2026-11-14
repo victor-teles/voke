@@ -8,6 +8,7 @@ import type {
 } from "../src/invoke";
 import { response } from "../src/response";
 import { schema } from "../src/schema";
+import { setEnv } from "./support/env";
 
 const standardSchema = <TInput, TOutput = TInput>(
   validate: (value: TInput) => TOutput
@@ -111,7 +112,7 @@ test("auto-loads voke.config.ts when composing a Gateway", async () => {
     expect(gateway.config.stage).toBe("test");
     await expect(functions.invoke("ping")).resolves.toEqual({ ok: true });
   } finally {
-    Bun.env.PWD = previousPwd;
+    setEnv("PWD", previousPwd);
   }
 });
 
@@ -132,10 +133,10 @@ test("fails clearly when voke.config.ts cannot be auto-loaded", async () => {
     });
 
     expect(() => voke(functions)).toThrow(
-      `Voke config file not found: ${directory}/voke.config.ts`
+      `Voke config file not found: ${directory}/voke.config.ts. In a deployed bundle voke.config.ts is not on disk; pass it explicitly: voke(functions, { config }).`
     );
   } finally {
-    Bun.env.PWD = previousPwd;
+    setEnv("PWD", previousPwd);
   }
 });
 
