@@ -778,7 +778,13 @@ test("reports expanded event coverage and unknown fields deterministically", () 
   ).toContain('route.get("/profiles/:id"');
   expect(
     migration.files["./voke-advanced/src/functions/api-handler.ts"]
-  ).toContain('runtime: "nodejs24.x"');
+  ).toContain('provider: awsLambda({ runtime: "nodejs24.x" })');
+  expect(
+    migration.files["./voke-advanced/src/functions/api-handler.ts"]
+  ).toContain('import { awsLambda } from "@voke/aws";');
+  expect(migration.files["./voke-advanced/voke.config.ts"]).toContain(
+    'provider: aws({ lambda: { runtime: "nodejs22.x" } }),'
+  );
   expect(migration.files["./voke-advanced/MIGRATION_REPORT.md"]).toContain(
     "Queue source OrdersQueue is not generated as a Voke SQS queue resource."
   );

@@ -62,11 +62,11 @@ test("explains bad config and model input with actionable details", () => {
     defineConfig({
       name: "runtime-api",
       runtime: {
-        lambda: "python3.12",
+        timeout: -1,
       },
-    } as unknown as Parameters<typeof defineConfig>[0])
+    })
   ).toThrow(
-    'Invalid Voke config at runtime.lambda: expected one of "nodejs22.x", "nodejs24.x"; received "python3.12"'
+    "Invalid Voke config at runtime.timeout: expected a positive integer number of seconds; received -1"
   );
 
   try {
@@ -199,5 +199,61 @@ test("requires a default export from voke.config.ts", async () => {
 
   await expect(loadVokeConfig({ path: configPath })).rejects.toThrow(
     `Voke config must export a default config from ${configPath}`
+  );
+});
+
+test("rejects runtime.lambda with the AWS provider replacement", () => {
+  expect(reject({ runtime: { lambda: "nodejs24.x" } })).toThrow(
+    'Invalid Voke config at runtime.lambda: "runtime.lambda" moved to the AWS provider; use aws({ lambda: { runtime } })'
+  );
+});
+
+test("defaults Function timeout and memory and rejects non-positive values", () => {
+  expect(defineConfig({ name: "defaults" }).runtime).toEqual({
+    memory: 1024,
+    timeout: 15,
+  });
+  expect(reject({ runtime: { memory: 0 } })).toThrow(
+    "Invalid Voke config at runtime.memory: expected a positive integer number of MB; received 0"
+  );
+  expect(reject({ runtime: { timeout: 1.5 } })).toThrow(
+    "Invalid Voke config at runtime.timeout: expected a positive integer number of seconds; received 1.5"
+  );
+});
+
+test("normalizes api.cors and rejects credentials with a wildcard origin", () => {
+  expect(defineConfig({ name: "no-cors" }).api.cors).toBeUndefined();
+  expect(
+    defineConfig({ api: { cors: false }, name: "off" }).api.cors
+  ).toBeUndefined();
+  expect(defineConfig({ api: { cors: true }, name: "open" }).api.cors).toEqual({
+    credentials: false,
+    headers: ["*"],
+    methods: ["*"],
+    origins: ["*"],
+  });
+  expect(
+    defineConfig({
+      api: {
+        cors: {
+          credentials: true,
+          maxAgeSeconds: 600,
+          origins: ["https://app.example"],
+        },
+      },
+      name: "partial",
+    }).api.cors
+  ).toEqual({
+    credentials: true,
+    headers: ["*"],
+    maxAgeSeconds: 600,
+    methods: ["*"],
+    origins: ["https://app.example"],
+  });
+  expect(reject({ api: { cors: { credentials: true } } })).toThrow(
+    'Invalid Voke config at api.cors.credentials: expected explicit origins when credentials is true; received ["*"]. List explicit origins: api.cors.origins'
+  );
+  expect(reject({ api: { cors: { origins: [] } } })).toThrow(
+    "Invalid Voke config at api.cors.origins: expected at least one origin; received []"
   );
 });

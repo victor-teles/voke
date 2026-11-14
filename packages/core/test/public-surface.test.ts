@@ -94,6 +94,7 @@ test("keeps AWS authoring in @voke/aws", async () => {
 
   expect(Object.keys(aws).toSorted()).toEqual([
     "aws",
+    "awsLambda",
     "bindResource",
     "createAuthorizers",
     "createAwsClientConfig",

@@ -18,11 +18,14 @@ import type {
   StackDescription,
   StackEvent,
 } from "./deploy-clients";
+import type { AwsLambdaSettings } from "./lambda-settings";
 import { createAwsClientConfig } from "./resources";
 import { createZip } from "./zip";
 
 export interface DeployDependencies {
   clients: DeployAwsClients;
+  /** `aws({ lambda })` settings for the synthesized template. Defaults apply when absent. */
+  lambda?: AwsLambdaSettings;
   now?: () => number;
   pollIntervalMs?: number;
   readFile?: (path: string) => Promise<Uint8Array>;
@@ -512,6 +515,7 @@ export const deployAwsStack = async (
       withManifestHandlers(input.model, entries),
       {
         artifact: { bucket, key: bundleKey },
+        ...(deps.lambda === undefined ? {} : { lambda: deps.lambda }),
       }
     ),
     null,

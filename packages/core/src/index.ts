@@ -11,6 +11,8 @@ export {
   type VokeBuildConfig,
   type VokeConfig,
   type VokeConfigInput,
+  type VokeCorsConfig,
+  type VokeRuntimeConfig,
 } from "./config";
 export { createHandlerExportName } from "./handler-names";
 export {
@@ -75,6 +77,7 @@ export type { VokeEnv } from "./context";
 export {
   createInternalModel as createVokeModel,
   type VokeModel,
+  type VokeModelFunction,
   type VokeModelHttpAuthorizer,
   type VokeModelProviderExtensionRecord,
   type VokeModelRecord,

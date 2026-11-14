@@ -4,7 +4,7 @@ import type {
 } from "./authorizers";
 import { createResourceBindingDefinition } from "./bindings";
 import { createHandlerNameFromEntrypoint, defineConfig } from "./config";
-import type { VokeConfig, VokeConfigInput, VokeNodeRuntime } from "./config";
+import type { VokeConfig, VokeConfigInput, VokeCorsConfig } from "./config";
 import { VokeConfigError, VokeModelError } from "./errors";
 import type { VokeIssue } from "./errors";
 import {
@@ -16,7 +16,9 @@ import type {
   AnyFunctionDefinition,
   FunctionRegistry,
   FunctionRegistryInput,
+  FunctionSynthesisConfig,
 } from "./invoke";
+import { positiveIntegerIssue } from "./numbers";
 import type { RuntimeVariableCatalog } from "./variables";
 
 export type VokeModelScalar = string | number | boolean | null;
@@ -54,6 +56,7 @@ export interface VokeModelBuild {
 
 export interface VokeModelApi {
   authorizers?: Record<string, VokeModelHttpAuthorizer>;
+  cors?: VokeCorsConfig;
   name: string;
   routes: VokeModelApiRoute[];
 }
@@ -88,8 +91,13 @@ export interface VokeModelFunction {
   eventSources: VokeModelEventSource[];
   handler: string;
   invokable: boolean;
-  runtime: VokeNodeRuntime;
+  /** Memory in MB: the Function's `synthesis.memory`, else `runtime.memory`. */
+  memory: number;
+  /** Provider Extension Records from `synthesis.provider`, copied untouched. */
+  provider?: Record<string, VokeModelProviderExtensionRecord>;
   routes: string[];
+  /** Maximum run time in seconds: the Function's `synthesis.timeout`, else `runtime.timeout`. */
+  timeout: number;
   variables: RuntimeVariableCatalog;
   environment: Record<string, string>;
   bindings: VokeModelBinding[];
@@ -314,6 +322,43 @@ const toModelResource = (
   return modelResource;
 };
 
+const assertFunctionSynthesis = (
+  name: string,
+  synthesis: FunctionSynthesisConfig | undefined
+): void => {
+  if (synthesis === undefined) {
+    return;
+  }
+
+  const path = `functions.${name}.synthesis`;
+  const issues: VokeIssue[] = [];
+
+  if ("runtime" in synthesis) {
+    issues.push({
+      message: '"synthesis.runtime" moved; use synthesis.provider.aws',
+      path: `${path}.runtime`,
+    });
+  }
+
+  for (const [field, unit] of [
+    ["memory", "MB"],
+    ["timeout", "seconds"],
+  ] as const) {
+    const issue =
+      synthesis[field] === undefined
+        ? undefined
+        : positiveIntegerIssue(synthesis[field], `${path}.${field}`, unit);
+
+    if (issue !== undefined) {
+      issues.push(issue);
+    }
+  }
+
+  if (issues.length > 0) {
+    throw VokeConfigError.validation(issues);
+  }
+};
+
 const validateModel = (model: VokeModel): void => {
   const issues: VokeIssue[] = [];
 
@@ -521,6 +566,9 @@ export const createInternalModel = (input: VokeModelInput): VokeModel => {
     }
 
     validateRuntimeVariableResources(name, definition, resources);
+    assertFunctionSynthesis(name, definition.synthesis);
+
+    const provider = definition.synthesis?.provider;
 
     return {
       bindings,
@@ -533,8 +581,10 @@ export const createInternalModel = (input: VokeModelInput): VokeModel => {
       eventSources,
       handler: toFunctionHandler(name, definition),
       invokable: definition.kind === "invokable",
+      memory: definition.synthesis?.memory ?? config.runtime.memory,
+      ...(provider === undefined ? {} : { provider: { ...provider } }),
       routes: definition.routes?.map(toRouteKey) ?? [],
-      runtime: definition.synthesis?.runtime ?? config.runtime.lambda,
+      timeout: definition.synthesis?.timeout ?? config.runtime.timeout,
       variables: definition.variables ?? {},
     };
   };
@@ -595,6 +645,7 @@ export const createInternalModel = (input: VokeModelInput): VokeModel => {
       ? {
           http: {
             ...(hasApiAuthorizers ? { authorizers: apiAuthorizers } : {}),
+            ...(config.api.cors === undefined ? {} : { cors: config.api.cors }),
             name: config.api.name,
             routes: apiRoutes,
           },

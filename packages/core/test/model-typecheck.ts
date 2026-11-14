@@ -32,7 +32,7 @@ const getUser = fn({
   name: "getUser",
   output: schema<{ id: string }>(),
   synthesis: {
-    runtime: "nodejs24.x",
+    timeout: 30,
   },
 });
 
@@ -49,7 +49,7 @@ if (modelFunction === undefined) {
   throw new Error("typecheck fixture is missing getUser");
 }
 
-const { runtime }: { runtime: "nodejs22.x" | "nodejs24.x" } = modelFunction;
+const { memory, timeout }: { memory: number; timeout: number } = modelFunction;
 
 const processOrder = sqs({
   batchSize: 5,
@@ -77,6 +77,7 @@ const eventSource: VokeModelSqsEventSource | undefined =
 const invalidValue: VokeModelValue = () => "nope";
 
 void value;
-void runtime;
+void memory;
+void timeout;
 void eventSource;
 void invalidValue;

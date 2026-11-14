@@ -1,11 +1,20 @@
 import { createVokeModel, VokeModelError } from "voke";
 import type {
   VokeConfigInput,
+  VokeCorsConfig,
   VokeModel,
   VokeModelInput,
   VokeModelHttpAuthorizer,
   VokeModelResource,
 } from "voke";
+
+import {
+  defaultAwsLambdaSettings,
+  derivedVisibilityTimeout,
+  explicitVisibilityTimeout,
+  resolveFunctionLambdaSettings,
+} from "./lambda-settings";
+import type { AwsLambdaSettings } from "./lambda-settings";
 
 export type CloudFormationValue =
   | string
@@ -153,7 +162,18 @@ export const dynamodbTable = (
   });
 };
 
-export const sqsQueue = (): StackResourceDefinition =>
+export interface SqsQueueOptions {
+  /**
+   * How long a received message stays hidden from other consumers, in seconds. When unset, Voke
+   * derives it from the Functions that consume the queue (six times the timeout plus the batching
+   * window), as AWS recommends.
+   */
+  visibilityTimeoutSeconds?: number;
+}
+
+export const sqsQueue = (
+  options: SqsQueueOptions = {}
+): StackResourceDefinition =>
   awsCloudFormationResource({
     actions: [
       "sqs:SendMessage",
@@ -166,7 +186,10 @@ export const sqsQueue = (): StackResourceDefinition =>
     cloudFormationType: "AWS::SQS::Queue",
     outputName: "Url",
     policyResource: "getAttArn",
-    properties: {},
+    properties:
+      options.visibilityTimeoutSeconds === undefined
+        ? {}
+        : { VisibilityTimeout: options.visibilityTimeoutSeconds },
   });
 
 export const snsTopic = (): StackResourceDefinition =>
@@ -722,6 +745,14 @@ const toApiGatewayPermissionResource = (
   Type: "AWS::Lambda::Permission",
 });
 
+const toCorsConfiguration = (cors: VokeCorsConfig): CloudFormationValue => ({
+  AllowCredentials: cors.credentials,
+  AllowHeaders: cors.headers,
+  AllowMethods: cors.methods,
+  AllowOrigins: cors.origins,
+  ...(cors.maxAgeSeconds === undefined ? {} : { MaxAge: cors.maxAgeSeconds }),
+});
+
 const addHttpApiResources = (options: {
   apiFunctionName: string;
   apiRoutes: VokeModel["apis"][string]["routes"];
@@ -730,8 +761,13 @@ const addHttpApiResources = (options: {
 }): void => {
   const { apiFunctionName, apiRoutes, model, templateResources } = options;
 
+  const cors = model.apis.http?.cors;
+
   templateResources.Api = {
     Properties: {
+      ...(cors === undefined
+        ? {}
+        : { CorsConfiguration: toCorsConfiguration(cors) }),
       Name: `${model.service.name}-${model.service.stage}`,
       ProtocolType: "HTTP",
     },
@@ -865,6 +901,21 @@ const outputValue = (
   );
 };
 
+const withDerivedVisibilityTimeout = (
+  model: VokeModel,
+  name: string,
+  resource: VokeModelResource
+): VokeModelResource["properties"] => {
+  const isQueue =
+    resource.provider?.aws?.properties.cloudFormationType === "AWS::SQS::Queue";
+  const derived = isQueue ? derivedVisibilityTimeout(model, name) : undefined;
+
+  return derived === undefined ||
+    explicitVisibilityTimeout(model, name) !== undefined
+    ? resource.properties
+    : { ...resource.properties, VisibilityTimeout: derived };
+};
+
 export interface SynthesisArtifact {
   bucket: string;
   key: string;
@@ -873,6 +924,8 @@ export interface SynthesisArtifact {
 export interface SynthesisOptions {
   /** The uploaded deployment bundle; without it each Function gets a 501 placeholder. */
   artifact?: SynthesisArtifact;
+  /** `aws({ lambda })` settings. Defaults to `defaultAwsLambdaSettings`. */
+  lambda?: AwsLambdaSettings;
 }
 
 export const synthesizeCloudFormationFromModel = (
@@ -880,6 +933,7 @@ export const synthesizeCloudFormationFromModel = (
   options: SynthesisOptions = {}
 ): CloudFormationTemplate => {
   const apiRoutes = model.apis.http?.routes ?? [];
+  const lambdaSettings = options.lambda ?? defaultAwsLambdaSettings;
   // The Function keyed "http" owns the bare Function/FunctionRole/Permission logical ids; every
   // other Function is prefixed with its key. Keyed by name, not by route order, so ids are stable.
   const apiFunctionName = primaryFunctionName;
@@ -898,7 +952,7 @@ export const synthesizeCloudFormationFromModel = (
           Resource: name,
         },
       },
-      Properties: resource.properties,
+      Properties: withDerivedVisibilityTimeout(model, name, resource),
       Type: provider.cloudFormationType,
     };
     policyStatements.push(
@@ -921,6 +975,8 @@ export const synthesizeCloudFormationFromModel = (
   )) {
     const logicalId = functionLogicalId(name, apiFunctionName);
     const roleLogicalId = functionRoleLogicalId(name, apiFunctionName);
+    const logGroupLogicalId = `${logicalId}LogGroup`;
+    const lambda = resolveFunctionLambdaSettings(definition, lambdaSettings);
     templateResources[roleLogicalId] = functionRoleResource([
       ...policyStatements,
       ...toRuntimeVariablePolicyStatements(
@@ -956,6 +1012,7 @@ export const synthesizeCloudFormationFromModel = (
         VokeRoutes: definition.routes.map(toApiGatewayRouteKey),
       },
       Properties: {
+        Architectures: [lambda.architecture],
         Code:
           options.artifact === undefined
             ? {
@@ -972,10 +1029,21 @@ export const synthesizeCloudFormationFromModel = (
         },
         FunctionName: definition.deployedName,
         Handler: definition.handler,
+        LoggingConfig: { LogGroup: { Ref: logGroupLogicalId } },
+        MemorySize: definition.memory,
         Role: { "Fn::GetAtt": [roleLogicalId, "Arn"] },
-        Runtime: definition.runtime,
+        Runtime: lambda.runtime,
+        Timeout: definition.timeout,
       },
       Type: "AWS::Lambda::Function",
+    };
+    // An explicit log group gives the logs a retention period and removes them with the stack.
+    templateResources[logGroupLogicalId] = {
+      Properties: {
+        LogGroupName: `/aws/lambda/${definition.deployedName}`,
+        RetentionInDays: lambdaSettings.logRetentionDays,
+      },
+      Type: "AWS::Logs::LogGroup",
     };
 
     for (const [

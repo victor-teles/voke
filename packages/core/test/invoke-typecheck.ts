@@ -105,7 +105,8 @@ const functions = createFunctions({
   }),
   publicRoute: fn({
     synthesis: {
-      runtime: "nodejs24.x",
+      memory: 512,
+      timeout: 30,
     },
   }),
   secureRoute: http({
@@ -195,6 +196,17 @@ fn({
   handler: () => ({ ok: true }),
   output: schema<{ ok: boolean }>(),
   synthesis: {
+    memory: 512,
+    provider: { aws: { properties: {}, type: "lambda.function" } },
+    timeout: 30,
+  },
+});
+
+fn({
+  handler: () => ({ ok: true }),
+  output: schema<{ ok: boolean }>(),
+  synthesis: {
+    // @ts-expect-error The Lambda runtime moved to synthesis.provider (awsLambda from @voke/aws).
     runtime: "nodejs24.x",
   },
 });

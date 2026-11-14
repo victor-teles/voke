@@ -2,10 +2,12 @@ import type { Context } from "hono";
 
 import type { VokeEnv } from "./context";
 import { VokeConfigError } from "./errors";
+import type { VokeIssue } from "./errors";
 import type {
   VokeModelProviderExtensionRecord,
   VokeModelRecord,
 } from "./model";
+import { isNonNegativeInteger, positiveIntegerIssue } from "./numbers";
 import type { VokeProvider } from "./provider";
 import { defineRemoteConfig } from "./remote";
 import type { VokeRemoteConfig, VokeRemoteConfigInput } from "./remote";
@@ -30,7 +32,23 @@ export interface VokeConfig {
 }
 
 export interface VokeApiConfig {
+  /** Cross-origin access for browsers, applied to the local Gateway and the deployed API alike. Off when absent. */
+  cors?: VokeCorsConfig;
   name: string;
+}
+
+export interface VokeCorsConfig {
+  credentials: boolean;
+  headers: string[];
+  maxAgeSeconds?: number;
+  methods: string[];
+  origins: string[];
+}
+
+export interface VokeApiConfigInput {
+  /** `true` allows any origin, method and header without credentials. */
+  cors?: boolean | Partial<VokeCorsConfig>;
+  name?: string;
 }
 
 export interface VokeBuildConfig {
@@ -66,15 +84,16 @@ export interface VokeDevConfig {
   environment: Record<string, string>;
 }
 
-export type VokeNodeRuntime = "nodejs22.x" | "nodejs24.x";
-
 export interface VokeRuntimeConfig {
-  lambda: VokeNodeRuntime;
+  /** Memory for every Function, in MB. Default 1024. */
+  memory: number;
+  /** Maximum run time for every Function, in seconds. Default 15. */
+  timeout: number;
 }
 
 export interface VokeConfigInput {
   name: string;
-  api?: Partial<VokeApiConfig>;
+  api?: VokeApiConfigInput;
   stage?: string;
   region?: string;
   entrypoint?: string;
@@ -88,9 +107,71 @@ export interface VokeConfigInput {
   resources?: Record<string, VokeResourceInput>;
 }
 
-const defineApiConfig = (input: VokeConfigInput): VokeApiConfig => ({
-  name: input.api?.name ?? input.name,
-});
+const wildcard = ["*"];
+
+const defineCorsConfig = (
+  input: VokeApiConfigInput["cors"]
+): VokeCorsConfig | undefined => {
+  if (input === undefined || input === false) {
+    return undefined;
+  }
+
+  const cors: VokeCorsConfig = {
+    credentials: false,
+    headers: wildcard,
+    methods: wildcard,
+    origins: wildcard,
+    ...(input === true ? {} : input),
+  };
+  const issues: VokeIssue[] = [];
+
+  if (cors.origins.length === 0) {
+    issues.push({
+      message: "expected at least one origin; received []",
+      path: "api.cors.origins",
+    });
+  }
+
+  if (cors.credentials && cors.origins.includes("*")) {
+    issues.push({
+      message: `expected explicit origins when credentials is true; received ${JSON.stringify(cors.origins)}. List explicit origins: api.cors.origins`,
+      path: "api.cors.credentials",
+    });
+  }
+
+  if (
+    cors.maxAgeSeconds !== undefined &&
+    !isNonNegativeInteger(cors.maxAgeSeconds)
+  ) {
+    issues.push({
+      message: `expected a non-negative integer number of seconds; received ${JSON.stringify(cors.maxAgeSeconds)}`,
+      path: "api.cors.maxAgeSeconds",
+    });
+  }
+
+  if (issues.length > 0) {
+    throw VokeConfigError.validation(issues);
+  }
+
+  return {
+    credentials: cors.credentials,
+    headers: [...cors.headers],
+    ...(cors.maxAgeSeconds === undefined
+      ? {}
+      : { maxAgeSeconds: cors.maxAgeSeconds }),
+    methods: [...cors.methods],
+    origins: [...cors.origins],
+  };
+};
+
+const defineApiConfig = (input: VokeConfigInput): VokeApiConfig => {
+  const cors = defineCorsConfig(input.api?.cors);
+
+  return {
+    ...(cors === undefined ? {} : { cors }),
+    name: input.api?.name ?? input.name,
+  };
+};
 
 export const createHandlerNameFromEntrypoint = (entrypoint: string): string => {
   const fileName = entrypoint.split("/").at(-1) ?? "index.ts";
@@ -117,6 +198,7 @@ const removedSettings = (
     api?: Record<string, unknown>;
     build?: Record<string, unknown>;
     cloudFormation?: Record<string, unknown>;
+    runtime?: Record<string, unknown>;
   };
   const issues: { message: string; path: string }[] = [];
 
@@ -164,6 +246,14 @@ const removedSettings = (
     });
   }
 
+  if (raw.runtime !== undefined && "lambda" in raw.runtime) {
+    issues.push({
+      message:
+        '"runtime.lambda" moved to the AWS provider; use aws({ lambda: { runtime } })',
+      path: "runtime.lambda",
+    });
+  }
+
   if (raw.build !== undefined && "target" in raw.build) {
     issues.push({
       message:
@@ -204,25 +294,23 @@ const defineDevConfig = (input: VokeConfigInput): VokeDevConfig => ({
   environment: input.dev?.environment ?? {},
 });
 
-const isNodeRuntime = (runtime: string): runtime is VokeNodeRuntime =>
-  runtime === "nodejs22.x" || runtime === "nodejs24.x";
+const defaultFunctionMemory = 1024;
+const defaultFunctionTimeout = 15;
 
-const defineNodeRuntime = (runtime: string): VokeNodeRuntime => {
-  if (!isNodeRuntime(runtime)) {
-    throw VokeConfigError.validation([
-      {
-        message: `expected one of "nodejs22.x", "nodejs24.x"; received ${JSON.stringify(runtime)}`,
-        path: "runtime.lambda",
-      },
-    ]);
+const defineRuntimeConfig = (input: VokeConfigInput): VokeRuntimeConfig => {
+  const memory = input.runtime?.memory ?? defaultFunctionMemory;
+  const timeout = input.runtime?.timeout ?? defaultFunctionTimeout;
+  const issues = [
+    positiveIntegerIssue(memory, "runtime.memory", "MB"),
+    positiveIntegerIssue(timeout, "runtime.timeout", "seconds"),
+  ].filter((issue) => issue !== undefined);
+
+  if (issues.length > 0) {
+    throw VokeConfigError.validation(issues);
   }
 
-  return runtime;
+  return { memory, timeout };
 };
-
-const defineRuntimeConfig = (input: VokeConfigInput): VokeRuntimeConfig => ({
-  lambda: defineNodeRuntime(input.runtime?.lambda ?? "nodejs22.x"),
-});
 
 const defineRemotesConfig = (
   input: VokeConfigInput,

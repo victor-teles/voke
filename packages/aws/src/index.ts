@@ -6,6 +6,11 @@ import { deployAwsStack, removeAwsStack } from "./deploy";
 import { createDeployAwsClients } from "./deploy-clients";
 import { awsRouteAuth } from "./lambda";
 import {
+  defineAwsLambdaSettings,
+  validateAwsLambdaModel,
+} from "./lambda-settings";
+import type { AwsLambdaOptions } from "./lambda-settings";
+import {
   createLocalAwsEnvironment,
   createLocalResourceBindings,
   createLocalWorkflow,
@@ -42,6 +47,14 @@ export {
   type AwsClientConfig,
   type ResourceBinding,
 } from "./resources";
+export {
+  awsLambda,
+  type AwsLambdaArchitecture,
+  type AwsLambdaFunctionOptions,
+  type AwsLambdaOptions,
+  type AwsLambdaRuntime,
+  type AwsLogRetentionDays,
+} from "./lambda-settings";
 export { parameter, secret } from "./runtime-variables";
 export type {
   AwsLambdaContext,
@@ -93,15 +106,20 @@ const validateAwsModel = (model: VokeModel): void => {
       }
     }
   }
+
+  validateAwsLambdaModel(model);
 };
 
 export interface AwsProviderOptions {
+  /** Lambda settings for every Function: runtime, architecture and log retention. */
+  lambda?: AwsLambdaOptions;
   /** The Local AWS Provider for `voke local` and `voke dev`. Defaults to Floci. */
   local?: LocalProvider;
 }
 
 export const aws = (options: AwsProviderOptions = {}): VokeProvider => {
   const localProvider = options.local ?? floci();
+  const lambda = defineAwsLambdaSettings(options.lambda);
 
   return {
     build: {
@@ -113,6 +131,7 @@ export const aws = (options: AwsProviderOptions = {}): VokeProvider => {
           clients: await createDeployAwsClients({
             region: input.region ?? input.config.region,
           }),
+          lambda,
         }),
       remove: async (input) =>
         await removeAwsStack(input, {
@@ -129,7 +148,7 @@ export const aws = (options: AwsProviderOptions = {}): VokeProvider => {
           region,
         });
         const bindings = createLocalResourceBindings(
-          synthesizeCloudFormationFromModel(model),
+          synthesizeCloudFormationFromModel(model, { lambda }),
           {
             accountId: localProvider.defaults.accountId,
             endpoint: environment.AWS_ENDPOINT_URL,
@@ -147,7 +166,8 @@ export const aws = (options: AwsProviderOptions = {}): VokeProvider => {
       variables: () => [createAwsRuntimeVariableProvider()],
     },
     synthesis: {
-      synthesize: ({ model }) => synthesizeCloudFormationFromModel(model),
+      synthesize: ({ model }) =>
+        synthesizeCloudFormationFromModel(model, { lambda }),
     },
     validate: validateAwsModel,
   };

@@ -1932,6 +1932,29 @@ const sqsQueueExpression = (
     : `{ queue: ${tsString(queue)}, ${options.join(", ")} }`;
 };
 
+const supportedLambdaRuntime = (
+  runtime: string | undefined
+): string | undefined =>
+  runtime === "nodejs22.x" || runtime === "nodejs24.x" ? runtime : undefined;
+
+// voke build generates the Lambda entry for every Function, so only an explicit runtime carries
+// over from the Serverless service, as an AWS Provider Extension Record.
+const functionSynthesisBlock = (fn: ServerlessFunction): string => {
+  const runtime = supportedLambdaRuntime(fn.runtime);
+
+  return runtime === undefined
+    ? ""
+    : `\n  synthesis: {\n    provider: awsLambda({ runtime: ${tsString(runtime)} }),\n  },`;
+};
+
+const awsProviderExpression = (service: ServerlessService): string => {
+  const runtime = supportedLambdaRuntime(service.provider.runtime);
+
+  return runtime === undefined
+    ? "aws()"
+    : `aws({ lambda: { runtime: ${tsString(runtime)} } })`;
+};
+
 const createSqsFunctionTemplate = (
   fn: ServerlessFunction,
   resourceDeclarations: ResourceDeclarations
@@ -1945,15 +1968,7 @@ const createSqsFunctionTemplate = (
   }
 
   const exportName = toIdentifier(fn.name, "migratedFunction");
-  const runtime = fn.runtime ?? undefined;
-  const supportedRuntime =
-    runtime === "nodejs22.x" || runtime === "nodejs24.x" ? runtime : undefined;
-  // voke build generates the Lambda entry for every Function, so only an explicit runtime
-  // carries over from the Serverless service.
-  const synthesisBlock =
-    supportedRuntime === undefined
-      ? ""
-      : `\n  synthesis: {\n    runtime: ${tsString(supportedRuntime)},\n  },`;
+  const synthesisBlock = functionSynthesisBlock(fn);
   const eventSources = sqsEvents.map((event) => {
     const { queue } = resolveSqsEventSource(event, resourceDeclarations);
 
@@ -1964,7 +1979,7 @@ const createSqsFunctionTemplate = (
     return sqsQueueExpression(event, queue);
   });
 
-  return `import { sqs } from "@voke/aws";
+  return `import { ${synthesisBlock === "" ? "sqs" : "awsLambda, sqs"} } from "@voke/aws";
 import type { StandardSchemaV1 } from "voke";
 
 const messageSchema: StandardSchemaV1<unknown, unknown> = {
@@ -1998,20 +2013,12 @@ const createFunctionTemplate = (
   }
 
   const exportName = toIdentifier(fn.name, "migratedFunction");
-  const runtime = fn.runtime ?? undefined;
-  const supportedRuntime =
-    runtime === "nodejs22.x" || runtime === "nodejs24.x" ? runtime : undefined;
-  // voke build generates the Lambda entry for every Function, so only an explicit runtime
-  // carries over from the Serverless service.
-  const synthesisBlock =
-    supportedRuntime === undefined
-      ? ""
-      : `\n  synthesis: {\n    runtime: ${tsString(supportedRuntime)},\n  },`;
+  const synthesisBlock = functionSynthesisBlock(fn);
   const eventTypes = fn.events
     .filter((event) => event.type === "sqs" || event.type === "eventBridge")
     .map((event) => event.type);
 
-  return `import { fn } from "voke";
+  return `${synthesisBlock === "" ? "" : 'import { awsLambda } from "@voke/aws";\n'}import { fn } from "voke";
 import type { StandardSchemaV1 } from "voke";
 
 const outputSchema: StandardSchemaV1<unknown, unknown> = {
@@ -2123,7 +2130,7 @@ import { defineConfig } from "voke";${resourceImports}
 
 export default defineConfig({
   name: ${tsString(service.service)},
-  provider: aws(),
+  provider: ${awsProviderExpression(service)},
   stage: ${tsString(service.provider.stage ?? "local")},
   region: ${tsString(service.provider.region ?? "us-east-1")},
   entrypoint: "./src/index.ts",

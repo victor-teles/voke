@@ -53,12 +53,27 @@
         },
         "FunctionName": "snapshot-api-test-http",
         "Handler": "index.http",
+        "Architectures": ["arm64"],
+        "LoggingConfig": {
+          "LogGroup": {
+            "Ref": "FunctionLogGroup"
+          }
+        },
+        "MemorySize": 1024,
         "Role": {
           "Fn::GetAtt": ["FunctionRole", "Arn"]
         },
-        "Runtime": "nodejs22.x"
+        "Runtime": "nodejs22.x",
+        "Timeout": 15
       },
       "Type": "AWS::Lambda::Function"
+    },
+    "FunctionLogGroup": {
+      "Properties": {
+        "LogGroupName": "/aws/lambda/snapshot-api-test-http",
+        "RetentionInDays": 14
+      },
+      "Type": "AWS::Logs::LogGroup"
     },
     "Api": {
       "Properties": {
