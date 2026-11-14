@@ -7,7 +7,16 @@ import { createHandlerNameFromEntrypoint, defineConfig } from "./config";
 import type { VokeConfig, VokeConfigInput, VokeNodeRuntime } from "./config";
 import { VokeConfigError, VokeModelError } from "./errors";
 import type { VokeIssue } from "./errors";
-import type { AnyFunctionDefinition } from "./invoke";
+import {
+  assertUniqueHandlerExportNames,
+  createHandlerExportName,
+} from "./handler-names";
+import { functionRegistryEntries } from "./invoke";
+import type {
+  AnyFunctionDefinition,
+  FunctionRegistry,
+  FunctionRegistryInput,
+} from "./invoke";
 import type { RuntimeVariableCatalog } from "./variables";
 
 export type VokeModelScalar = string | number | boolean | null;
@@ -47,7 +56,6 @@ export interface VokeModelBuild {
 export interface VokeModelApi {
   authorizers?: Record<string, VokeModelHttpAuthorizer>;
   name: string;
-  protocol: "http";
   routes: VokeModelApiRoute[];
 }
 
@@ -171,7 +179,7 @@ const toFunctionHandler = (
 ): string =>
   definition.synthesis?.handler ??
   (definition.synthesis?.entrypoint === undefined
-    ? `${name}.handler`
+    ? `index.${createHandlerExportName(name)}`
     : createHandlerNameFromEntrypoint(definition.synthesis.entrypoint));
 
 const toRouteKey = (
@@ -450,10 +458,14 @@ const validateRuntimeVariableResources = (
   }
 };
 
-export const createInternalModel = (
-  input: VokeConfig | VokeConfigInput
-): VokeModel => {
-  const config = defineConfig(input);
+export type VokeModelInput = (VokeConfig | VokeConfigInput) & {
+  /** The Function Registry discovered from the project entrypoint. */
+  readonly functions?: FunctionRegistry | FunctionRegistryInput;
+};
+
+export const createInternalModel = (input: VokeModelInput): VokeModel => {
+  const { functions: registry = {}, ...configInput } = input;
+  const config = defineConfig(configInput as VokeConfigInput);
   const resources = Object.fromEntries(
     Object.entries(config.cloudFormation.resources).map(([name, resource]) => [
       name,
@@ -477,14 +489,10 @@ export const createInternalModel = (
       },
     ])
   );
-  const registryEntries = Object.entries(config.functions).filter(
-    ([name]) => name !== "invoke" && name !== "route"
-  ) as [string, AnyFunctionDefinition][];
-  const hasRegistryFunctions = registryEntries.length > 0;
+  const registryEntries = functionRegistryEntries(registry);
+  assertUniqueHandlerExportNames(registryEntries.map(([name]) => name));
   const generatedFunctionName = (name: string): string =>
-    name === config.api.function
-      ? `${config.name}-${config.stage}`
-      : `${config.name}-${config.stage}-${name}`;
+    `${config.name}-${config.stage}-${name}`;
   const toModelFunction = (
     name: string,
     definition: AnyFunctionDefinition
@@ -565,34 +573,7 @@ export const createInternalModel = (
       };
     })
   );
-  const legacyApiRoutes =
-    apiRoutes.length === 0 && !hasRegistryFunctions
-      ? config.api.routes.map((route) => ({
-          function: config.api.function,
-          route,
-        }))
-      : [];
-  const modelFunctions: Record<string, VokeModelFunction> = {
-    ...functions,
-  };
-
-  if (
-    legacyApiRoutes.length > 0 &&
-    modelFunctions[config.api.function] === undefined
-  ) {
-    modelFunctions[config.api.function] = {
-      bindings,
-      deployedName: generatedFunctionName(config.api.function),
-      entrypoint: config.entrypoint,
-      environment: config.cloudFormation.environment,
-      eventSources: [],
-      handler: config.cloudFormation.handler,
-      invokable: false,
-      routes: config.api.routes,
-      runtime: config.runtime.lambda,
-      variables: {},
-    };
-  }
+  const modelFunctions: Record<string, VokeModelFunction> = functions;
   const functionOutputs = Object.fromEntries(
     Object.keys(modelFunctions).map((name) => [
       `${name}FunctionName`,
@@ -605,7 +586,7 @@ export const createInternalModel = (
       },
     ])
   );
-  const hasHttpApi = apiRoutes.length > 0 || legacyApiRoutes.length > 0;
+  const hasHttpApi = apiRoutes.length > 0;
   const hasApiAuthorizers = Object.keys(apiAuthorizers).length > 0;
   const apiOutputs: Record<string, VokeModelOutput> = hasHttpApi
     ? {
@@ -625,8 +606,7 @@ export const createInternalModel = (
           http: {
             ...(hasApiAuthorizers ? { authorizers: apiAuthorizers } : {}),
             name: config.api.name,
-            protocol: config.api.protocol,
-            routes: apiRoutes.length > 0 ? apiRoutes : legacyApiRoutes,
+            routes: apiRoutes,
           },
         }
       : {},

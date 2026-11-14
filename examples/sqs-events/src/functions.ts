@@ -1,4 +1,4 @@
-import { createSqsEventHandler, sqs } from "@voke/aws";
+import { sqs } from "@voke/aws";
 import { schema } from "@voke/schema";
 import { createFunctions } from "voke";
 
@@ -22,8 +22,3 @@ export const processOrder = sqs({
 });
 
 export const functions = createFunctions({ processOrder });
-
-export const handler = createSqsEventHandler({
-  function: "processOrder",
-  functions,
-});

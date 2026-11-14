@@ -1,7 +1,8 @@
 import type { VokeModel, VokeProvider } from "voke";
 
+import { createAwsBuildPlan } from "./build";
 import { synthesizeCloudFormationFromModel } from "./cloudformation-synthesis";
-import { createAwsLambdaHandler } from "./lambda";
+import { awsRouteAuth } from "./lambda";
 import {
   createLocalAwsEnvironment,
   createLocalResourceBindings,
@@ -44,6 +45,11 @@ export {
   type AwsLambdaHttpApiV2Event,
   type AwsLambdaHttpApiV2Result,
 } from "./lambda";
+export {
+  createLambdaHandlers,
+  type LambdaHandler,
+  type LambdaProjectModule,
+} from "./lambda-handlers";
 export {
   createAwsLambdaInvokeTransport,
   type AwsLambdaInvokeClient,
@@ -88,9 +94,10 @@ const validateAwsModel = (model: VokeModel): void => {
   }
 };
 
-export const aws = (): VokeProvider<{
-  handler: ReturnType<typeof createAwsLambdaHandler>;
-}> => ({
+export const aws = (): VokeProvider => ({
+  build: {
+    plan: createAwsBuildPlan,
+  },
   local: {
     devEnvironment: ({ config, endpoint, model, region }) => {
       const environment = createLocalAwsEnvironment({
@@ -115,9 +122,7 @@ export const aws = (): VokeProvider<{
   },
   name: "aws",
   runtime: {
-    gateway: ({ app }) => ({
-      handler: createAwsLambdaHandler(app),
-    }),
+    routeAuth: awsRouteAuth,
     variables: () => [createAwsRuntimeVariableProvider()],
   },
   synthesis: {

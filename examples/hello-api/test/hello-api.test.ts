@@ -1,12 +1,21 @@
 import { expect, test } from "bun:test";
 
+import { createLambdaHandlers } from "@voke/aws";
 import { Hono } from "hono";
-import type { LambdaContext, LambdaEvent } from "hono/aws-lambda";
+import type {
+  APIGatewayProxyResult,
+  LambdaContext,
+  LambdaEvent,
+} from "hono/aws-lambda";
 
 import helloApi from "../src/index";
 import { requestInfo } from "../src/middleware/request-info";
 
-const { handler } = helloApi;
+// The same handler `voke build` exports as `index.http` for the deployed Lambda.
+const handler = createLambdaHandlers({ default: helloApi }).http as (
+  event: LambdaEvent,
+  context?: LambdaContext
+) => Promise<APIGatewayProxyResult>;
 
 const lambdaEvent = (overrides: Record<string, unknown>): LambdaEvent => {
   const requestContext = {
@@ -55,14 +64,9 @@ const lambdaEvent = (overrides: Record<string, unknown>): LambdaEvent => {
   } as LambdaEvent;
 };
 
-test("exports a named Voke API", () => {
-  const defaultHandler = Object.getOwnPropertyDescriptor(
-    helloApi,
-    "handler"
-  )?.value;
-
+test("exports a named Voke API with a generated Lambda handler", () => {
   expect(helloApi.name).toBe("hello-api");
-  expect(handler).toBe(defaultHandler);
+  expect(typeof handler).toBe("function");
 });
 
 test("responds through the Lambda handler", async () => {

@@ -16,16 +16,19 @@ test("keeps root voke runtime values provider-neutral", () => {
     "VokeRuntimeVariableError",
     "activateFunctionRegistry",
     "createFunctions",
+    "createHandlerExportName",
     "createHandlerNameFromEntrypoint",
     "createVariableProvider",
     "createVariableSource",
     "createVokeModel",
     "defineConfig",
     "fn",
+    "functionRegistryEntries",
     "http",
     "invokeRegistryFunction",
     "loadVokeConfig",
     "route",
+    "runRequestAuthorizer",
     "toEnvKey",
     "voke",
   ]);
@@ -60,6 +63,9 @@ test("publishes HTTP helpers from @voke/http", async () => {
 test("publishes build helpers from @voke/build", async () => {
   const build = await importPackage("@voke/build");
 
-  expect(Object.keys(build).toSorted()).toEqual(["createBuildPlan"]);
+  expect(Object.keys(build).toSorted()).toEqual([
+    "createBuildPlan",
+    "handlerModule",
+  ]);
   expect("createBuildPlan" in voke).toBe(false);
 });

@@ -602,3 +602,49 @@ In `cli.ts`, the `synth` and `build` handlers call `loadProject` after `loadConf
 - Plan 004 consumes `<outdir>/index.js`, `<outdir>/package.json` and `<outdir>/voke-manifest.json` from
   `aws().build.plan`, and `loadProject` for the registry. Plan 008 picks up any remaining duplicate
   spellings. Plan 010 deletes core's retained `cloudformation.ts`, `aws-lambda.ts` and `api.ts`.
+
+## Execution notes (2026-11-14)
+
+Done on branch `feature/registry-discovery-lambda-entries`, stacked on `feature/finish-aws-package-split`
+(plan 009, PR #52, open at the time). Uncommitted. Gates: `bun run check` 0 errors, `bun run typecheck`
+18/18, `bun run test` 23/23 tasks (core 226, `@voke/aws` 38, `@voke/build` 4, examples all green).
+
+Done criteria, run for real:
+
+- `examples/hello-api`: `voke synth` gives `GET /|GET /health|GET /typed|GET /users|GET /users/{id}|POST /users 1 index.http`;
+  `grep -c '/:'` gives 0; `voke build` writes `dist/index.js`, `dist/package.json`, `dist/voke-manifest.json`;
+  under Node, `typeof m.http` is `function`.
+- `examples/sqs-events`: `voke synth` gives one `AWS::Lambda::EventSourceMapping` and `Handler: index.processOrder`;
+  `test/synthesis.test.ts` covers the undeclared `ordersQueue` error at `functions.processOrder.events.0.queue`.
+- `packages/core/test/node-runtime.test.ts` builds through `aws().build.plan` (generated entry included) and runs
+  the `http` and `processOrder` exports under real Node.
+
+Deviations and findings:
+
+- **Manifest handlers use the output-relative module path.** When a Function has an explicit
+  `synthesis.entrypoint`, Bun's common root widens and the generated entry lands at
+  `<outdir>/.voke/build/index.js`, so the manifest handler is `.voke/build/index.<export>`. The synthesized
+  template (from the model) still says `index.<export>` in that mixed case. Plan 004 must take handlers from
+  `voke-manifest.json`, not from the template. The common case (no explicit entrypoints) matches.
+- **Generated exports are sorted by name** so `.voke/build/index.ts` does not change when Functions are
+  reordered (the formatter reorders object keys, which exposed the order dependence).
+- **`VokeRoutes` template metadata** now uses API Gateway route keys too, so the template has one route spelling;
+  the core model keeps Route Builder syntax. Nothing read that metadata.
+- **`createGateway` takes the Provider from `config.provider`**; plan 009's `GatewayOptions.provider` was removed
+  (one spelling, U2).
+- **Migrator:** generated Functions drop `synthesis.entrypoint`/`handler` (they pointed at a `handler` export that
+  never existed); only an explicit runtime remains. Generated `package.json` gains `@voke/aws`.
+- **Examples outside the listed scope:** `examples/cross-function` and `examples/e2e` get a `voke.config.ts`
+  (`provider: aws()`), their build script becomes `voke build`, and their tsconfig includes the config. Without
+  this their `voke build` fails under U2. `.gitignore` gains `.voke`. New test file
+  `examples/sqs-events/test/synthesis.test.ts`.
+- **New public surface:** root `functionRegistryEntries`, `createHandlerExportName`, `runRequestAuthorizer`
+  and types `BuildPlan`, `BuildPlanFunction`, `BuildPlanOutput`, `ProviderBuildInput`, `RouteAuthContext`,
+  `RequestAuthorizerOutcome`, `VokeBuildConfig`, `VokeModelInput`; `@voke/aws` `createLambdaHandlers`;
+  `@voke/build` `handlerModule`.
+- **Expected grep matches:** `config.ts` mentions `cloudFormation.handler` only in its rejection message;
+  `model.ts` `api.routes` reads the model's own HTTP API routes, not the removed config key.
+- **Known edge:** an entrypoint that calls `voke(functions)` but exports only `functions` (no default) makes
+  `createLambdaHandlers` activate the registry a second time with a different key, which throws. Export the
+  Gateway as default in that case. Not covered by an error message yet.
+- Local bootstrap and `voke dev` still synthesize from config alone, so their templates are resources-only.

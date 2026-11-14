@@ -34,11 +34,11 @@ const schema = <TValue>(): StandardSchemaV1<TValue, TValue> => ({
 });
 
 test("builds a small serializable model from normalized config", () => {
-  const model = createInternalModel(
-    defineConfig({
+  const app = new Voke();
+  const model = createInternalModel({
+    ...defineConfig({
       api: {
         name: "orders-http",
-        routes: ["GET /orders", "POST /orders"],
       },
       build: {
         outdir: "./build",
@@ -47,7 +47,6 @@ test("builds a small serializable model from normalized config", () => {
         environment: {
           LOG_LEVEL: "debug",
         },
-        handler: "api.handler",
         resources: {
           eventsQueue: sqsQueue(),
           ordersTable: dynamodbTable({ partitionKey: "pk", sortKey: "sk" }),
@@ -60,15 +59,22 @@ test("builds a small serializable model from normalized config", () => {
         lambda: "nodejs22.x",
       },
       stage: "prod",
-    })
-  );
+    }),
+    functions: defineFunctions({
+      api: http({
+        routes: [
+          app.get("/orders", { handler: () => [] }),
+          app.post("/orders", { handler: () => ({ created: true }) }),
+        ],
+      }),
+    }),
+  });
 
   expect(structuredClone(model)).toEqual(model);
   expect(model).toEqual({
     apis: {
       http: {
         name: "orders-http",
-        protocol: "http",
         routes: [
           {
             function: "api",
@@ -100,13 +106,13 @@ test("builds a small serializable model from normalized config", () => {
             resource: "ordersTable",
           },
         ],
-        deployedName: "orders-api-prod",
+        deployedName: "orders-api-prod-api",
         entrypoint: "./src/api.ts",
         environment: {
           LOG_LEVEL: "debug",
         },
         eventSources: [],
-        handler: "api.handler",
+        handler: "index.api",
         invokable: false,
         routes: ["GET /orders", "POST /orders"],
         runtime: "nodejs22.x",
@@ -273,24 +279,62 @@ test("stores provider resource metadata as provider-neutral extension records", 
 
 test("keeps empty model sections explicit for minimal configs", () => {
   const model = createInternalModel({ name: "minimal-api" });
-  const apiFunction = model.functions.api;
 
-  if (apiFunction === undefined) {
-    throw new Error("Expected default API function in the model");
-  }
-
+  // Without Functions from the entrypoint there is nothing to deploy as a Lambda or an API.
+  expect(model.functions).toEqual({});
+  expect(model.apis).toEqual({});
+  expect(model.outputs).toEqual({});
   expect(model.resources).toEqual({});
-  expect(apiFunction.bindings).toEqual([]);
-  expect(apiFunction.deployedName).toBe("minimal-api-local");
-  expect(apiFunction.environment).toEqual({});
-  expect(apiFunction.invokable).toBe(false);
-  expect(apiFunction.routes).toEqual(["$default"]);
-  expect(apiFunction.runtime).toBe("nodejs22.x");
-  expect(model.apis.http?.name).toBe("minimal-api");
   expect(model.local.provider).toEqual({
     adapter: "floci",
     optional: true,
   });
+});
+
+test("names every deployed Function <name>-<stage>-<key> and points it at the generated handler", () => {
+  const app = new Voke();
+  const model = createInternalModel({
+    functions: defineFunctions({
+      api: http({ routes: [app.get("/health", { handler: () => "ok" })] }),
+      "send-email": defineFunction({
+        handler: () => "sent",
+        output: schema<string>(),
+      }),
+    }),
+    name: "shop",
+    stage: "prod",
+  });
+
+  expect(model.functions.api?.deployedName).toBe("shop-prod-api");
+  expect(model.functions.api?.handler).toBe("index.api");
+  expect(model.functions["send-email"]?.deployedName).toBe(
+    "shop-prod-send-email"
+  );
+  expect(model.functions["send-email"]?.handler).toBe("index.sendEmail");
+});
+
+test("rejects registry keys that map to the same Lambda handler export", () => {
+  expect(() =>
+    createInternalModel({
+      functions: defineFunctions({
+        "send-email": defineFunction({
+          handler: () => "a",
+          output: schema<string>(),
+        }),
+        sendEmail: defineFunction({
+          handler: () => "c",
+          output: schema<string>(),
+        }),
+        send_email: defineFunction({
+          handler: () => "b",
+          output: schema<string>(),
+        }),
+      }),
+      name: "shop",
+    })
+  ).toThrow(
+    'Functions "send-email" and "sendEmail" both map to the Lambda handler export "sendEmail"'
+  );
 });
 
 test("maps explicit function definitions from config into the model", () => {
@@ -311,20 +355,18 @@ test("maps explicit function definitions from config into the model", () => {
       runtime: "nodejs24.x",
     },
   });
-  const model = createInternalModel(
-    defineConfig({
-      cloudFormation: {
-        environment: {
-          LOG_LEVEL: "info",
-        },
-        resources: {
-          eventsQueue: sqsQueue(),
-        },
+  const model = createInternalModel({
+    cloudFormation: {
+      environment: {
+        LOG_LEVEL: "info",
       },
-      functions: defineFunctions({ sendWelcomeEmail }),
-      name: "workers-api",
-    })
-  );
+      resources: {
+        eventsQueue: sqsQueue(),
+      },
+    },
+    functions: defineFunctions({ sendWelcomeEmail }),
+    name: "workers-api",
+  });
 
   expect(model.functions.sendWelcomeEmail).toEqual({
     bindings: [

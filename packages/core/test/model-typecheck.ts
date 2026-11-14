@@ -1,7 +1,6 @@
 import { sqsEventSource, sqsMessageBatch } from "@voke/aws";
 import { sqsQueue } from "@voke/aws/cloudformation";
 
-import { defineConfig } from "../src/config";
 import { defineFunction, defineFunctions } from "../src/invoke";
 import type { SqsMessageBatch, StandardSchemaV1 } from "../src/invoke";
 import { createInternalModel } from "../src/model";
@@ -37,17 +36,12 @@ const getUser = defineFunction({
   },
 });
 
-const model: VokeModel = createInternalModel(
-  defineConfig({
-    api: {
-      function: "getUser",
-    },
-    functions: {
-      getUser,
-    },
-    name: "typed-model",
-  })
-);
+const model: VokeModel = createInternalModel({
+  functions: {
+    getUser,
+  },
+  name: "typed-model",
+});
 
 const modelFunction = model.functions.getUser;
 

@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { rm } from "node:fs/promises";
 
 import { bindResource, createAwsClientConfig } from "@voke/aws";
 import {
@@ -21,9 +22,10 @@ import { defineConfig, getConfig, loadVokeConfig } from "../src/config";
 import { awsContext } from "../src/context";
 import type { VokeEnv } from "../src/context";
 import { VokeConfigError } from "../src/errors";
-import { defineFunction, defineFunctions } from "../src/invoke";
+import { defineFunction, defineFunctions, http } from "../src/invoke";
 import type { StandardSchemaV1 } from "../src/invoke";
 import { ok as json } from "../src/response";
+import { route } from "../src/route-builder";
 import { setEnv } from "./support/env";
 import { tempPath } from "./support/temp";
 
@@ -89,10 +91,7 @@ test("wraps a Hono app with a default name and handler", () => {
   expect(vokeApi.name).toBe("api");
   expect(vokeApi.config).toEqual({
     api: {
-      function: "api",
       name: "api",
-      protocol: "http",
-      routes: ["$default"],
     },
     build: {
       entrypoints: ["./src/index.ts"],
@@ -101,7 +100,6 @@ test("wraps a Hono app with a default name and handler", () => {
     },
     cloudFormation: {
       environment: {},
-      handler: "index.handler",
       out: "./dist/cloudformation.json",
       resources: {},
     },
@@ -110,7 +108,6 @@ test("wraps a Hono app with a default name and handler", () => {
       environment: {},
     },
     entrypoint: "./src/index.ts",
-    functions: {},
     local: {
       provider: expect.objectContaining({
         name: "floci",
@@ -134,13 +131,11 @@ test("uses createApiApp config metadata when wrapping a Hono app", () => {
     config: {
       api: {
         name: "orders-http",
-        routes: ["GET /orders", "POST /orders"],
       },
       cloudFormation: {
         environment: {
           LOG_LEVEL: "debug",
         },
-        handler: "orders.handler",
       },
       name: "orders-api",
       region: "sa-east-1",
@@ -155,12 +150,8 @@ test("uses createApiApp config metadata when wrapping a Hono app", () => {
   expect(service.name).toBe("orders-http");
   expect(service.config.name).toBe("orders-api");
   expect(service.config.api).toEqual({
-    function: "api",
     name: "orders-http",
-    protocol: "http",
-    routes: ["GET /orders", "POST /orders"],
   });
-  expect(service.config.cloudFormation.handler).toBe("orders.handler");
   expect(service.config.cloudFormation.environment).toEqual({
     LOG_LEVEL: "debug",
   });
@@ -195,32 +186,19 @@ test("activates local Function Registry invocation through createGateway", async
   });
 });
 
-test("rejects duplicate Function Registry configuration on createGateway", () => {
+test("rejects a Function Registry passed through config", () => {
   const functions = defineFunctions({
     ping: defineFunction({
       handler: () => ({ ok: true }),
       output: passthroughSchema<{ ok: boolean }>(),
     }),
   });
+  const config = { functions, name: "config-functions-api" } as never;
 
-  expect(() =>
-    createGateway({
-      config: {
-        functions,
-        name: "duplicate-functions-api",
-      },
-      functions,
-    })
-  ).toThrow(VokeConfigError);
-  expect(() =>
-    createGateway({
-      config: {
-        functions,
-        name: "duplicate-functions-api",
-      },
-      functions,
-    })
-  ).toThrow("Pass functions either top-level or in config.functions, not both");
+  expect(() => createGateway({ config, functions })).toThrow(VokeConfigError);
+  expect(() => createGateway({ config, functions })).toThrow(
+    "functions: Functions are declared in the project entrypoint, not in voke.config.ts"
+  );
 });
 
 test("handles a Lambda HTTP API v2 GET request", async () => {
@@ -441,7 +419,6 @@ test("normalizes project and CloudFormation settings through defineConfig", () =
       environment: {
         LOG_LEVEL: "debug",
       },
-      handler: "api.handler",
       out: "./build/stack.json",
       resources: {
         ordersTable: dynamodbTable({ partitionKey: "id" }),
@@ -455,10 +432,7 @@ test("normalizes project and CloudFormation settings through defineConfig", () =
 
   expect(config).toEqual({
     api: {
-      function: "api",
       name: "orders-api",
-      protocol: "http",
-      routes: ["$default"],
     },
     build: {
       entrypoints: ["./src/api.ts"],
@@ -469,7 +443,6 @@ test("normalizes project and CloudFormation settings through defineConfig", () =
       environment: {
         LOG_LEVEL: "debug",
       },
-      handler: "api.handler",
       out: "./build/stack.json",
       resources: {
         ordersTable: dynamodbTable({ partitionKey: "id" }),
@@ -480,7 +453,6 @@ test("normalizes project and CloudFormation settings through defineConfig", () =
       environment: {},
     },
     entrypoint: "./src/api.ts",
-    functions: {},
     local: {
       provider: expect.objectContaining({
         name: "floci",
@@ -593,6 +565,33 @@ export default defineConfig({
   expect(Object.keys(config.cloudFormation.resources)).toEqual(["jobsQueue"]);
 });
 
+// synth and build import the project entrypoint to discover its Functions.
+const writeHttpEntrypoint = async (path: string): Promise<void> => {
+  await Bun.write(
+    path,
+    `import { createFunctions, http, route } from "${import.meta.dir}/../src/index.ts";
+
+export const functions = createFunctions({
+  http: http({ routes: [route.get("/health", { handler: () => "ok" })] }),
+});
+`
+  );
+};
+
+const withPwd = async <TResult>(
+  directory: string,
+  run: () => Promise<TResult>
+): Promise<TResult> => {
+  const previous = process.env.PWD;
+  process.env.PWD = directory;
+
+  try {
+    return await run();
+  } finally {
+    process.env.PWD = previous;
+  }
+};
+
 test("synth CLI reads voke.config.ts and writes the configured template path", async () => {
   const directory = tempPath(`voke-synth-config-${crypto.randomUUID()}`);
   const out = `${directory}/build/template.json`;
@@ -624,7 +623,8 @@ export default defineConfig({
 `
   );
 
-  await runCli(["synth", "--config", configPath]);
+  await writeHttpEntrypoint(`${directory}/src/service.ts`);
+  await withPwd(directory, () => runCli(["synth", "--config", configPath]));
 
   const template = await Bun.file(out).json();
 
@@ -706,22 +706,44 @@ test("runs create and build through the CLI parser", async () => {
   const buildDirectory = tempPath(`voke-cli-build-${crypto.randomUUID()}`);
   const entrypoint = `${directory}/src/smoke.ts`;
 
-  await runCli(["create", "api", "cli-api", directory]);
-  await Bun.write(
-    entrypoint,
-    "export default { fetch: () => new Response('ok') };\n"
-  );
-  await runCli(["build", entrypoint, buildDirectory]);
+  const configPath = `${directory}/build.config.ts`;
 
-  expect(await Bun.file(`${directory}/src/routes/health.ts`).exists()).toBe(
-    true
+  await runCli(["create", "api", "cli-api", directory]);
+  await writeHttpEntrypoint(entrypoint);
+  await Bun.write(
+    configPath,
+    `import { defineConfig } from "${import.meta.dir}/../src/index.ts";
+import { aws } from "${import.meta.dir}/../../aws/src/index.ts";
+
+export default defineConfig({ name: "cli-api", provider: aws() });
+`
   );
-  expect(await Bun.file(`${buildDirectory}/smoke.js`).exists()).toBe(true);
+
+  try {
+    await runCli(["build", "--config", configPath, entrypoint, buildDirectory]);
+
+    expect(await Bun.file(`${directory}/src/routes/health.ts`).exists()).toBe(
+      true
+    );
+    expect(await Bun.file(`${buildDirectory}/index.js`).exists()).toBe(true);
+    expect(
+      await Bun.file(`${buildDirectory}/voke-manifest.json`).json()
+    ).toMatchObject({ functions: { http: { handler: "index.http" } } });
+  } finally {
+    // The generated entry lives under the working directory, as in a real project.
+    await rm(".voke", { force: true, recursive: true });
+  }
 });
 
+// The Function keyed "http" owns the bare Function/FunctionRole/Permission logical ids.
+const healthFunctions = () =>
+  defineFunctions({
+    http: http({ routes: [route.get("/health", { handler: () => "ok" })] }),
+  });
+
 test("synthesizes a CloudFormation template with API, Lambda, IAM, resources, bindings, and outputs", () => {
-  const template = synthesizeCloudFormation(
-    defineConfig({
+  const template = synthesizeCloudFormation({
+    ...defineConfig({
       cloudFormation: {
         environment: {
           LOG_LEVEL: "info",
@@ -739,8 +761,9 @@ test("synthesizes a CloudFormation template with API, Lambda, IAM, resources, bi
       name: "orders-api",
       region: "sa-east-1",
       stage: "prod",
-    })
-  );
+    }),
+    functions: healthFunctions(),
+  });
   const resources = template.Resources;
   const outputs = template.Outputs;
   const apiResource = resources.Api;
@@ -801,6 +824,7 @@ test("synthesizes a CloudFormation template with API, Lambda, IAM, resources, bi
 test("matches the CloudFormation snapshot for a minimal API stack", async () => {
   const template = synthesizeCloudFormation({
     entrypoint: "./src/index.ts",
+    functions: healthFunctions(),
     name: "snapshot-api",
     region: "us-east-1",
     stage: "test",
@@ -854,6 +878,7 @@ test("runs synth and experimental deploy/remove through the CLI parser", async (
 import { aws } from "${import.meta.dir}/../../aws/src/index.ts";
 
 export default defineConfig({
+  entrypoint: "${directory}/src/index.ts",
   name: "orders-api",
   provider: aws(),
   stage: "prod",
@@ -861,6 +886,7 @@ export default defineConfig({
 `
   );
 
+  await writeHttpEntrypoint(`${directory}/src/index.ts`);
   await runCli([
     "synth",
     "--config",

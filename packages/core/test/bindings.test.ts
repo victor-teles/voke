@@ -13,7 +13,9 @@ import {
 } from "@voke/aws/cloudformation";
 
 import { createResourceBindingName } from "../src/bindings";
+import { createFunctions, http } from "../src/invoke";
 import { createLocalResourceBindings } from "../src/local";
+import { route } from "../src/route-builder";
 
 test("uses one stable binding naming convention everywhere", () => {
   expect(createResourceBindingName("ordersTable", "name")).toBe(
@@ -32,6 +34,9 @@ test("uses one stable binding naming convention everywhere", () => {
 
 test("keeps synthesized and local resource bindings on the same logical contract", () => {
   const template = synthesizeCloudFormation({
+    functions: createFunctions({
+      http: http({ routes: [route.get("/health", { handler: () => "ok" })] }),
+    }),
     name: "binding-api",
     resources: {
       appSecret: secret(),

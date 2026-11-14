@@ -19,6 +19,7 @@
     "@aws-sdk/client-lambda": "^3.1050.0",
     "@aws-sdk/client-secrets-manager": "^3.1053.0",
     "@aws-sdk/client-ssm": "^3.1053.0",
+    "@voke/build": "workspace:*",
     "@voke/http": "workspace:*",
     "hono": "^4.0.0",
     "voke": "workspace:*"

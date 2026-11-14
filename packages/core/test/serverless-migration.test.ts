@@ -585,20 +585,25 @@ test("creates a measurable migration report and Voke skeleton files", () => {
   expect(
     migration.files["./voke-orders/src/functions/fulfill-order.ts"]
   ).toContain("fn({");
+  // voke build generates the Lambda entry, so migrated Functions carry no handler wiring.
   expect(
     migration.files["./voke-orders/src/functions/fulfill-order.ts"]
-  ).toContain('entrypoint: "./src/functions/fulfill-order.ts"');
-  expect(
-    migration.files["./voke-orders/src/functions/fulfill-order.ts"]
-  ).toContain('handler: "fulfillOrder.handler"');
+  ).not.toContain("synthesis");
   expect(migration.files["./voke-orders/src/functions/index.ts"]).toContain(
     "createFunctions"
   );
+  // Functions live in the entrypoint; the config sets the Provider and holds resources.
   expect(migration.files["./voke-orders/voke.config.ts"]).toContain(
-    'import { functions } from "./src/functions";'
+    "provider: aws(),"
   );
-  expect(migration.files["./voke-orders/voke.config.ts"]).toContain(
-    "functions,"
+  expect(migration.files["./voke-orders/voke.config.ts"]).not.toContain(
+    "functions"
+  );
+  expect(migration.files["./voke-orders/src/index.ts"]).toContain(
+    'import { functions as workerFunctions } from "./functions";'
+  );
+  expect(migration.files["./voke-orders/src/index.ts"]).not.toContain(
+    "service.handler"
   );
   expect(migration.files["./voke-orders/src/stack.ts"]).toBeUndefined();
   expect(migration.files["./voke-orders/MIGRATION_REPORT.md"]).toContain(
@@ -890,7 +895,7 @@ test("generates skeletons from example Serverless migration fixtures", async () 
   );
   expect(
     sqsWorker.files["./voke-sqs-worker/src/functions/process-order.ts"]
-  ).toContain('entrypoint: "./src/functions/process-order.ts"');
+  ).not.toContain("synthesis");
   expect(
     sqsWorker.files["./voke-sqs-worker/src/functions/process-order.ts"]
   ).toContain('queue: "OrdersQueue",');
@@ -907,7 +912,10 @@ test("generates skeletons from example Serverless migration fixtures", async () 
   ).toContain('eventTypes: ["eventBridge"]');
   expect(
     eventBridgeWorker.files["./voke-eventbridge-worker/voke.config.ts"]
-  ).toContain("functions,");
+  ).not.toContain("functions");
+  expect(
+    eventBridgeWorker.files["./voke-eventbridge-worker/src/index.ts"]
+  ).toContain("workerFunctions");
   expect(httpApi.files["./voke-http-api/src/stack.ts"]).toBeUndefined();
   expect(restApi.files["./voke-rest-api/src/stack.ts"]).toBeUndefined();
   expect(sqsWorker.files["./voke-sqs-worker/src/stack.ts"]).toBeUndefined();

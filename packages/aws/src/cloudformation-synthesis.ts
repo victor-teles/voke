@@ -2,6 +2,7 @@ import { createVokeModel, VokeModelError } from "voke";
 import type {
   VokeConfigInput,
   VokeModel,
+  VokeModelInput,
   VokeModelHttpAuthorizer,
   VokeModelResource,
 } from "voke";
@@ -109,8 +110,9 @@ const awsCloudFormationResource = (definition: {
 
 export type SynthesizeCloudFormationOptions = VokeConfigInput & {
   entrypoint?: string;
-  handler?: string;
   environment?: Record<string, string>;
+  /** The Function Registry discovered from the project entrypoint. */
+  functions?: VokeModelInput["functions"];
   resources?: Record<string, StackResourceDefinition>;
 };
 
@@ -484,6 +486,8 @@ const functionRoleResource = (
   };
 };
 
+const primaryFunctionName = "http";
+
 const functionLogicalId = (name: string, apiFunctionName: string): string =>
   name === apiFunctionName ? "Function" : `${toLogicalId(name)}Function`;
 
@@ -605,6 +609,64 @@ const toHttpAuthorizerResource = (
   };
 };
 
+const routeParamPattern = /^:([A-Za-z_][A-Za-z0-9_]*)$/u;
+
+/**
+ * Converts a Route Builder route ("GET /users/:id") to an API Gateway HTTP API route key
+ * ("GET /users/{id}"). A trailing "*" becomes "{proxy+}". Forms API Gateway cannot express
+ * (optional or regex-constrained params, a wildcard before the end) fail synthesis.
+ */
+export const toApiGatewayRouteKey = (route: string): string => {
+  const [method = "", path = ""] = route.split(" ");
+
+  if (method === "$default") {
+    return route;
+  }
+
+  const segments = path.split("/");
+  const converted = segments.map((segment, index) => {
+    if (segment === "*") {
+      if (index !== segments.length - 1) {
+        throw VokeModelError.validation([
+          {
+            message: `Route "${route}" has a "*" before the last path segment, which API Gateway HTTP APIs cannot route. Use a trailing "*" only.`,
+            path: "apis.http.routes",
+          },
+        ]);
+      }
+
+      return "{proxy+}";
+    }
+
+    if (!segment.startsWith(":")) {
+      return segment;
+    }
+
+    const param = routeParamPattern.exec(segment)?.[1];
+
+    if (param === undefined) {
+      throw VokeModelError.validation([
+        {
+          message: `Route "${route}" uses the path parameter "${segment}", which has no API Gateway equivalent. Use a plain ":name" parameter.`,
+          path: "apis.http.routes",
+        },
+      ]);
+    }
+
+    return `{${param}}`;
+  });
+
+  return `${method} ${converted.join("/")}`;
+};
+
+/** "GET /users/{id}" -> "GetUsersById"; independent of route order. */
+const routeKeyLogicalName = (routeKey: string): string =>
+  toLogicalId(
+    routeKey
+      .replaceAll("{proxy+}", "proxy")
+      .replaceAll(/\{([^}]+)\}/gu, "by-$1")
+  );
+
 const toHttpRouteResource = (options: {
   apiRoute: VokeModel["apis"][string]["routes"][number];
   authorizer?: VokeModelHttpAuthorizer;
@@ -613,7 +675,7 @@ const toHttpRouteResource = (options: {
   const { apiRoute, authorizer, integrationLogicalId } = options;
   const routeProperties: Record<string, CloudFormationValue> = {
     ApiId: { Ref: "Api" },
-    RouteKey: apiRoute.route,
+    RouteKey: toApiGatewayRouteKey(apiRoute.route),
     Target: { "Fn::Sub": `integrations/\${${integrationLogicalId}}` },
   };
 
@@ -633,16 +695,13 @@ const toHttpRouteResource = (options: {
 
 const toHttpIntegrationResource = (
   apiFunctionName: string,
-  apiRoute: VokeModel["apis"][string]["routes"][number]
+  functionName: string
 ): CloudFormationResource => ({
   Properties: {
     ApiId: { Ref: "Api" },
     IntegrationType: "AWS_PROXY",
     IntegrationUri: {
-      "Fn::GetAtt": [
-        functionLogicalId(apiRoute.function, apiFunctionName),
-        "Arn",
-      ],
+      "Fn::GetAtt": [functionLogicalId(functionName, apiFunctionName), "Arn"],
     },
     PayloadFormatVersion: "2.0",
   },
@@ -701,15 +760,28 @@ const addHttpApiResources = (options: {
     }
   }
 
-  for (const [index, apiRoute] of apiRoutes.entries()) {
-    const suffix =
-      index === 0 ? "" : toLogicalId(`${apiRoute.function}-${apiRoute.route}`);
-    const integrationLogicalId = `${suffix}Integration`;
-    const routeLogicalId = `${suffix}Route`;
+  const routeOwners = new Map<string, string>();
 
-    templateResources[integrationLogicalId] = toHttpIntegrationResource(
+  for (const apiRoute of apiRoutes) {
+    // Ids derive from the Function and the route itself, so reordering routes or Functions in
+    // code never renames (and so never replaces) a deployed resource.
+    const integrationLogicalId = `${toLogicalId(apiRoute.function)}Integration`;
+    const routeLogicalId = `${toLogicalId(apiRoute.function)}${routeKeyLogicalName(toApiGatewayRouteKey(apiRoute.route))}Route`;
+    const owner = routeOwners.get(routeLogicalId);
+
+    if (owner !== undefined) {
+      throw VokeModelError.validation([
+        {
+          message: `Routes "${owner}" and "${apiRoute.route}" of Function "${apiRoute.function}" map to the same CloudFormation logical id "${routeLogicalId}". Rename one of the paths.`,
+          path: `functions.${apiRoute.function}.routes`,
+        },
+      ]);
+    }
+
+    routeOwners.set(routeLogicalId, apiRoute.route);
+    templateResources[integrationLogicalId] ??= toHttpIntegrationResource(
       apiFunctionName,
-      apiRoute
+      apiRoute.function
     );
     templateResources[routeLogicalId] = toHttpRouteResource({
       apiRoute,
@@ -798,8 +870,9 @@ export const synthesizeCloudFormationFromModel = (
   model: VokeModel
 ): CloudFormationTemplate => {
   const apiRoutes = model.apis.http?.routes ?? [];
-  const apiFunctionName =
-    apiRoutes[0]?.function ?? Object.keys(model.functions).at(0) ?? "api";
+  // The Function keyed "http" owns the bare Function/FunctionRole/Permission logical ids; every
+  // other Function is prefixed with its key. Keyed by name, not by route order, so ids are stable.
+  const apiFunctionName = primaryFunctionName;
   const templateResources: Record<string, CloudFormationResource> = {};
   const outputs: Record<string, CloudFormationOutput> = {};
   const policyStatements: CloudFormationValue[] = [];
@@ -870,7 +943,7 @@ export const synthesizeCloudFormationFromModel = (
         VokeEntrypoint: definition.entrypoint,
         VokeFunction: name,
         VokeInvokable: definition.invokable,
-        VokeRoutes: definition.routes,
+        VokeRoutes: definition.routes.map(toApiGatewayRouteKey),
       },
       Properties: {
         Code: {

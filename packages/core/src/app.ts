@@ -15,7 +15,6 @@ import {
   mountFunctionRoutes,
 } from "./invoke";
 import type { FunctionRegistry, FunctionRegistryInput } from "./invoke";
-import type { VokeProvider } from "./provider";
 import { mountDevFunctionEndpoints } from "./remote";
 import { error as responseError } from "./response";
 import { readEnv } from "./runtime-env";
@@ -39,7 +38,6 @@ export interface GatewayOptions {
   config?: VokeConfigInput;
   functions?: FunctionRegistry | FunctionRegistryInput;
   middleware?: MiddlewareHandler<VokeEnv>[];
-  provider?: VokeProvider;
   routes?: ApiRouteModule[];
   variables?: {
     overrides?: RuntimeVariableOverrides;
@@ -47,12 +45,10 @@ export interface GatewayOptions {
   };
 }
 
-export interface VokeOptions<
-  TProvider extends VokeProvider | undefined = VokeProvider | undefined,
-> {
+export interface VokeOptions {
+  /** Project config. The Provider is set here (`provider: aws()`), never on `voke()`. */
   config?: VokeConfigInput;
   middleware?: MiddlewareHandler<VokeEnv>[];
-  provider?: TProvider;
   variables?: GatewayOptions["variables"];
 }
 
@@ -172,7 +168,7 @@ export const createApiApp = (options: ApiAppOptions): Hono<VokeEnv> => {
 const gatewayVariableProviders = (
   options: GatewayOptions
 ): RuntimeVariableProvider[] => {
-  const provider = options.provider ?? options.config?.provider;
+  const provider = options.config?.provider;
 
   return [
     ...(provider?.runtime?.variables?.() ?? []),
@@ -181,18 +177,8 @@ const gatewayVariableProviders = (
 };
 
 export const createGateway = (options: GatewayOptions = {}): Hono<VokeEnv> => {
-  if (
-    options.functions !== undefined &&
-    options.config?.functions !== undefined
-  ) {
-    throw new VokeConfigError(
-      "Pass functions either top-level or in config.functions, not both"
-    );
-  }
-
-  const configInput = {
+  const configInput: VokeConfigInput = {
     ...options.config,
-    functions: options.functions ?? options.config?.functions,
     name: options.config?.name ?? "api",
   };
   const gateway = createApiApp({
@@ -200,28 +186,29 @@ export const createGateway = (options: GatewayOptions = {}): Hono<VokeEnv> => {
     middleware: options.middleware,
     routes: options.routes,
   });
+  const { functions } = options;
 
-  if (configInput.functions !== undefined) {
+  if (functions !== undefined) {
     const config = getApiAppConfig(gateway);
 
-    assertUniqueFunctionRoutes(configInput.functions);
-    assertRouteParamSchemas(configInput.functions);
+    assertUniqueFunctionRoutes(functions);
+    assertRouteParamSchemas(functions);
     activateFunctionRegistry(
-      configInput.functions,
+      functions,
       activationKey(config ?? defineConfig(configInput)),
       {
         variableOverrides: options.variables?.overrides,
         variableProviders: gatewayVariableProviders(options),
       }
     );
-    mountFunctionRoutes(gateway, configInput.functions);
+    mountFunctionRoutes(gateway, functions, configInput.provider);
 
     if (readEnv("VOKE_DEV_SUMMARY") === "1") {
       mountDevFunctionEndpoints(gateway, {
-        functions: configInput.functions,
+        functions,
         project: configInput.name,
       });
-      console.info(formatDevFunctionSummary(configInput.functions));
+      console.info(formatDevFunctionSummary(functions));
     }
   }
 
@@ -256,44 +243,27 @@ const loadRuntimeConfig = (): VokeConfigInput => {
   }
 };
 
-type ProviderGatewayExtension<TProvider> =
-  TProvider extends VokeProvider<infer TGatewayExtension>
-    ? TGatewayExtension
-    : object;
-
-export const voke = <
-  const TFunctions extends FunctionRegistry,
-  const TProvider extends VokeProvider | undefined = undefined,
->(
+export const voke = <const TFunctions extends FunctionRegistry>(
   functions: TFunctions,
-  options: VokeOptions<TProvider> = {}
-): GatewayRuntime<TFunctions> & ProviderGatewayExtension<TProvider> => {
+  options: VokeOptions = {}
+): GatewayRuntime<TFunctions> => {
   const configInput = options.config ?? loadRuntimeConfig();
-  const { functions: _configuredFunctions, ...gatewayConfig } = configInput;
-  const provider = options.provider ?? configInput.provider;
+  const config = defineConfig(configInput);
   const app = createGateway({
-    config: gatewayConfig,
+    config: configInput,
     functions,
     middleware: options.middleware,
-    provider,
     variables: options.variables,
   });
-  const config = defineConfig({ ...configInput, functions });
-  const providerGateway =
-    provider?.runtime?.gateway?.({
-      app,
-      config,
-    }) ?? {};
 
   return {
-    ...providerGateway,
     app,
     config,
     fetch: app.fetch.bind(app) as Hono<VokeEnv>["fetch"],
     functions,
     name: config.name,
     request: app.request.bind(app) as Hono<VokeEnv>["request"],
-  } as GatewayRuntime<TFunctions> & ProviderGatewayExtension<TProvider>;
+  };
 };
 
 export const routeModule = <TEnv extends VokeEnv>(

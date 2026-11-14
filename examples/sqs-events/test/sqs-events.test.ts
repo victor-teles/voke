@@ -1,6 +1,14 @@
 import { expect, test } from "bun:test";
 
-import { functions, handler, processedOrders } from "../src/functions";
+import { createLambdaHandlers } from "@voke/aws";
+import type { SqsAwsEvent, SqsBatchResult } from "@voke/aws";
+
+import { functions, processedOrders } from "../src/functions";
+
+// The handler `voke build` exports as `index.processOrder`; no hand-written Lambda glue.
+const handler = createLambdaHandlers({ functions }).processOrder as (
+  event: SqsAwsEvent
+) => Promise<SqsBatchResult>;
 
 test("processes SQS events locally through the typed Function Registry", async () => {
   processedOrders.length = 0;

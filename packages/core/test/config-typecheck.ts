@@ -1,4 +1,6 @@
+import { voke } from "../src/app";
 import type { VokeConfigInput } from "../src/config";
+import type { FunctionRegistry } from "../src/invoke";
 import type { LocalProvider } from "../src/local";
 
 declare const assertConfigInput: (config: VokeConfigInput) => void;
@@ -96,4 +98,53 @@ assertConfigInput({
     target: "bun",
   },
   name: "removed-build-target-api",
+});
+
+// ADR 0007: Functions are declared in the project entrypoint and Voke generates the Lambda
+// handlers, so these config keys no longer exist.
+assertConfigInput({
+  // @ts-expect-error Functions are declared in the project entrypoint, not in voke.config.ts.
+  functions: {},
+  name: "config-first-registry",
+});
+
+assertConfigInput({
+  // @ts-expect-error The Lambda handler is generated per Function.
+  handler: "index.handler",
+  name: "top-level-handler",
+});
+
+assertConfigInput({
+  cloudFormation: {
+    // @ts-expect-error The Lambda handler is generated per Function.
+    handler: "index.handler",
+  },
+  name: "cloudformation-handler",
+});
+
+assertConfigInput({
+  api: {
+    // @ts-expect-error HTTP routes come from route-backed Functions.
+    routes: ["$default"],
+  },
+  name: "api-routes",
+});
+
+assertConfigInput({
+  api: {
+    // @ts-expect-error The single-function API mode was removed.
+    function: "api",
+  },
+  name: "api-function",
+});
+
+// The Provider is configured in voke.config.ts only (`provider: aws()`), never on voke().
+declare const providerFunctions: FunctionRegistry;
+voke(providerFunctions, {
+  config: { name: "provider-in-config", provider: { name: "test" } },
+});
+voke(providerFunctions, {
+  config: { name: "provider-on-voke" },
+  // @ts-expect-error Set the Provider in config: voke(functions, { config: { provider } }).
+  provider: { name: "test" },
 });

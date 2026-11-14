@@ -53,7 +53,6 @@ interface AwsCloudFormationResourceProvider {
 
 export type SynthesizeCloudFormationOptions = VokeConfigInput & {
   entrypoint?: string;
-  handler?: string;
   environment?: Record<string, string>;
   resources?: Record<string, VokeResourceInput>;
 };

@@ -9,7 +9,7 @@
       }
     },
     "FunctionName": {
-      "Description": "api Lambda function name",
+      "Description": "http Lambda function name",
       "Value": {
         "Ref": "Function"
       }
@@ -128,11 +128,11 @@
     },
     "Function": {
       "Metadata": {
-        "VokeDeployedName": "orders-api-prod",
+        "VokeDeployedName": "orders-api-prod-http",
         "VokeEntrypoint": "./src/index.ts",
-        "VokeFunction": "api",
+        "VokeFunction": "http",
         "VokeInvokable": false,
-        "VokeRoutes": ["$default"]
+        "VokeRoutes": ["GET /health"]
       },
       "Properties": {
         "Code": {
@@ -149,8 +149,8 @@
             }
           }
         },
-        "FunctionName": "orders-api-prod",
-        "Handler": "index.handler",
+        "FunctionName": "orders-api-prod-http",
+        "Handler": "index.http",
         "Role": {
           "Fn::GetAtt": ["FunctionRole", "Arn"]
         },
@@ -165,7 +165,7 @@
       },
       "Type": "AWS::ApiGatewayV2::Api"
     },
-    "Integration": {
+    "HttpIntegration": {
       "Properties": {
         "ApiId": {
           "Ref": "Api"
@@ -178,14 +178,14 @@
       },
       "Type": "AWS::ApiGatewayV2::Integration"
     },
-    "Route": {
+    "HttpGETHealthRoute": {
       "Properties": {
         "ApiId": {
           "Ref": "Api"
         },
-        "RouteKey": "$default",
+        "RouteKey": "GET /health",
         "Target": {
-          "Fn::Sub": "integrations/${Integration}"
+          "Fn::Sub": "integrations/${HttpIntegration}"
         }
       },
       "Type": "AWS::ApiGatewayV2::Route"

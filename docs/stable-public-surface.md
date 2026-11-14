@@ -12,6 +12,7 @@ Use the root package for the common Function-first Gateway authoring path:
 - Config: root exports `defineConfig`
 - Runtime Variable primitives (provider-neutral): `createVariableSource`, `createVariableProvider`
 - Error classes: `VokeConfigError`, `VokeModelError`, `VokeResourceBindingError`, `VokeRuntimeVariableError`, `InvokeError`
+- Provider building blocks: `functionRegistryEntries`, `createHandlerExportName`, `runRequestAuthorizer`, and the `BuildPlan`, `ProviderBuildInput` and `RouteAuthContext` types
 - HTTP helpers: use `@voke/http`
 - Runtime AWS binding helpers: use `@voke/aws`
 - CloudFormation synthesis entrypoint: use `@voke/aws/cloudformation`
@@ -32,6 +33,7 @@ Use `@voke/aws` for AWS-specific authoring and runtime binding helpers:
 
 - Runtime Variable builders: `secret`, `parameter` (each with `.fromResource(...)`)
 - Event Source Function helpers: `sqs`, `createSqsEventHandler`
+- Generated Lambda handlers: `createLambdaHandlers` (used by the entry module `voke build` generates)
 - API Gateway authorizer helpers: `createAuthorizers`, `jwtAuthorizer`, `lambdaAuthorizer`, `requestAuthorizer`
 - Runtime binding helpers: `bindResource`, `createAwsClientConfig`
 - Provider: `aws`

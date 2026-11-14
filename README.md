@@ -30,7 +30,6 @@ Then create Functions with explicit Function Contracts and mount them in a Gatew
 
 ```ts
 import { createFunctions, http, route, voke } from "voke";
-import { aws } from "@voke/aws";
 import config from "../voke.config";
 
 const functions = createFunctions({
@@ -46,12 +45,12 @@ const functions = createFunctions({
   }),
 });
 
-const gateway = voke(functions, { config, provider: aws() });
+const gateway = voke(functions, { config });
 
 export default gateway;
 ```
 
-The Gateway exposes `handler` for AWS Lambda HTTP API v2 events, `fetch` for Web-standard servers such as `Bun.serve`, and `request` for tests. For local tests, call the Gateway directly:
+The Provider comes from `voke.config.ts` (`provider: aws()`). The Gateway exposes `fetch` for Web-standard servers such as `Bun.serve` and `request` for tests. You never write Lambda handlers: `voke build` imports this entrypoint, finds every Function, and generates one Lambda handler per Function (`index.http` here). For local tests, call the Gateway directly:
 
 ```ts
 const response = await gateway.request("/health");
@@ -154,7 +153,7 @@ SQS Event Source Functions use the same Function Registry model, but receive nor
 
 ```ts
 import { createFunctions } from "voke";
-import { createSqsEventHandler, sqs } from "@voke/aws";
+import { sqs } from "@voke/aws";
 
 const processOrder = sqs({
   batchSize: 10,
@@ -170,11 +169,9 @@ const processOrder = sqs({
 });
 
 export const functions = createFunctions({ processOrder });
-export const handler = createSqsEventHandler({
-  function: "processOrder",
-  functions,
-});
 ```
+
+Exporting `functions` from the project entrypoint is enough: `voke build` generates the Lambda handler (`index.processOrder`) and `voke synth` wires the queue to it. `createSqsEventHandler` from `@voke/aws` remains available when you wire a Lambda yourself.
 
 Use `functions.sendEvent("processOrder", { messages: [...] })` in local tests. Voke parses each JSON message body with the Standard Schema-compatible message schema, reports invalid messages as partial batch failures by default, and synthesizes Lambda event source mappings with `ReportBatchItemFailures` enabled.
 

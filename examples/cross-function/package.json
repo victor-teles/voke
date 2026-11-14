@@ -4,13 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "voke build ./src/index.ts",
+    "build": "voke build",
     "dev": "bun --hot ./src/index.ts",
     "test": "bun test",
     "typecheck": "bunx tsgo --project tsconfig.json --noEmit",
     "clean": "rm -rf dist coverage"
   },
   "dependencies": {
+    "@voke/aws": "workspace:*",
     "@voke/schema": "workspace:*",
     "@voke/testing": "workspace:*",
     "hono": "^4.0.0",

@@ -38,6 +38,14 @@ const synthesizeCloudFormationFromModel = (model: VokeModel) =>
     model,
   }) as ReturnType<typeof synthesizeCloudFormation>;
 
+// The Function keyed "http" owns the bare Function/FunctionRole/Permission logical ids.
+const healthFunctions = () =>
+  defineFunctions({
+    http: http({
+      routes: new Voke().get("/health", { handler: () => ({ ok: true }) }),
+    }),
+  });
+
 const schema = <TValue>(): StandardSchemaV1<TValue, TValue> => ({
   "~standard": {
     validate: (value) => ({ data: value, success: true }),
@@ -106,6 +114,7 @@ test("matches the CloudFormation snapshot for an API stack with resources", asyn
         ordersTable: dynamodbTable({ partitionKey: "pk", sortKey: "sk" }),
       },
     },
+    functions: healthFunctions(),
     name: "orders-api",
     region: "sa-east-1",
     stage: "prod",
@@ -228,12 +237,12 @@ test("synthesizes route-backed, invokable, and mixed functions from the Function
     stage: "prod",
   });
 
-  expect(template.Resources.Function).toMatchObject({
+  expect(template.Resources.UsersFunction).toMatchObject({
     Metadata: {
       VokeDeployedName: "prod-users-handler",
       VokeEntrypoint: "./src/functions/users.ts",
       VokeFunction: "users",
-      VokeRoutes: ["GET /users/:id"],
+      VokeRoutes: ["GET /users/{id}"],
     },
     Properties: {
       FunctionName: "prod-users-handler",
@@ -252,22 +261,24 @@ test("synthesizes route-backed, invokable, and mixed functions from the Function
       Handler: "send-receipt.handler",
     },
   });
-  expect(template.Resources.Integration).toMatchObject({
+  expect(template.Resources.UsersIntegration).toMatchObject({
     Properties: {
-      IntegrationUri: { "Fn::GetAtt": ["Function", "Arn"] },
+      IntegrationUri: { "Fn::GetAtt": ["UsersFunction", "Arn"] },
     },
   });
-  expect(template.Resources.Route).toMatchObject({
+  // The template uses API Gateway route keys ({param}); the core model keeps the Route Builder's :param.
+  expect(template.Resources.UsersGETUsersByIdRoute).toMatchObject({
     Properties: {
-      RouteKey: "GET /users/:id",
+      RouteKey: "GET /users/{id}",
+      Target: { "Fn::Sub": `integrations/\${UsersIntegration}` },
     },
   });
   expect(template.Outputs).toMatchObject({
-    FunctionName: {
-      Value: { Ref: "Function" },
-    },
     SendReceiptFunctionName: {
       Value: { Ref: "SendReceiptFunction" },
+    },
+    UsersFunctionName: {
+      Value: { Ref: "UsersFunction" },
     },
   });
 });
@@ -308,12 +319,9 @@ test("synthesizes JWT Authorizers for protected HTTP API routes", () => {
     },
     Type: "AWS::ApiGatewayV2::Authorizer",
   });
-  expect(template.Resources.Route).toMatchObject({
-    Properties: {
-      AuthorizationType: "JWT",
-      AuthorizerId: { Ref: "UserJwtAuthorizer" },
-      RouteKey: "GET /users/me",
-    },
+  expect(routeResource(template, "GET /users/me").Properties).toMatchObject({
+    AuthorizationType: "JWT",
+    AuthorizerId: { Ref: "UserJwtAuthorizer" },
   });
 });
 
@@ -407,11 +415,9 @@ test("synthesizes Lambda Authorizers for local Request Authorizer Functions", ()
     },
     Type: "AWS::ApiGatewayV2::Authorizer",
   });
-  expect(template.Resources.Route).toMatchObject({
-    Properties: {
-      AuthorizationType: "CUSTOM",
-      AuthorizerId: { Ref: "SessionAuthorizer" },
-    },
+  expect(routeResource(template, "GET /me").Properties).toMatchObject({
+    AuthorizationType: "CUSTOM",
+    AuthorizerId: { Ref: "SessionAuthorizer" },
   });
   expect(template.Resources.SessionAuthorizerPermission).toMatchObject({
     Properties: {
@@ -476,6 +482,7 @@ test("synthesizes external Lambda Authorizer targets without permissions", () =>
 
 test("omits the inline resource access policy when no resources are configured", () => {
   const template = synthesizeCloudFormation({
+    functions: healthFunctions(),
     name: "minimal-api",
   });
 
@@ -486,6 +493,7 @@ test("generates resource-specific IAM policy statements for each AWS helper", ()
   const configValueArn = `arn:aws:ssm:\${AWS::Region}:\${AWS::AccountId}:parameter/\${ConfigValue}`;
   const uploadsBucketObjectArn = `\${UploadsBucket.Arn}/*`;
   const template = synthesizeCloudFormation({
+    functions: healthFunctions(),
     name: "policy-api",
     resources: {
       auditBus: eventBus(),
@@ -577,7 +585,7 @@ test("synthesizes Runtime Variable permissions only for declaring Functions", ()
     name: "runtime-policy-api",
   });
 
-  expect(rolePolicyStatements(template, "FunctionRole")).toEqual([
+  expect(rolePolicyStatements(template, "CheckoutFunctionRole")).toEqual([
     {
       Action: ["ssm:GetParameter", "ssm:GetParameters"],
       Effect: "Allow",
@@ -600,8 +608,8 @@ test("synthesizes Runtime Variable permissions only for declaring Functions", ()
     },
   ]);
   expect(rolePolicyStatements(template, "ReceiptFunctionRole")).toBeUndefined();
-  expect(template.Resources.Function?.Properties.Role).toEqual({
-    "Fn::GetAtt": ["FunctionRole", "Arn"],
+  expect(template.Resources.CheckoutFunction?.Properties.Role).toEqual({
+    "Fn::GetAtt": ["CheckoutFunctionRole", "Arn"],
   });
   expect(template.Resources.ReceiptFunction?.Properties.Role).toEqual({
     "Fn::GetAtt": ["ReceiptFunctionRole", "Arn"],
@@ -627,21 +635,25 @@ test("synthesizes Runtime Variable permissions for managed resource-key declarat
     },
   });
 
-  expect(rolePolicyStatements(template, "FunctionRole")).toContainEqual({
-    Action: ["secretsmanager:GetSecretValue"],
-    Effect: "Allow",
-    Resource: { "Fn::GetAtt": ["SigningSecret", "Arn"] },
-  });
-  expect(rolePolicyStatements(template, "FunctionRole")).toContainEqual({
-    Action: ["ssm:GetParameter", "ssm:GetParameters"],
-    Effect: "Allow",
-    Resource: {
-      "Fn::Sub": [
-        `arn:aws:ssm:\${AWS::Region}:\${AWS::AccountId}:parameter/\${PublicConfig}`,
-        {},
-      ],
-    },
-  });
+  expect(rolePolicyStatements(template, "CheckoutFunctionRole")).toContainEqual(
+    {
+      Action: ["secretsmanager:GetSecretValue"],
+      Effect: "Allow",
+      Resource: { "Fn::GetAtt": ["SigningSecret", "Arn"] },
+    }
+  );
+  expect(rolePolicyStatements(template, "CheckoutFunctionRole")).toContainEqual(
+    {
+      Action: ["ssm:GetParameter", "ssm:GetParameters"],
+      Effect: "Allow",
+      Resource: {
+        "Fn::Sub": [
+          `arn:aws:ssm:\${AWS::Region}:\${AWS::AccountId}:parameter/\${PublicConfig}`,
+          {},
+        ],
+      },
+    }
+  );
 });
 
 test("can synthesize directly from the internal model for advanced usage", () => {
@@ -688,23 +700,27 @@ test("synthesizes SQS event source mappings for Function event sources", () => {
     stage: "prod",
   });
 
-  expect(template.Resources.FunctionOrdersQueueEventSourceMapping).toEqual({
+  expect(
+    template.Resources.ProcessOrdersFunctionOrdersQueueEventSourceMapping
+  ).toEqual({
     Properties: {
       BatchSize: 10,
       Enabled: true,
       EventSourceArn: { "Fn::GetAtt": ["OrdersQueue", "Arn"] },
-      FunctionName: { Ref: "Function" },
+      FunctionName: { Ref: "ProcessOrdersFunction" },
       FunctionResponseTypes: ["ReportBatchItemFailures"],
       MaximumBatchingWindowInSeconds: 0,
     },
     Type: "AWS::Lambda::EventSourceMapping",
   });
-  expect(template.Resources.FunctionPriorityQueueEventSourceMapping).toEqual({
+  expect(
+    template.Resources.ProcessOrdersFunctionPriorityQueueEventSourceMapping
+  ).toEqual({
     Properties: {
       BatchSize: 5,
       Enabled: false,
       EventSourceArn: { "Fn::GetAtt": ["PriorityQueue", "Arn"] },
-      FunctionName: { Ref: "Function" },
+      FunctionName: { Ref: "ProcessOrdersFunction" },
       FunctionResponseTypes: ["ReportBatchItemFailures"],
       MaximumBatchingWindowInSeconds: 30,
     },

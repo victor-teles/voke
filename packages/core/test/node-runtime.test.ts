@@ -2,11 +2,15 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdir, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
-import { createBuildPlan } from "../src/build";
-import { createHttpApiEvent } from "../src/e2e";
+import { aws } from "@voke/aws";
 
-// Built bundles must run on the AWS Lambda Node.js runtime, so this test builds a
-// Gateway the same way `voke build` does and loads the output with real Node.
+import { defineConfig } from "../src/config";
+import { createHttpApiEvent } from "../src/e2e";
+import { functions } from "./fixtures/node-runtime/index";
+
+// Built bundles must run on the AWS Lambda Node.js runtime, so this test builds the
+// fixture project through the AWS Provider's build plan, exactly as `voke build` does
+// (generated entry module included), and loads the output with real Node.
 // The output lives under packages/core so Node resolves the external AWS SDK from
 // the workspace node_modules, as the Lambda runtime resolves its bundled SDK.
 const packageDirectory = join(import.meta.dir, "..");
@@ -20,17 +24,19 @@ interface LambdaResult {
   statusCode: number;
 }
 
-const runInNode = async (
+const runInNode = async <TResult = LambdaResult>(
+  exportName: string,
   events: unknown[],
   env: Record<string, string> = {}
-): Promise<LambdaResult[]> => {
+): Promise<TResult[]> => {
   const script = `
-const { handler } = await import(${JSON.stringify(`file://${bundlePath}`)});
+const handlers = await import(${JSON.stringify(`file://${bundlePath}`)});
+const handler = handlers[${JSON.stringify(exportName)}];
 const events = JSON.parse(process.env.VOKE_TEST_EVENTS);
 const results = [];
 for (const event of events) {
   const result = await handler(event, {});
-  results.push({ body: result.body, statusCode: result.statusCode });
+  results.push(result.statusCode === undefined ? result : { body: result.body, statusCode: result.statusCode });
 }
 process.stdout.write(JSON.stringify(results));
 `;
@@ -63,7 +69,7 @@ process.stdout.write(JSON.stringify(results));
     throw new Error(`node exited with ${exitCode}: ${stderr}`);
   }
 
-  return JSON.parse(stdout) as LambdaResult[];
+  return JSON.parse(stdout) as TResult[];
 };
 
 beforeAll(async () => {
@@ -73,10 +79,23 @@ beforeAll(async () => {
     );
   }
 
-  const plan = createBuildPlan(
-    { entrypoint, name: "node-runtime" },
-    { entrypoints: [entrypoint], outdir }
-  );
+  const provider = aws();
+  const config = defineConfig({ entrypoint, name: "node-runtime", provider });
+  const plan = provider.build?.plan?.({
+    build: { ...config.build, outdir },
+    config,
+    entrypoint,
+    functions,
+  });
+
+  if (plan === undefined) {
+    throw new Error("The AWS Provider must provide a build plan");
+  }
+
+  for (const [path, contents] of Object.entries(plan.sources)) {
+    await Bun.write(resolve(packageDirectory, path), contents);
+  }
+
   const build = Bun.spawn(plan.command, {
     cwd: packageDirectory,
     stderr: "pipe",
@@ -99,6 +118,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await rm(outputRoot, { force: true, recursive: true });
+  await rm(join(packageDirectory, ".voke"), { force: true, recursive: true });
 });
 
 test("build writes a module-type package.json next to the bundle", async () => {
@@ -115,6 +135,7 @@ test("built bundle does not reference the Bun global", async () => {
 
 test("built bundle serves Gateway routes on the Node.js runtime", async () => {
   const results = await runInNode(
+    "http",
     [
       createHttpApiEvent("GET", "/health"),
       createHttpApiEvent("GET", "/greeting"),
@@ -144,4 +165,28 @@ test("built bundle serves Gateway routes on the Node.js runtime", async () => {
       statusCode: 404,
     },
   ]);
+});
+
+const record = (messageId: string, body: string) => ({
+  attributes: {},
+  awsRegion: "us-east-1",
+  body,
+  eventSource: "aws:sqs",
+  eventSourceARN: "arn:aws:sqs:us-east-1:123456789012:orders",
+  md5OfBody: "",
+  messageAttributes: {},
+  messageId,
+  receiptHandle: `receipt-${messageId}`,
+});
+test("built bundle runs the generated SQS handler on the Node.js runtime", async () => {
+  const results = await runInNode<{ batchItemFailures: unknown[] }>(
+    "processOrder",
+    [
+      {
+        Records: [record("valid", '{"name":"Ada"}'), record("bad", "not json")],
+      },
+    ]
+  );
+
+  expect(results).toEqual([{ batchItemFailures: [{ itemIdentifier: "bad" }] }]);
 });
