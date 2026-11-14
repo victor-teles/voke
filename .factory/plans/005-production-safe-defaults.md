@@ -519,8 +519,8 @@ Replace the module-level `handleRouteError` (`app.ts:112-133`) with a handler cr
 
 ## Execution notes (2026-11-14)
 
-Done on branch `feature/production-safe-defaults`, stacked on plan 010 (`feature/local-workflow-through-provider`,
-PR #56, open). Uncommitted. Gates: `bun run check` 0 errors, `bun run typecheck` 18/18, `bun run test`
+Done on branch `feature/production-safe-defaults` (PR #57), stacked on plan 010 (`feature/local-workflow-through-provider`,
+PR #56, open). Gates: `bun run check` 0 errors, `bun run typecheck` 18/18, `bun run test`
 23/23 tasks (core 224, `@voke/aws` 74).
 
 - **Core:** `runtime.lambda` and `VokeNodeRuntime` are gone. `defineConfig` rejects `runtime.lambda` with
