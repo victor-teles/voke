@@ -221,7 +221,7 @@ test("creates stack test context with local environment, outputs, and seed comma
   const context = createStackTestContext({
     endpoint: "http://localhost:4566",
     outputs: {
-      ApiUrl: "https://example.execute-api.sa-east-1.amazonaws.com/local",
+      ApiUrl: "https://example.execute-api.sa-east-1.amazonaws.com",
     },
     region: "sa-east-1",
     template,
@@ -238,7 +238,7 @@ test("creates stack test context with local environment, outputs, and seed comma
   expect(context.environment.AWS_ENDPOINT_URL).toBe("http://localhost:4566");
   expect(context.resource("ordersTable", "name")).toBe("OrdersTable");
   expect(context.output("ApiUrl")).toBe(
-    "https://example.execute-api.sa-east-1.amazonaws.com/local"
+    "https://example.execute-api.sa-east-1.amazonaws.com"
   );
   expect(() => context.output("MissingOutput")).toThrow(
     "Missing stack test output: MissingOutput"

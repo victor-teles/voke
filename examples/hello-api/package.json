@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "voke build",
+    "deploy": "voke deploy",
+    "remove": "voke remove",
     "dev": "voke dev",
     "synth": "voke synth",
     "test": "bun test",

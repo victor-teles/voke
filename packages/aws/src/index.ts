@@ -2,6 +2,8 @@ import type { VokeModel, VokeProvider } from "voke";
 
 import { createAwsBuildPlan } from "./build";
 import { synthesizeCloudFormationFromModel } from "./cloudformation-synthesis";
+import { deployAwsStack, removeAwsStack } from "./deploy";
+import { createDeployAwsClients } from "./deploy-clients";
 import { awsRouteAuth } from "./lambda";
 import {
   createLocalAwsEnvironment,
@@ -93,6 +95,20 @@ const validateAwsModel = (model: VokeModel): void => {
 export const aws = (): VokeProvider => ({
   build: {
     plan: createAwsBuildPlan,
+  },
+  deploy: {
+    deploy: async (input) =>
+      await deployAwsStack(input, {
+        clients: await createDeployAwsClients({
+          region: input.region ?? input.config.region,
+        }),
+      }),
+    remove: async (input) =>
+      await removeAwsStack(input, {
+        clients: await createDeployAwsClients({
+          region: input.region ?? input.config.region,
+        }),
+      }),
   },
   local: {
     devEnvironment: ({ config, endpoint, model, region }) => {

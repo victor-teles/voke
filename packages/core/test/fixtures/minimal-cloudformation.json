@@ -5,7 +5,7 @@
     "ApiUrl": {
       "Description": "HTTP API URL",
       "Value": {
-        "Fn::Sub": "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/test"
+        "Fn::Sub": "https://${Api}.execute-api.${AWS::Region}.amazonaws.com"
       }
     },
     "FunctionName": {
@@ -46,7 +46,7 @@
       },
       "Properties": {
         "Code": {
-          "ZipFile": "export const handler = async () => ({ statusCode: 501, body: 'Build and upload this Voke function before deploying.' });"
+          "ZipFile": "exports.handler = async () => ({ statusCode: 501, body: \"Build and upload this Voke function before deploying.\" });"
         },
         "Environment": {
           "Variables": {}
@@ -98,7 +98,7 @@
           "Ref": "Api"
         },
         "AutoDeploy": true,
-        "StageName": "test"
+        "StageName": "$default"
       },
       "Type": "AWS::ApiGatewayV2::Stage"
     },

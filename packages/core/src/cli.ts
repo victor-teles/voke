@@ -1,5 +1,9 @@
 #!/usr/bin/env bun
 
+import { access, mkdir, writeFile } from "node:fs/promises";
+import { dirname, relative, resolve } from "node:path";
+import { createInterface } from "node:readline/promises";
+
 import packageJson from "../package.json";
 import { defineConfig, loadVokeConfig } from "./config";
 import type { VokeConfig } from "./config";
@@ -10,7 +14,9 @@ import { createLocalBootstrapPlan, LocalProviderError } from "./local";
 import type { LocalProvider } from "./local";
 import { createInternalModel } from "./model";
 import { loadProject } from "./project";
+import type { BuildPlan, ProviderDeployResult } from "./provider";
 import { generateRemoteModules } from "./remote";
+import { readEnv } from "./runtime-env";
 import { writeServerlessMigration } from "./serverless-migration";
 
 interface CreateApiProjectOptions {
@@ -19,6 +25,10 @@ interface CreateApiProjectOptions {
 }
 
 interface CliOptions {
+  /** Reads one line of confirmation; defaults to the terminal. */
+  confirm?: (prompt: string) => Promise<string>;
+  /** Whether the CLI may prompt; defaults to whether stdin is a terminal. */
+  interactive?: boolean;
   output?: CliOutput;
   run?: CommandRunner;
   showDetails?: boolean;
@@ -36,7 +46,7 @@ interface CommandRunOptions {
   stdoutFilter?: (line: string) => boolean;
 }
 
-interface ParsedFlags {
+export interface ParsedFlags {
   values: Record<string, string>;
   positional: string[];
 }
@@ -62,41 +72,33 @@ Usage:
   voke build [entrypoint] [outdir]
   voke create api <name> [directory]
   voke synth [entrypoint] [out] [--config voke.config.ts] [--name api] [--stage local] [--region us-east-1]
+  voke deploy [--stage dev] [--region us-east-1] [--config voke.config.ts] [--dry-run]
+  voke remove [--stage dev] [--region us-east-1] [--config voke.config.ts] [--yes]
   voke remote generate [name]
   voke local start [--compose .voke/local/docker-compose.yml]
   voke local stop [--compose .voke/local/docker-compose.yml]
   voke local reset [--compose .voke/local/docker-compose.yml]
   voke local bootstrap --name api [--stage local]
   voke migrate serverless [serverless.yml] [--out ./voke-migration]
-
-Experimental:
-  voke experimental deploy --name api [--stage local] [--template ./dist/cloudformation.json]
-  voke experimental remove --name api [--stage local]
 `);
 };
 
-const commandName = (argv: string[]): string => {
-  const [command, subcommand] = argv;
-
-  if (command === "experimental" && subcommand !== undefined) {
-    return `${command} ${subcommand}`;
-  }
-
-  return command ?? "help";
-};
+const commandName = (argv: string[]): string => argv[0] ?? "help";
 
 const formatCommand = (argv: string[]): string => ["voke", ...argv].join(" ");
 
 const commandUsage: Record<string, string> = {
   build: "Usage: voke build [entrypoint] [outdir]",
   create: "Usage: voke create api <name> [directory]",
+  deploy:
+    "Usage: voke deploy [--stage dev] [--region us-east-1] [--config voke.config.ts] [--dry-run]",
   dev: "Usage: voke dev [entrypoint] [--hostname localhost] [--port 3000]",
-  experimental:
-    "Usage: voke experimental <deploy|remove> [--config voke.config.ts]",
   local: "Usage: voke local <start|stop|reset|bootstrap>",
   migrate:
     "Usage: voke migrate serverless [serverless.yml] [--out ./voke-migration]",
   remote: "Usage: voke remote generate [name]",
+  remove:
+    "Usage: voke remove [--stage dev] [--region us-east-1] [--config voke.config.ts] [--yes]",
   synth:
     "Usage: voke synth [entrypoint] [out] [--config voke.config.ts] [--name api] [--stage local] [--region us-east-1]",
 };
@@ -129,6 +131,12 @@ const printRunDetails = (argv: string[], options: CliOptions): void => {
   output(cliRunDetails(argv));
 };
 
+// Flags that take no value: `--yes` means "true"; `--yes=false` is accepted too.
+const booleanFlags = new Set(["dry-run", "force", "help", "verbose", "yes"]);
+
+export const isFlagSet = (flags: ParsedFlags, name: string): boolean =>
+  flags.values[name] !== undefined && flags.values[name] !== "false";
+
 const parseFlags = (args: string[]): ParsedFlags => {
   const values: Record<string, string> = {};
   const positional: string[] = [];
@@ -146,6 +154,11 @@ const parseFlags = (args: string[]): ParsedFlags => {
 
       if (inlineValue !== undefined) {
         values[key] = inlineValue;
+        continue;
+      }
+
+      if (booleanFlags.has(key)) {
+        values[key] = "true";
         continue;
       }
 
@@ -167,8 +180,6 @@ const parseFlags = (args: string[]): ParsedFlags => {
 
   return { positional, values };
 };
-
-const stackName = (name: string, stage: string): string => `${name}-${stage}`;
 
 const writeLocalCompose = async (
   config: VokeConfig,
@@ -468,45 +479,6 @@ export const createApiProject = async (
   return directory;
 };
 
-export const remove = async (options: {
-  name: string;
-  stage: string;
-  region: string;
-  run?: CommandRunner;
-}): Promise<void> => {
-  await (options.run ?? runCommand)([
-    "aws",
-    "cloudformation",
-    "delete-stack",
-    "--stack-name",
-    stackName(options.name, options.stage),
-    "--region",
-    options.region,
-  ]);
-};
-
-export const deploy = async (options: {
-  name: string;
-  stage: string;
-  region: string;
-  template: string;
-  run?: CommandRunner;
-}): Promise<void> => {
-  await (options.run ?? runCommand)([
-    "aws",
-    "cloudformation",
-    "deploy",
-    "--stack-name",
-    stackName(options.name, options.stage),
-    "--template-file",
-    options.template,
-    "--capabilities",
-    "CAPABILITY_IAM",
-    "--region",
-    options.region,
-  ]);
-};
-
 export const synth = async (options: {
   config?: VokeConfig;
   name?: string;
@@ -559,7 +531,7 @@ export const build = async (
     outdir?: string;
     run?: CommandRunner;
   }
-): Promise<void> => {
+): Promise<BuildPlan> => {
   const createPlan = config.provider?.build?.plan;
 
   if (createPlan === undefined) {
@@ -589,6 +561,220 @@ export const build = async (
   for (const [path, contents] of Object.entries(plan.files)) {
     await Bun.write(path, contents);
   }
+
+  return plan;
+};
+
+const endpointEnvironment = ["VOKE_AWS_ENDPOINT_URL", "AWS_ENDPOINT_URL"];
+
+/** --stage, then VOKE_STAGE, then the config. */
+const resolveStage = (flags: ParsedFlags, config: VokeConfig): string =>
+  flags.values.stage ?? readEnv("VOKE_STAGE") ?? config.stage;
+
+const assertDeployableStage = (stage: string): void => {
+  const hasLocalEndpoint = endpointEnvironment.some(
+    (name) => (readEnv(name) ?? "") !== ""
+  );
+
+  if (stage === "local" && !hasLocalEndpoint) {
+    throw new CliUsageError(
+      'Stage "local" is reserved for the local emulator. Deploy to AWS with: voke deploy --stage dev'
+    );
+  }
+};
+
+/** Bundle files relative to the build output directory; each must exist after the build. */
+const artifactFilesOf = async (
+  plan: BuildPlan,
+  cwd: string
+): Promise<{ directory: string; files: string[] }> => {
+  const directory = resolve(cwd, plan.outdir);
+  const paths = [
+    ...Object.values(plan.outputs).map((output) => output.file),
+    ...Object.keys(plan.files),
+  ];
+  const files = [
+    ...new Set(paths.map((path) => relative(directory, resolve(cwd, path)))),
+  ];
+
+  for (const file of files) {
+    try {
+      await access(resolve(directory, file));
+    } catch {
+      throw new CliUsageError(
+        `The build did not produce ${file} in ${plan.outdir}. Run voke build and check its output.`
+      );
+    }
+  }
+
+  return { directory, files };
+};
+
+const printDeployOutputs = (
+  result: ProviderDeployResult,
+  output: CliOutput
+): void => {
+  const entries = Object.entries(result.outputs).toSorted(([left], [right]) => {
+    if (left === "ApiUrl") {
+      return -1;
+    }
+
+    return right === "ApiUrl" ? 1 : left.localeCompare(right);
+  });
+
+  if (entries.length === 0) {
+    return;
+  }
+
+  const width = Math.max(...entries.map(([key]) => key.length));
+
+  output("");
+
+  for (const [key, value] of entries) {
+    output(`${key.padEnd(width)}  ${value}`);
+  }
+};
+
+const writeDeployOutputs = async (
+  result: ProviderDeployResult,
+  stage: string,
+  cwd: string
+): Promise<string> => {
+  const path = resolve(cwd, ".voke", "outputs", `${stage}.json`);
+
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(
+    path,
+    `${JSON.stringify({ id: result.id, outputs: result.outputs, region: result.region, stage }, null, 2)}\n`
+  );
+
+  return path;
+};
+
+/** Builds the project through its Provider and deploys it to the stage. */
+export const deployProject = async (options: {
+  config: VokeConfig;
+  cwd?: string;
+  dryRun?: boolean;
+  entrypoint?: string;
+  functions: FunctionRegistry | FunctionRegistryInput;
+  output?: CliOutput;
+  region?: string;
+  run?: CommandRunner;
+  stage: string;
+}): Promise<ProviderDeployResult> => {
+  const output = options.output ?? console.log;
+  const cwd = options.cwd ?? readEnv("PWD") ?? ".";
+
+  assertDeployableStage(options.stage);
+
+  const config = defineConfig({ ...options.config, stage: options.stage });
+  const deployToProvider = config.provider?.deploy?.deploy;
+
+  if (deployToProvider === undefined) {
+    throw new CliUsageError(
+      config.provider === undefined
+        ? "No provider configured for deploy. Set provider: aws() in voke.config.ts."
+        : `Provider "${config.provider.name}" does not support deploy.`
+    );
+  }
+
+  output(`Building ${config.name} (${options.stage})`);
+  const plan = await build(config, {
+    entrypoint: options.entrypoint,
+    functions: options.functions,
+    run: options.run,
+  });
+  const artifact = await artifactFilesOf(plan, cwd);
+  const result = await deployToProvider({
+    artifactDirectory: artifact.directory,
+    artifactFiles: artifact.files,
+    config,
+    dryRun: options.dryRun ?? false,
+    model: createInternalModel({ ...config, functions: options.functions }),
+    output,
+    region: options.region,
+    stage: options.stage,
+  });
+
+  printDeployOutputs(result, output);
+
+  if (result.status !== "dry-run") {
+    await writeDeployOutputs(result, options.stage, cwd);
+  }
+
+  return result;
+};
+
+const readConfirmation = async (prompt: string): Promise<string> => {
+  const reader = createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  try {
+    return await reader.question(prompt);
+  } finally {
+    reader.close();
+  }
+};
+
+/** Removes a deployed stage through its Provider, after confirmation. */
+export const removeProject = async (
+  options: {
+    config: VokeConfig;
+    output?: CliOutput;
+    region?: string;
+    stage: string;
+    yes?: boolean;
+  },
+  cli: CliOptions = {}
+): Promise<"absent" | "removed"> => {
+  const output = options.output ?? console.log;
+  const config = defineConfig({ ...options.config, stage: options.stage });
+  const removeFromProvider = config.provider?.deploy?.remove;
+
+  if (removeFromProvider === undefined) {
+    throw new CliUsageError(
+      config.provider === undefined
+        ? "No provider configured for remove. Set provider: aws() in voke.config.ts."
+        : `Provider "${config.provider.name}" does not support remove.`
+    );
+  }
+
+  if (options.yes !== true) {
+    const target = `${config.name}-${options.stage}`;
+    const interactive = cli.interactive ?? process.stdin.isTTY === true;
+
+    if (!interactive) {
+      throw new CliUsageError(
+        `voke remove deletes ${target} and its resources. Run it in a terminal to confirm, or pass --yes.`
+      );
+    }
+
+    const answer = await (cli.confirm ?? readConfirmation)(
+      `This deletes ${target} and its resources. Type ${target} to confirm: `
+    );
+
+    if (answer.trim() !== target) {
+      throw new CliUsageError(`Removal cancelled; ${target} was not changed.`);
+    }
+  }
+
+  const { status } = await removeFromProvider({
+    config,
+    output,
+    region: options.region,
+    stage: options.stage,
+  });
+
+  output(
+    status === "absent"
+      ? "Nothing to remove"
+      : `Removed ${config.name}-${options.stage}`
+  );
+
+  return status;
 };
 
 export const dev = async (
@@ -693,39 +879,6 @@ export const local = async (
   throw new CliUsageError("Usage: voke local <start|stop|reset|bootstrap>");
 };
 
-const experimental = async (
-  subcommand: string | undefined,
-  flags: ParsedFlags,
-  options: CliOptions
-): Promise<void> => {
-  const config = await loadConfigFromFlags(flags);
-
-  if (subcommand === "deploy") {
-    await deploy({
-      name: flags.values.name ?? config.name,
-      region: flags.values.region ?? config.region,
-      run: options.run ?? runCommand,
-      stage: flags.values.stage ?? config.stage,
-      template: flags.values.template ?? config.cloudFormation.out,
-    });
-    return;
-  }
-
-  if (subcommand === "remove") {
-    await remove({
-      name: flags.values.name ?? config.name,
-      region: flags.values.region ?? config.region,
-      run: options.run ?? runCommand,
-      stage: flags.values.stage ?? config.stage,
-    });
-    return;
-  }
-
-  throw new CliUsageError(
-    "Usage: voke experimental <deploy|remove> [--config voke.config.ts]"
-  );
-};
-
 const remote = async (
   subcommand: string | undefined,
   flags: ParsedFlags
@@ -767,6 +920,20 @@ const commandHandlers: Record<string, CommandHandler> = {
 
     await createApiProject({ directory, name });
   },
+  deploy: async (_args, flags, options) => {
+    const config = await loadConfigFromFlags(flags);
+    const project = await loadProject({ config });
+
+    await deployProject({
+      config,
+      dryRun: isFlagSet(flags, "dry-run"),
+      functions: project.functions,
+      output: options.output,
+      region: flags.values.region,
+      run: options.run ?? runCommand,
+      stage: resolveStage(flags, config),
+    });
+  },
   dev: async (_args, flags, options) => {
     const config = await loadConfigFromFlags(flags);
     await dev(config, {
@@ -779,9 +946,6 @@ const commandHandlers: Record<string, CommandHandler> = {
       run: options.run ?? runCommand,
       stage: flags.values.stage,
     });
-  },
-  experimental: async (args, flags, options) => {
-    await experimental(args[0], flags, options);
   },
   local: async (args, flags, options) => {
     await local(args[0], flags, options.run ?? runCommand);
@@ -800,6 +964,20 @@ const commandHandlers: Record<string, CommandHandler> = {
       positional: args,
       values: flags.values,
     });
+  },
+  remove: async (_args, flags, options) => {
+    const config = await loadConfigFromFlags(flags);
+
+    await removeProject(
+      {
+        config,
+        output: options.output,
+        region: flags.values.region,
+        stage: resolveStage(flags, config),
+        yes: isFlagSet(flags, "yes"),
+      },
+      options
+    );
   },
   synth: async (_args, flags) => {
     const config = await loadConfigFromFlags(flags);
@@ -827,12 +1005,6 @@ export const runCli = async (
   if (command === undefined || command === "--help" || command === "-h") {
     printHelp();
     return;
-  }
-
-  if (command === "deploy" || command === "remove") {
-    throw new CliUsageError(
-      `Deployment commands are experimental. Use: voke experimental ${command}`
-    );
   }
 
   let flags: ParsedFlags;

@@ -794,7 +794,9 @@ const addHttpApiResources = (options: {
     Properties: {
       ApiId: { Ref: "Api" },
       AutoDeploy: true,
-      StageName: model.service.stage,
+      // One stack per Voke stage already isolates environments. The $default stage keeps the
+      // stage name out of the URL and out of rawPath, so Gateway routes match as declared.
+      StageName: "$default",
     },
     Type: "AWS::ApiGatewayV2::Stage",
   };
@@ -843,7 +845,7 @@ const outputValue = (
 ): CloudFormationValue => {
   if ("api" in output.source) {
     return {
-      "Fn::Sub": `https://\${Api}.execute-api.\${AWS::Region}.amazonaws.com/${model.service.stage}`,
+      "Fn::Sub": `https://\${Api}.execute-api.\${AWS::Region}.amazonaws.com`,
     };
   }
 
@@ -863,8 +865,19 @@ const outputValue = (
   );
 };
 
+export interface SynthesisArtifact {
+  bucket: string;
+  key: string;
+}
+
+export interface SynthesisOptions {
+  /** The uploaded deployment bundle; without it each Function gets a 501 placeholder. */
+  artifact?: SynthesisArtifact;
+}
+
 export const synthesizeCloudFormationFromModel = (
-  model: VokeModel
+  model: VokeModel,
+  options: SynthesisOptions = {}
 ): CloudFormationTemplate => {
   const apiRoutes = model.apis.http?.routes ?? [];
   // The Function keyed "http" owns the bare Function/FunctionRole/Permission logical ids; every
@@ -943,10 +956,17 @@ export const synthesizeCloudFormationFromModel = (
         VokeRoutes: definition.routes.map(toApiGatewayRouteKey),
       },
       Properties: {
-        Code: {
-          ZipFile:
-            "export const handler = async () => ({ statusCode: 501, body: 'Build and upload this Voke function before deploying.' });",
-        },
+        Code:
+          options.artifact === undefined
+            ? {
+                // Inline code runs as CommonJS index.js, so the placeholder uses exports.
+                ZipFile:
+                  'exports.handler = async () => ({ statusCode: 501, body: "Build and upload this Voke function before deploying." });',
+              }
+            : {
+                S3Bucket: options.artifact.bucket,
+                S3Key: options.artifact.key,
+              },
         Environment: {
           Variables: environmentVariables,
         },

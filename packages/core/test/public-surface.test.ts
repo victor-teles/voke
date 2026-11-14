@@ -63,6 +63,8 @@ test("keeps the stable root runtime surface intentional", () => {
   expect(Object.keys(voke).toSorted()).toEqual([
     "InvokeError",
     "VokeConfigError",
+    "VokeDeployError",
+    "VokeError",
     "VokeModelError",
     "VokeResourceBindingError",
     "VokeRuntimeVariableError",
