@@ -1,6 +1,5 @@
-import { aws } from "@voke/aws";
+import { aws, bindResource } from "@voke/aws";
 
-import { bindResource } from "../../../src/aws";
 import { createFunctions, fn, http, route, voke } from "../../../src/index";
 import type { StandardSchemaV1 } from "../../../src/schema";
 

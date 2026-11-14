@@ -56,7 +56,7 @@ mock.module("@aws-sdk/client-ssm", () => ({
 }));
 
 test("creates AWS Runtime Variable descriptors for secrets and parameters", async () => {
-  const { parameter, secret } = await import("../src/aws");
+  const { parameter, secret } = await import("../src/index");
 
   const signingSecret = secret("/prod/stripe/key");
   const configParameter = parameter("/prod/app/config");
@@ -94,17 +94,16 @@ test("creates AWS Runtime Variable descriptors for secrets and parameters", asyn
   expect(Object.isFrozen(signingSecret.source)).toBe(true);
 });
 
-test("loads AWS secrets and parameters through the automatic provider", async () => {
+test("loads AWS secrets and parameters through the configured aws() provider", async () => {
   secretCalls.length = 0;
   parameterCalls.length = 0;
   secretResponse = { SecretString: "secret-value" };
   parameterResponse = { Parameter: { Value: "parameter-value" } };
-  const { createGateway } = await import("../src/app");
-  const { defineFunction, defineFunctions } = await import("../src/invoke");
-  const { parameter, secret } = await import("../src/aws");
+  const { createFunctions, fn, voke } = await import("voke");
+  const { aws, parameter, secret } = await import("../src/index");
 
-  const functions = defineFunctions({
-    readAwsVariables: defineFunction({
+  const functions = createFunctions({
+    readAwsVariables: fn({
       handler: async (_payload, context) =>
         `${await context.variables.apiKey.text()}/${await context.variables.config.text()}`,
       output: {
@@ -123,7 +122,7 @@ test("loads AWS secrets and parameters through the automatic provider", async ()
       },
     }),
   });
-  createGateway({ functions });
+  voke(functions, { config: { name: "variables-test", provider: aws() } });
 
   await expect(functions.invoke("readAwsVariables")).resolves.toBe(
     "secret-value/parameter-value"
@@ -141,13 +140,12 @@ test("maps missing AWS variables and binary secrets to Runtime Variable results"
   missingParameter.name = "ParameterNotFound";
   parameterResponse = missingParameter;
   secretResponse = { SecretBinary: new Uint8Array([1, 2, 3]) };
-  const { createGateway } = await import("../src/app");
-  const { VokeRuntimeVariableError } = await import("../src/errors");
-  const { defineFunction, defineFunctions } = await import("../src/invoke");
-  const { parameter, secret } = await import("../src/aws");
+  const { createFunctions, fn, voke, VokeRuntimeVariableError } =
+    await import("voke");
+  const { aws, parameter, secret } = await import("../src/index");
 
-  const functions = defineFunctions({
-    readMissingParameter: defineFunction({
+  const functions = createFunctions({
+    readMissingParameter: fn({
       handler: async (_payload, context) =>
         (await context.variables.optional.text()) ?? "missing",
       output: {
@@ -164,7 +162,7 @@ test("maps missing AWS variables and binary secrets to Runtime Variable results"
         optional: parameter("/missing", undefined, { optional: true }),
       },
     }),
-    readSecret: defineFunction({
+    readSecret: fn({
       handler: async (_payload, context) =>
         await context.variables.apiKey.text(),
       output: {
@@ -182,7 +180,7 @@ test("maps missing AWS variables and binary secrets to Runtime Variable results"
       },
     }),
   });
-  createGateway({ functions });
+  voke(functions, { config: { name: "variables-test", provider: aws() } });
 
   await expect(functions.invoke("readMissingParameter")).resolves.toBe(
     "missing"
@@ -200,20 +198,19 @@ test("resolves AWS Runtime Variables from Voke-managed resource bindings", async
   parameterCalls.length = 0;
   secretResponse = { SecretString: "managed-secret-value" };
   parameterResponse = { Parameter: { Value: "managed-parameter-value" } };
-  const { createResourceBindingName, parameter, secret } =
-    await import("../src/aws");
+  const { aws, createResourceBindingName, parameter, secret } =
+    await import("../src/index");
   const signingSecretEnv = createResourceBindingName("signingSecret", "id");
   const publicConfigEnv = createResourceBindingName("publicConfig", "name");
-  const previousSecret = Bun.env[signingSecretEnv];
-  const previousParameter = Bun.env[publicConfigEnv];
+  const previousSecret = process.env[signingSecretEnv];
+  const previousParameter = process.env[publicConfigEnv];
 
   try {
-    Bun.env[signingSecretEnv] = "signing-secret-id";
-    Bun.env[publicConfigEnv] = "/public/config";
-    const { createGateway } = await import("../src/app");
-    const { defineFunction, defineFunctions } = await import("../src/invoke");
-    const functions = defineFunctions({
-      readManagedVariables: defineFunction({
+    process.env[signingSecretEnv] = "signing-secret-id";
+    process.env[publicConfigEnv] = "/public/config";
+    const { createFunctions, fn, voke } = await import("voke");
+    const functions = createFunctions({
+      readManagedVariables: fn({
         handler: async (_payload, context) =>
           `${await context.variables.signingSecret.text()}/${await context.variables.publicConfig.text()}`,
         output: {
@@ -232,7 +229,7 @@ test("resolves AWS Runtime Variables from Voke-managed resource bindings", async
         },
       }),
     });
-    createGateway({ functions });
+    voke(functions, { config: { name: "variables-test", provider: aws() } });
 
     await expect(functions.invoke("readManagedVariables")).resolves.toBe(
       "managed-secret-value/managed-parameter-value"
@@ -243,15 +240,15 @@ test("resolves AWS Runtime Variables from Voke-managed resource bindings", async
     ]);
   } finally {
     if (previousSecret === undefined) {
-      Reflect.deleteProperty(Bun.env, signingSecretEnv);
+      Reflect.deleteProperty(process.env, signingSecretEnv);
     } else {
-      Bun.env[signingSecretEnv] = previousSecret;
+      process.env[signingSecretEnv] = previousSecret;
     }
 
     if (previousParameter === undefined) {
-      Reflect.deleteProperty(Bun.env, publicConfigEnv);
+      Reflect.deleteProperty(process.env, publicConfigEnv);
     } else {
-      Bun.env[publicConfigEnv] = previousParameter;
+      process.env[publicConfigEnv] = previousParameter;
     }
   }
 });

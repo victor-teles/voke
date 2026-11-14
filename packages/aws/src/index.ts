@@ -6,6 +6,7 @@ import {
   createLocalAwsEnvironment,
   createLocalResourceBindings,
 } from "./local";
+import { createAwsRuntimeVariableProvider } from "./runtime-variables";
 
 export {
   createAuthorizers,
@@ -31,18 +32,11 @@ export {
   bindResource,
   createAwsClientConfig,
   createResourceBindingName,
-  dynamodbTable,
-  eventBus,
-  s3Bucket,
-  secret,
-  snsTopic,
-  sqsQueue,
-  ssmParameter,
   toEnvKey,
   type AwsClientConfig,
   type ResourceBinding,
-  type StackResourceDefinition,
 } from "./resources";
+export { parameter, secret } from "./runtime-variables";
 export {
   createAwsLambdaHandler,
   handleAwsLambdaRequest,
@@ -124,6 +118,7 @@ export const aws = (): VokeProvider<{
     gateway: ({ app }) => ({
       handler: createAwsLambdaHandler(app),
     }),
+    variables: () => [createAwsRuntimeVariableProvider()],
   },
   synthesis: {
     synthesize: ({ model }) => synthesizeCloudFormationFromModel(model),

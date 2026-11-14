@@ -1,4 +1,5 @@
-import type { VokeConfigInput } from "./config";
+// Retained only for local.ts / local-provider.ts / e2e.ts until plan 010 deletes them. Do not add code or importers.
+import type { VokeConfigInput, VokeResourceInput } from "./config";
 import { VokeModelError } from "./errors";
 import { createInternalModel } from "./model";
 import type {
@@ -34,21 +35,6 @@ export interface CloudFormationOutput {
   Value: CloudFormationValue;
 }
 
-export interface StackResourceDefinition {
-  cloudFormationType: string;
-  bindingAttribute: string;
-  bindingValue: "ref" | "getAttArn" | "getAttId";
-  policyResource:
-    | "ref"
-    | "getAttArn"
-    | "getAttId"
-    | "parameterArn"
-    | "s3ArnWithObjects";
-  actions: string[];
-  outputName: string;
-  properties: Record<string, CloudFormationValue>;
-}
-
 type AwsResourceBindingValue = "ref" | "getAttArn" | "getAttId";
 
 type AwsResourcePolicyResource =
@@ -69,121 +55,8 @@ export type SynthesizeCloudFormationOptions = VokeConfigInput & {
   entrypoint?: string;
   handler?: string;
   environment?: Record<string, string>;
-  resources?: Record<string, StackResourceDefinition>;
+  resources?: Record<string, VokeResourceInput>;
 };
-
-export const dynamodbTable = (
-  options: {
-    partitionKey?: string;
-    sortKey?: string;
-    billingMode?: "PAY_PER_REQUEST" | "PROVISIONED";
-  } = {}
-): StackResourceDefinition => {
-  const partitionKey = options.partitionKey ?? "id";
-  const attributes = [{ AttributeName: partitionKey, AttributeType: "S" }];
-  const keySchema = [{ AttributeName: partitionKey, KeyType: "HASH" }];
-
-  if (options.sortKey !== undefined) {
-    attributes.push({ AttributeName: options.sortKey, AttributeType: "S" });
-    keySchema.push({ AttributeName: options.sortKey, KeyType: "RANGE" });
-  }
-
-  return {
-    // Voke does not model per-operation table access yet, so these practical
-    // defaults stay table-scoped instead of wildcarding all DynamoDB resources.
-    actions: [
-      "dynamodb:GetItem",
-      "dynamodb:PutItem",
-      "dynamodb:UpdateItem",
-      "dynamodb:DeleteItem",
-      "dynamodb:Query",
-      "dynamodb:Scan",
-    ],
-    bindingAttribute: "name",
-    bindingValue: "ref",
-    cloudFormationType: "AWS::DynamoDB::Table",
-    outputName: "Name",
-    policyResource: "getAttArn",
-    properties: {
-      AttributeDefinitions: attributes,
-      BillingMode: options.billingMode ?? "PAY_PER_REQUEST",
-      KeySchema: keySchema,
-    },
-  };
-};
-
-export const sqsQueue = (): StackResourceDefinition => ({
-  actions: [
-    "sqs:SendMessage",
-    "sqs:ReceiveMessage",
-    "sqs:DeleteMessage",
-    "sqs:GetQueueAttributes",
-  ],
-  bindingAttribute: "url",
-  bindingValue: "ref",
-  cloudFormationType: "AWS::SQS::Queue",
-  outputName: "Url",
-  policyResource: "getAttArn",
-  properties: {},
-});
-
-export const snsTopic = (): StackResourceDefinition => ({
-  actions: ["sns:Publish"],
-  bindingAttribute: "arn",
-  bindingValue: "ref",
-  cloudFormationType: "AWS::SNS::Topic",
-  outputName: "Arn",
-  policyResource: "ref",
-  properties: {},
-});
-
-export const eventBus = (): StackResourceDefinition => ({
-  actions: ["events:PutEvents"],
-  bindingAttribute: "name",
-  bindingValue: "ref",
-  cloudFormationType: "AWS::Events::EventBus",
-  outputName: "Name",
-  policyResource: "getAttArn",
-  properties: {},
-});
-
-export const s3Bucket = (): StackResourceDefinition => ({
-  actions: ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket"],
-  bindingAttribute: "name",
-  bindingValue: "ref",
-  cloudFormationType: "AWS::S3::Bucket",
-  outputName: "Name",
-  policyResource: "s3ArnWithObjects",
-  properties: {},
-});
-
-export const secret = (): StackResourceDefinition => ({
-  actions: ["secretsmanager:GetSecretValue"],
-  bindingAttribute: "id",
-  bindingValue: "getAttId",
-  cloudFormationType: "AWS::SecretsManager::Secret",
-  outputName: "Id",
-  policyResource: "getAttArn",
-  properties: {
-    GenerateSecretString: {},
-  },
-});
-
-export const ssmParameter = (options: {
-  value: string;
-  type?: "String" | "StringList";
-}): StackResourceDefinition => ({
-  actions: ["ssm:GetParameter", "ssm:GetParameters"],
-  bindingAttribute: "name",
-  bindingValue: "ref",
-  cloudFormationType: "AWS::SSM::Parameter",
-  outputName: "Name",
-  policyResource: "parameterArn",
-  properties: {
-    Type: options.type ?? "String",
-    Value: options.value,
-  },
-});
 
 const toLogicalId = (value: string): string => {
   const words = value

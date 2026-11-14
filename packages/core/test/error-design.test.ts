@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 
-import { bindResource } from "../src/aws";
+import { bindResource } from "@voke/aws";
+
 import { runCli } from "../src/cli";
 import { defineConfig } from "../src/config";
 import { createDevPlan } from "../src/dev";

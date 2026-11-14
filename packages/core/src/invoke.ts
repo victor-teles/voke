@@ -6,7 +6,6 @@ import type {
   RequestAuthorizerFunctionDefinition,
   RequestAuthorizerHandler,
 } from "./authorizers";
-import { createAwsRuntimeVariableProvider } from "./aws-runtime-variables";
 import type { VokeNodeRuntime } from "./config";
 import type { VokeEnv } from "./context";
 import { VokeConfigError } from "./errors";
@@ -967,6 +966,7 @@ const traceStack: InvokeTrace[] = [];
 interface FunctionRegistryActivation {
   activationKey: string;
   variableCache: RuntimeVariableCache;
+  unregisteredVariableProviders: "defer" | "error";
   variableOverrides?: RuntimeVariableOverrides;
   variableProviders: readonly RuntimeVariableProvider[];
 }
@@ -1002,15 +1002,17 @@ export const activateFunctionRegistry = (
     );
   }
 
-  const activation = {
+  const variableProviders = options.variableProviders ?? [];
+  const activation: FunctionRegistryActivation = {
     activationKey,
+    // Without any provider (no configured Provider, no explicit providers), Runtime Variables
+    // can still resolve from overrides and the environment, so provider checks wait for load.
+    unregisteredVariableProviders:
+      variableProviders.length === 0 ? "defer" : "error",
     variableCache:
       previousActivation?.variableCache ?? createRuntimeVariableCache(),
     variableOverrides: options.variableOverrides,
-    variableProviders: [
-      createAwsRuntimeVariableProvider(),
-      ...(options.variableProviders ?? []),
-    ],
+    variableProviders,
   };
 
   activatedFunctionRegistries.set(registry, activation);
@@ -1061,6 +1063,7 @@ const createInvokeContext = <TVariables extends RuntimeVariableCatalog>(
       functionKey: definition.key,
       overrides: activation?.variableOverrides,
       providers: activation?.variableProviders ?? [],
+      unregisteredProviders: activation?.unregisteredVariableProviders,
       variables: definition.variables ?? ({} as TVariables),
     }),
   };
@@ -1104,192 +1107,6 @@ const parseWithSchema = async <TInput, TOutput>(
     throw errorFactory(message, error);
   }
 };
-
-const createSqsBatchResult = (
-  failures: SqsBatchItemFailure[] = []
-): SqsBatchResultBuilder => {
-  const result: SqsBatchResultBuilder = {
-    batchItemFailures: failures,
-    fail(message) {
-      if (
-        !this.batchItemFailures.some(
-          (failure) => failure.itemIdentifier === message.id
-        )
-      ) {
-        this.batchItemFailures.push({ itemIdentifier: message.id });
-      }
-    },
-  };
-  Object.defineProperty(result, "fail", {
-    enumerable: false,
-    value: result.fail,
-  });
-
-  return result;
-};
-
-const createSqsRecord = (
-  message: SqsEventInvocationMessage<unknown>,
-  index: number
-): SqsRecord => {
-  if (message.raw !== undefined) {
-    return message.raw;
-  }
-
-  const body =
-    typeof message.body === "string"
-      ? message.body
-      : JSON.stringify(message.body);
-  const id = message.id ?? `msg_${index + 1}`;
-
-  return {
-    attributes: message.attributes ?? {},
-    awsRegion: "local",
-    body,
-    eventSource: "aws:sqs",
-    eventSourceARN: "arn:aws:sqs:local:000000000000:local",
-    md5OfBody: "",
-    messageAttributes: message.messageAttributes ?? {},
-    messageId: id,
-    receiptHandle: `receipt-${id}`,
-  };
-};
-
-const sqsInvocationFromAwsEvent = (
-  event: SqsAwsEvent
-): SqsEventInvocationInput<unknown> => ({
-  messages: event.Records.map((record) => ({
-    attributes: record.attributes,
-    body: record.body,
-    id: record.messageId,
-    messageAttributes: record.messageAttributes,
-    raw: record,
-  })),
-  source: "sqs",
-});
-
-const parseSqsMessageBatch = async <
-  TBodySchema extends AnyStandardSchema,
-  TInvalidMessageBody extends SqsInvalidMessageBodyMode,
->(
-  schema: SqsMessageBatchSchema<TBodySchema, TInvalidMessageBody>,
-  input: SqsEventInvocationInput<StandardSchemaInput<TBodySchema>>
-): Promise<StandardSchemaOutput<typeof schema>> => {
-  const failures: SqsBatchItemFailure[] = [];
-  const messages: (
-    | SqsInvalidMessage
-    | SqsValidMessage<StandardSchemaOutput<TBodySchema>>
-  )[] = [];
-
-  for (const [index, message] of input.messages.entries()) {
-    const raw = createSqsRecord(message, index);
-    let body: StandardSchemaOutput<TBodySchema>;
-
-    try {
-      const parsedJson = JSON.parse(
-        raw.body
-      ) as StandardSchemaInput<TBodySchema>;
-      body = (await parseWithSchema(
-        schema.body,
-        parsedJson,
-        (text, cause) =>
-          new InvokeError(
-            `Invalid SQS message body for ${raw.messageId}: ${text}`,
-            {
-              cause,
-              code: "INVALID_PAYLOAD",
-              functionName: raw.messageId,
-            }
-          )
-      )) as StandardSchemaOutput<TBodySchema>;
-    } catch (error) {
-      const invokeError =
-        error instanceof InvokeError
-          ? error
-          : new InvokeError(
-              `Invalid SQS message body for ${raw.messageId}: ${
-                error instanceof Error ? error.message : String(error)
-              }`,
-              {
-                cause: error,
-                code: "INVALID_PAYLOAD",
-                functionName: raw.messageId,
-              }
-            );
-
-      failures.push({ itemIdentifier: raw.messageId });
-
-      if (schema.invalidMessageBody === "include") {
-        messages.push({
-          attributes: raw.attributes,
-          error: invokeError,
-          id: raw.messageId,
-          messageAttributes: raw.messageAttributes,
-          raw,
-          rawBody: raw.body,
-          valid: false,
-        });
-      }
-
-      continue;
-    }
-
-    messages.push({
-      attributes: raw.attributes,
-      body,
-      id: raw.messageId,
-      messageAttributes: raw.messageAttributes,
-      raw,
-      valid: true,
-    });
-  }
-
-  const batch = {
-    batchResult: () => createSqsBatchResult([...failures]),
-    messages,
-    ok: () => ({ batchItemFailures: [...failures] }),
-    source: "sqs",
-  };
-
-  return batch as StandardSchemaOutput<typeof schema>;
-};
-
-export const sqsEventSource = (
-  queue: string,
-  options: SqsEventSourceOptions = {}
-): SqsEventSourceDefinition => ({
-  options,
-  queue,
-  source: "sqs",
-});
-
-export const sqsMessageBatch = <
-  const TBodySchema extends AnyStandardSchema,
-  const TInvalidMessageBody extends SqsInvalidMessageBodyMode = "fail",
->(
-  body: TBodySchema,
-  options: SqsMessageBatchOptions<TInvalidMessageBody> = {}
-): SqsMessageBatchSchema<TBodySchema, TInvalidMessageBody> => ({
-  body,
-  invalidMessageBody:
-    options.invalidMessageBody ?? ("fail" as TInvalidMessageBody),
-  source: "sqs",
-  "~standard": {
-    validate: async (value) => ({
-      data: await parseSqsMessageBatch(
-        {
-          body,
-          invalidMessageBody: options.invalidMessageBody ?? "fail",
-          source: "sqs",
-        } as SqsMessageBatchSchema<TBodySchema, TInvalidMessageBody>,
-        value
-      ),
-      success: true,
-    }),
-    vendor: "voke",
-    version: 1,
-  },
-});
 
 const parsePayload = async <TInputSchema extends AnyStandardSchema | undefined>(
   definition: InvokableFunctionDefinition<string, TInputSchema>,
@@ -1984,16 +1801,6 @@ const sendEventToFunction = async (
   return await definition.handler(parsedEvent, context);
 };
 
-export const createSqsEventHandler =
-  <const TRegistry extends FunctionRegistryInput>(
-    options: SqsEventHandlerOptions<TRegistry>
-  ) =>
-  async (event: SqsAwsEvent): Promise<SqsBatchResult> =>
-    await options.functions.sendEvent(
-      options.function,
-      sqsInvocationFromAwsEvent(event) as never
-    );
-
 export function defineFunction<
   const TInputSchema extends AnyStandardSchema,
   const TOutputSchema extends AnyStandardSchema,
@@ -2111,76 +1918,6 @@ export const http = <
     kind: "route",
     name: definition.name,
     routes: Object.freeze([...routes]) as unknown as RouteInputList<TRoutes>,
-    synthesis: definition.synthesis,
-    variables: definition.variables,
-  });
-};
-
-const queueInputs = (queues: SqsQueueListInput): readonly SqsQueueInput[] =>
-  Array.isArray(queues) ? queues : [queues as SqsQueueInput];
-
-const eventSourceFromQueueInput = (
-  queue: SqsQueueInput,
-  options: SqsEventSourceOptions
-): SqsEventSourceDefinition => {
-  if (typeof queue === "string") {
-    return sqsEventSource(queue, options);
-  }
-
-  const { queue: queueName, ...queueOptions } = queue;
-
-  return sqsEventSource(queueName, {
-    ...options,
-    ...queueOptions,
-  });
-};
-
-export const sqs = <
-  const TMessageSchema extends AnyStandardSchema,
-  const TInvalidMessageBody extends SqsInvalidMessageBodyMode = "fail",
-  const TVariables extends RuntimeVariableCatalog = Record<never, never>,
->(
-  definition: SqsFunctionDefinitionInput<
-    TMessageSchema,
-    TInvalidMessageBody,
-    TVariables
-  >
-): EventFunctionDefinition<
-  string,
-  SqsMessageBatchSchema<TMessageSchema, TInvalidMessageBody>,
-  TVariables
-> => {
-  if (definition.queue !== undefined && definition.queues !== undefined) {
-    throw new VokeConfigError("Pass either queue or queues to sqs(), not both");
-  }
-
-  if (definition.queue === undefined && definition.queues === undefined) {
-    throw new VokeConfigError("sqs() requires queue or queues");
-  }
-
-  const options = {
-    batchSize: definition.batchSize ?? 10,
-    enabled: definition.enabled,
-    maxBatchingWindowSeconds: definition.maxBatchingWindowSeconds,
-  };
-  const queues =
-    definition.queue === undefined
-      ? queueInputs(definition.queues as SqsQueueListInput)
-      : [definition.queue];
-
-  return Object.freeze({
-    events: Object.freeze(
-      queues.map((queue) => eventSourceFromQueueInput(queue, options))
-    ),
-    handler: definition.handler,
-    input: sqsMessageBatch(definition.message, {
-      invalidMessageBody:
-        definition.invalidMessageBody ?? ("fail" as TInvalidMessageBody),
-    }),
-    key: "",
-    kind: "event",
-    name: definition.name,
-    routes: [],
     synthesis: definition.synthesis,
     variables: definition.variables,
   });

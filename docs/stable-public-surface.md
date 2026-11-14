@@ -10,6 +10,8 @@ Use the root package for the common Function-first Gateway authoring path:
 - Function Contract helpers: `StandardSchemaV1`-compatible schemas accepted by `fn(...)`, `http(...)`, and the Route Builder
 - Route Builder support: `route.get(...)`, `.post(...)`, `.put(...)`, `.patch(...)`, `.delete(...)`, `.head(...)`, `.options(...)`, and `.route(...)`
 - Config: root exports `defineConfig`
+- Runtime Variable primitives (provider-neutral): `createVariableSource`, `createVariableProvider`
+- Error classes: `VokeConfigError`, `VokeModelError`, `VokeResourceBindingError`, `VokeRuntimeVariableError`, `InvokeError`
 - HTTP helpers: use `@voke/http`
 - Runtime AWS binding helpers: use `@voke/aws`
 - CloudFormation synthesis entrypoint: use `@voke/aws/cloudformation`
@@ -20,7 +22,7 @@ Use the root package for the common Function-first Gateway authoring path:
 - Test helpers used by stable examples: use `@voke/testing`
 - AWS-specific test helpers: use `@voke/aws/testing`
 
-The root package is intentionally limited to the common authoring path. First-party docs and examples should lead with `createFunctions`, `fn`, `http`, `route`, and `voke`; AWS-specific examples should import SQS, resources, authorizers, and provider runtime from `@voke/aws`.
+The root package is intentionally limited to the common authoring path. First-party docs and examples should lead with `createFunctions`, `fn`, `http`, `route`, and `voke`; AWS-specific examples should import SQS, Runtime Variables, authorizers, and provider runtime from `@voke/aws`, and CloudFormation resource builders from `@voke/aws/cloudformation`.
 
 The root should not export removed pre-stable APIs such as `api()`, `createGateway()`, `createApiApp()`, `routeModule()`, `new Voke()`, `createFunctionRegistry()`, global `invoke()`, `registerLocalFunction()`, or `resetLocalFunctions()`. It should also not export AWS runtime variable builders, AWS resource builders such as `dynamodbTable()`, or low-level Lambda adapter internals.
 
@@ -28,17 +30,20 @@ The root should not export removed pre-stable APIs such as `api()`, `createGatew
 
 Use `@voke/aws` for AWS-specific authoring and runtime binding helpers:
 
-- Resource builders: `dynamodbTable`, `sqsQueue`, `snsTopic`, `eventBus`, `s3Bucket`, `secret`, `ssmParameter`
+- Runtime Variable builders: `secret`, `parameter` (each with `.fromResource(...)`)
 - Event Source Function helpers: `sqs`, `createSqsEventHandler`
 - API Gateway authorizer helpers: `createAuthorizers`, `jwtAuthorizer`, `lambdaAuthorizer`, `requestAuthorizer`
 - Runtime binding helpers: `bindResource`, `createAwsClientConfig`
 - Provider: `aws`
 
-Resource builders live here so `voke.config.ts` can stay readable and domain-oriented:
+CloudFormation resource builders live in `@voke/aws/cloudformation`, so runtime value loading and
+infrastructure declaration do not share an import boundary: `dynamodbTable`, `sqsQueue`, `snsTopic`,
+`eventBus`, `s3Bucket`, `secret`, `ssmParameter`, and `synthesizeCloudFormation`.
 
 ```ts
 import { defineConfig } from "voke";
-import { aws, dynamodbTable, sqsQueue } from "@voke/aws";
+import { aws } from "@voke/aws";
+import { dynamodbTable, sqsQueue } from "@voke/aws/cloudformation";
 ```
 
 ## Specialized Packages

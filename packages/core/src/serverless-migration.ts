@@ -1,4 +1,4 @@
-import { toEnvKey } from "./aws";
+import { toEnvKey } from "./env-key";
 
 type YamlValue =
   | string
@@ -2119,7 +2119,7 @@ const createConfigTemplate = (service: ServerlessService): string => {
       ? ""
       : `\nimport { ${[...new Set(resources.map((resource) => resource.helper))]
           .toSorted()
-          .join(", ")} } from "@voke/aws";`;
+          .join(", ")} } from "@voke/aws/cloudformation";`;
   const resourceEntries = resources.map(
     (resource) => `      ${tsString(resource.name)}: ${resource.expression},`
   );

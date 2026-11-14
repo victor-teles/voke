@@ -1,15 +1,12 @@
 import { expect, test } from "bun:test";
 
+import { bindResource } from "@voke/aws";
+import { dynamodbTable, sqsQueue } from "@voke/aws/cloudformation";
 import { Hono } from "hono";
 
 import { api } from "../src/api";
 import { createGateway } from "../src/app";
-import { bindResource } from "../src/aws";
-import {
-  dynamodbTable,
-  sqsQueue,
-  synthesizeCloudFormation,
-} from "../src/cloudformation";
+import { synthesizeCloudFormation } from "../src/cloudformation";
 import { awsContext, awsEvent, requestId } from "../src/context";
 import type { VokeEnv } from "../src/context";
 import {

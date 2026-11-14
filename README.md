@@ -8,7 +8,8 @@ Create `voke.config.ts` for project, build, and CloudFormation settings:
 
 ```ts
 import { defineConfig } from "voke";
-import { aws, dynamodbTable, sqsQueue } from "@voke/aws";
+import { aws } from "@voke/aws";
+import { dynamodbTable, sqsQueue } from "@voke/aws/cloudformation";
 
 export default defineConfig({
   name: "hello-api",
@@ -118,7 +119,7 @@ Declare provider-backed runtime values on the Function that uses them, then read
 
 ```ts
 import { createFunctions, fn } from "voke";
-import { parameter, secret } from "voke/aws";
+import { parameter, secret } from "@voke/aws";
 
 const functions = createFunctions({
   checkout: fn({

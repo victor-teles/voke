@@ -97,7 +97,7 @@ const client = createTestClient({ baseUrl: Bun.env.VOKE_E2E_API_URL! });
 `createStackTestContext()` prepares local AWS environment variables, resource bindings, CloudFormation output helpers, and deterministic seed commands.
 
 ```ts
-import { dynamodbTable } from "@voke/aws";
+import { dynamodbTable } from "@voke/aws/cloudformation";
 import { synthesizeCloudFormation } from "@voke/aws/cloudformation";
 import { createStackTestContext } from "@voke/aws/testing";
 

@@ -144,6 +144,12 @@ export interface CreateRuntimeVariablesOptions<
   readonly overrides?: RuntimeVariableOverrides;
   readonly providers: readonly RuntimeVariableProvider[];
   readonly signal?: AbortSignal;
+  /**
+   * "error" (default) rejects a variable whose provider id is not registered as soon as the
+   * handles are created. "defer" skips that check so overrides and environment values still
+   * resolve; a load that reaches the provider step then fails with the same error.
+   */
+  readonly unregisteredProviders?: "defer" | "error";
   readonly variables: TVariables;
 }
 
@@ -357,11 +363,14 @@ export const createRuntimeVariables = <
   validateOverrideValues(options.overrides);
 
   const providers = createProviderMap(options.providers);
-  validateRegisteredProviders(
-    options.functionKey,
-    options.variables,
-    providers
-  );
+
+  if (options.unregisteredProviders !== "defer") {
+    validateRegisteredProviders(
+      options.functionKey,
+      options.variables,
+      providers
+    );
+  }
   const handles = {} as Record<string, RuntimeVariableHandle>;
   const env = options.env ?? process.env;
   const clock = options.clock ?? (() => Date.now());

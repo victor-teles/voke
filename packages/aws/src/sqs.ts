@@ -1,8 +1,24 @@
+import { InvokeError, VokeConfigError } from "voke";
 import type {
   EventFunctionDefinition,
+  FunctionSynthesisConfig,
+  InvokeContext,
+  RuntimeVariableCatalog,
   StandardSchemaIssue,
   StandardSchemaV1,
 } from "voke";
+
+type StandardSchemaInput<TSchema> = TSchema extends {
+  readonly "~standard": { readonly types: { input: infer TInput } };
+}
+  ? TInput
+  : TSchema extends {
+        readonly "~standard": {
+          validate(value: infer TInput): unknown;
+        };
+      }
+    ? TInput
+    : never;
 
 type StandardSchemaOutput<TSchema> =
   TSchema extends StandardSchemaV1<unknown, infer TOutput> ? TOutput : never;
@@ -64,7 +80,7 @@ export interface SqsValidMessage<TBody> {
 
 export interface SqsInvalidMessage {
   attributes: Record<string, string>;
-  error: Error;
+  error: InvokeError;
   id: string;
   messageAttributes: Record<string, SqsMessageAttribute>;
   raw: SqsRecord;
@@ -116,7 +132,7 @@ export interface SqsMessageBatchSchema<
   TBodySchema extends AnyStandardSchema = AnyStandardSchema,
   TInvalidMessageBody extends SqsInvalidMessageBodyMode = "fail",
 > extends StandardSchemaV1<
-  SqsEventInvocationInput,
+  SqsEventInvocationInput<StandardSchemaInput<TBodySchema>>,
   TInvalidMessageBody extends "include"
     ? SqsMessageBatchIncludeInvalid<StandardSchemaOutput<TBodySchema>>
     : SqsMessageBatch<StandardSchemaOutput<TBodySchema>>
@@ -135,24 +151,21 @@ type SqsQueueListInput = SqsQueueInput | readonly SqsQueueInput[];
 export interface SqsFunctionDefinitionInput<
   TMessageSchema extends AnyStandardSchema,
   TInvalidMessageBody extends SqsInvalidMessageBodyMode = "fail",
+  TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
 > extends SqsEventSourceOptions {
   readonly handler: (
     batch: StandardSchemaOutput<
       SqsMessageBatchSchema<TMessageSchema, TInvalidMessageBody>
     >,
-    context: { functionName: string; trace: Record<string, unknown> }
+    context: InvokeContext<TVariables>
   ) => SqsBatchResult | Promise<SqsBatchResult>;
   readonly invalidMessageBody?: TInvalidMessageBody;
   readonly message: TMessageSchema;
   readonly name?: string;
   readonly queue?: string;
   readonly queues?: SqsQueueListInput;
-  readonly synthesis?: {
-    entrypoint?: string;
-    environment?: Record<string, string>;
-    handler?: string;
-    runtime?: "nodejs22.x" | "nodejs24.x";
-  };
+  readonly synthesis?: FunctionSynthesisConfig;
+  readonly variables?: TVariables;
 }
 
 export interface SqsEventHandlerOptions<TFunctions> {
@@ -163,32 +176,104 @@ export interface SqsEventHandlerOptions<TFunctions> {
 }
 
 const createSqsBatchResult = (
-  initialFailures: SqsBatchItemFailure[] = []
+  failures: SqsBatchItemFailure[] = []
 ): SqsBatchResultBuilder => {
-  const failures = [...initialFailures];
+  const result: SqsBatchResultBuilder = {
+    batchItemFailures: failures,
+    fail(message) {
+      if (
+        !this.batchItemFailures.some(
+          (failure) => failure.itemIdentifier === message.id
+        )
+      ) {
+        this.batchItemFailures.push({ itemIdentifier: message.id });
+      }
+    },
+  };
+  // Handlers return the builder itself; keep `fail` out of the serialized batch response.
+  Object.defineProperty(result, "fail", {
+    enumerable: false,
+    value: result.fail,
+  });
+
+  return result;
+};
+
+const createSqsRecord = (
+  message: SqsEventInvocationMessage<unknown>,
+  index: number
+): SqsRecord => {
+  if (message.raw !== undefined) {
+    return message.raw;
+  }
+
+  const body =
+    typeof message.body === "string"
+      ? message.body
+      : JSON.stringify(message.body);
+  const id = message.id ?? `msg_${index + 1}`;
 
   return {
-    batchItemFailures: failures,
-    fail: (message) => {
-      failures.push({ itemIdentifier: message.id });
-    },
+    attributes: message.attributes ?? {},
+    awsRegion: "local",
+    body,
+    eventSource: "aws:sqs",
+    eventSourceARN: "arn:aws:sqs:local:000000000000:local",
+    md5OfBody: "",
+    messageAttributes: message.messageAttributes ?? {},
+    messageId: id,
+    receiptHandle: `receipt-${id}`,
   };
 };
 
-const issueMessage = (issues: readonly StandardSchemaIssue[]): string =>
-  issues.map((issue) => issue.message).join("; ");
+const formatIssue = (issue: StandardSchemaIssue): string =>
+  issue.path === undefined || issue.path.length === 0
+    ? issue.message
+    : `${issue.path.map(String).join(".")}: ${issue.message}`;
+
+const invalidMessageError = (
+  messageId: string,
+  detail: string,
+  cause?: unknown,
+  issues?: readonly StandardSchemaIssue[]
+): InvokeError =>
+  new InvokeError(`Invalid SQS message body for ${messageId}: ${detail}`, {
+    cause,
+    code: "INVALID_PAYLOAD",
+    functionName: messageId,
+    issues,
+  });
 
 const parseMessageBody = async <TBodySchema extends AnyStandardSchema>(
   schema: TBodySchema,
-  body: unknown
+  raw: SqsRecord
 ): Promise<StandardSchemaOutput<TBodySchema>> => {
-  const result = await schema["~standard"].validate(body);
+  try {
+    const result = await schema["~standard"].validate(
+      JSON.parse(raw.body) as unknown
+    );
 
-  if (!result.success) {
-    throw new Error(issueMessage(result.issues));
+    if (result.success) {
+      return result.data as StandardSchemaOutput<TBodySchema>;
+    }
+
+    throw invalidMessageError(
+      raw.messageId,
+      result.issues.map(formatIssue).join("; "),
+      undefined,
+      result.issues
+    );
+  } catch (error) {
+    if (error instanceof InvokeError) {
+      throw error;
+    }
+
+    throw invalidMessageError(
+      raw.messageId,
+      error instanceof Error ? error.message : String(error),
+      error
+    );
   }
-
-  return result.data as StandardSchemaOutput<TBodySchema>;
 };
 
 const parseSqsMessageBatch = async <
@@ -196,42 +281,27 @@ const parseSqsMessageBatch = async <
   TInvalidMessageBody extends SqsInvalidMessageBodyMode,
 >(
   schema: SqsMessageBatchSchema<TBodySchema, TInvalidMessageBody>,
-  value: SqsEventInvocationInput
+  input: SqsEventInvocationInput<StandardSchemaInput<TBodySchema>>
 ): Promise<StandardSchemaOutput<typeof schema>> => {
-  const messages: (SqsInvalidMessage | SqsValidMessage<unknown>)[] = [];
   const failures: SqsBatchItemFailure[] = [];
+  const messages: (
+    | SqsInvalidMessage
+    | SqsValidMessage<StandardSchemaOutput<TBodySchema>>
+  )[] = [];
 
-  for (const [index, message] of value.messages.entries()) {
-    const raw =
-      message.raw ??
-      ({
-        attributes: message.attributes ?? {},
-        awsRegion: "us-east-1",
-        body: JSON.stringify(message.body),
-        eventSource: "aws:sqs",
-        eventSourceARN: "",
-        md5OfBody: "",
-        messageAttributes: message.messageAttributes ?? {},
-        messageId: message.id ?? `${index}`,
-        receiptHandle: "",
-      } satisfies SqsRecord);
+  for (const [index, message] of input.messages.entries()) {
+    const raw = createSqsRecord(message, index);
+    let body: StandardSchemaOutput<TBodySchema>;
 
     try {
-      messages.push({
-        attributes: raw.attributes,
-        body: await parseMessageBody(schema.body, message.body),
-        id: raw.messageId,
-        messageAttributes: raw.messageAttributes,
-        raw,
-        valid: true,
-      });
+      body = await parseMessageBody(schema.body, raw);
     } catch (error) {
       failures.push({ itemIdentifier: raw.messageId });
 
       if (schema.invalidMessageBody === "include") {
         messages.push({
           attributes: raw.attributes,
-          error: error instanceof Error ? error : new Error(String(error)),
+          error: error as InvokeError,
           id: raw.messageId,
           messageAttributes: raw.messageAttributes,
           raw,
@@ -239,7 +309,18 @@ const parseSqsMessageBatch = async <
           valid: false,
         });
       }
+
+      continue;
     }
+
+    messages.push({
+      attributes: raw.attributes,
+      body,
+      id: raw.messageId,
+      messageAttributes: raw.messageAttributes,
+      raw,
+      valid: true,
+    });
   }
 
   return {
@@ -278,7 +359,7 @@ export const sqsMessageBatch = <
           invalidMessageBody: options.invalidMessageBody ?? "fail",
           source: "sqs",
         } as SqsMessageBatchSchema<TBodySchema, TInvalidMessageBody>,
-        value as SqsEventInvocationInput
+        value as SqsEventInvocationInput<StandardSchemaInput<TBodySchema>>
       ),
       success: true,
     }),
@@ -309,18 +390,24 @@ const eventSourceFromQueueInput = (
 export const sqs = <
   const TMessageSchema extends AnyStandardSchema,
   const TInvalidMessageBody extends SqsInvalidMessageBodyMode = "fail",
+  const TVariables extends RuntimeVariableCatalog = Record<never, never>,
 >(
-  definition: SqsFunctionDefinitionInput<TMessageSchema, TInvalidMessageBody>
+  definition: SqsFunctionDefinitionInput<
+    TMessageSchema,
+    TInvalidMessageBody,
+    TVariables
+  >
 ): EventFunctionDefinition<
   string,
-  SqsMessageBatchSchema<TMessageSchema, TInvalidMessageBody>
+  SqsMessageBatchSchema<TMessageSchema, TInvalidMessageBody>,
+  TVariables
 > => {
   if (definition.queue !== undefined && definition.queues !== undefined) {
-    throw new Error("Pass either queue or queues to sqs(), not both");
+    throw new VokeConfigError("Pass either queue or queues to sqs(), not both");
   }
 
   if (definition.queue === undefined && definition.queues === undefined) {
-    throw new Error("sqs() requires queue or queues");
+    throw new VokeConfigError("sqs() requires queue or queues");
   }
 
   const options = {
@@ -347,18 +434,22 @@ export const sqs = <
     name: definition.name,
     routes: [],
     synthesis: definition.synthesis,
+    variables: definition.variables,
   }) as unknown as EventFunctionDefinition<
     string,
-    SqsMessageBatchSchema<TMessageSchema, TInvalidMessageBody>
+    SqsMessageBatchSchema<TMessageSchema, TInvalidMessageBody>,
+    TVariables
   >;
 };
 
 const sqsInvocationFromAwsEvent = (
   event: SqsAwsEvent
 ): SqsEventInvocationInput => ({
+  // Bodies stay raw strings; each message is JSON-parsed on its own so one malformed
+  // body becomes a single batch item failure instead of failing the whole batch.
   messages: event.Records.map((record) => ({
     attributes: record.attributes,
-    body: JSON.parse(record.body) as unknown,
+    body: record.body,
     id: record.messageId,
     messageAttributes: record.messageAttributes,
     raw: record,

@@ -24,6 +24,7 @@ export {
   type FunctionRegistry,
   type FunctionRegistryInput,
   type InvokableFunctionDefinition,
+  type InvokeContext,
   type InvokeRequest,
   type InvokeOptions,
   type InvokeTransport,
@@ -32,7 +33,36 @@ export {
   type StandardSchemaResult,
   type StandardSchemaV1,
 } from "./invoke";
-export { VokeConfigError } from "./errors";
+export {
+  VokeConfigError,
+  VokeModelError,
+  VokeResourceBindingError,
+  VokeRuntimeVariableError,
+} from "./errors";
+export {
+  createVariableProvider,
+  createVariableSource,
+  type RuntimeVariableCatalog,
+  type RuntimeVariableOptions,
+  type RuntimeVariableProvider,
+  type RuntimeVariableSource,
+} from "./variables";
+export type {
+  AuthorizerIdentitySource,
+  AuthorizerRegistry,
+  AuthorizerRegistryInput,
+  AuthorizerRequest,
+  AuthorizerResult,
+  HttpAuthorizerDefinition,
+  JwtAuthorizerDefinition,
+  JwtAuthorizerInput,
+  LambdaAuthorizerDefinition,
+  LambdaAuthorizerInput,
+  LambdaAuthorizerTarget,
+  RequestAuthorizerFunctionDefinition,
+  RequestAuthorizerFunctionInput,
+  RequestAuthorizerHandler,
+} from "./authorizers";
 export { toEnvKey } from "./env-key";
 export type { VokeEnv } from "./context";
 export {

@@ -39,6 +39,7 @@ export interface GatewayOptions {
   config?: VokeConfigInput;
   functions?: FunctionRegistry | FunctionRegistryInput;
   middleware?: MiddlewareHandler<VokeEnv>[];
+  provider?: VokeProvider;
   routes?: ApiRouteModule[];
   variables?: {
     overrides?: RuntimeVariableOverrides;
@@ -166,6 +167,19 @@ export const createApiApp = (options: ApiAppOptions): Hono<VokeEnv> => {
   return app;
 };
 
+// The configured Provider supplies its Runtime Variable providers (for example the AWS
+// Secrets Manager/SSM loader); explicit providers are added after them.
+const gatewayVariableProviders = (
+  options: GatewayOptions
+): RuntimeVariableProvider[] => {
+  const provider = options.provider ?? options.config?.provider;
+
+  return [
+    ...(provider?.runtime?.variables?.() ?? []),
+    ...(options.variables?.providers ?? []),
+  ];
+};
+
 export const createGateway = (options: GatewayOptions = {}): Hono<VokeEnv> => {
   if (
     options.functions !== undefined &&
@@ -197,7 +211,7 @@ export const createGateway = (options: GatewayOptions = {}): Hono<VokeEnv> => {
       activationKey(config ?? defineConfig(configInput)),
       {
         variableOverrides: options.variables?.overrides,
-        variableProviders: options.variables?.providers,
+        variableProviders: gatewayVariableProviders(options),
       }
     );
     mountFunctionRoutes(gateway, configInput.functions);
@@ -256,14 +270,15 @@ export const voke = <
 ): GatewayRuntime<TFunctions> & ProviderGatewayExtension<TProvider> => {
   const configInput = options.config ?? loadRuntimeConfig();
   const { functions: _configuredFunctions, ...gatewayConfig } = configInput;
+  const provider = options.provider ?? configInput.provider;
   const app = createGateway({
     config: gatewayConfig,
     functions,
     middleware: options.middleware,
+    provider,
     variables: options.variables,
   });
   const config = defineConfig({ ...configInput, functions });
-  const provider = options.provider ?? config.provider;
   const providerGateway =
     provider?.runtime?.gateway?.({
       app,

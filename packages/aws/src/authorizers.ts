@@ -1,94 +1,32 @@
-import type { FunctionSynthesisConfig, StandardSchemaV1 } from "voke";
+import type {
+  AuthorizerIdentitySource,
+  AuthorizerRegistry,
+  AuthorizerRegistryInput,
+  JwtAuthorizerDefinition,
+  JwtAuthorizerInput,
+  LambdaAuthorizerDefinition,
+  LambdaAuthorizerInput,
+  RequestAuthorizerFunctionDefinition,
+  RequestAuthorizerFunctionInput,
+  RuntimeVariableCatalog,
+} from "voke";
 
-export type AuthorizerIdentitySource = string | readonly string[];
-
-export interface JwtAuthorizerDefinition {
-  readonly audience: readonly string[];
-  readonly identitySource: readonly string[];
-  readonly issuer: string;
-  readonly kind: "jwt";
-}
-
-export interface LambdaAuthorizerDefinition {
-  readonly cacheTtlSeconds: number;
-  readonly function: LambdaAuthorizerTarget;
-  readonly identitySource: readonly string[];
-  readonly kind: "lambda";
-}
-
-export type LambdaAuthorizerTarget =
-  | string
-  | {
-      readonly arn: string;
-    }
-  | {
-      readonly deployedName: string;
-    };
-
-export type HttpAuthorizerDefinition =
-  | JwtAuthorizerDefinition
-  | LambdaAuthorizerDefinition;
-
-export interface AuthorizerRequest {
-  readonly headers: Headers;
-  readonly raw: Request;
-  readonly request: Request;
-}
-
-export interface AuthorizerResult<
-  TContext extends Record<string, unknown> = Record<string, unknown>,
-> {
-  readonly authorized: boolean;
-  readonly context?: TContext;
-}
-
-export type RequestAuthorizerHandler<
-  TContext extends Record<string, unknown> = Record<string, unknown>,
-> = (
-  request: AuthorizerRequest
-) => AuthorizerResult<TContext> | Promise<AuthorizerResult<TContext>>;
-
-export interface RequestAuthorizerFunctionInput<
-  TContext extends Record<string, unknown> = Record<string, unknown>,
-> {
-  readonly context?: StandardSchemaV1<unknown, TContext>;
-  readonly handler: RequestAuthorizerHandler<TContext>;
-  readonly name?: string;
-  readonly synthesis?: FunctionSynthesisConfig;
-}
-
-export interface RequestAuthorizerFunctionDefinition<
-  TKey extends string = string,
-  TContext extends Record<string, unknown> = Record<string, unknown>,
-> {
-  readonly context?: StandardSchemaV1<unknown, TContext>;
-  readonly handler: RequestAuthorizerHandler<TContext>;
-  readonly key: TKey;
-  readonly kind: "authorizer";
-  readonly name?: string;
-  readonly routes: readonly [];
-  readonly synthesis?: RequestAuthorizerFunctionInput<TContext>["synthesis"];
-}
-
-export type AuthorizerRegistryInput = Record<string, HttpAuthorizerDefinition>;
-
-export type AuthorizerRegistry<
-  TAuthorizers extends AuthorizerRegistryInput = AuthorizerRegistryInput,
-> = {
-  readonly [TKey in keyof TAuthorizers]: TAuthorizers[TKey];
-};
-
-export interface JwtAuthorizerInput {
-  readonly audience: string | readonly string[];
-  readonly identitySource?: AuthorizerIdentitySource;
-  readonly issuer: string;
-}
-
-export interface LambdaAuthorizerInput {
-  readonly cacheTtlSeconds?: number;
-  readonly function: LambdaAuthorizerTarget;
-  readonly identitySource?: AuthorizerIdentitySource;
-}
+export type {
+  AuthorizerIdentitySource,
+  AuthorizerRegistry,
+  AuthorizerRegistryInput,
+  AuthorizerRequest,
+  AuthorizerResult,
+  HttpAuthorizerDefinition,
+  JwtAuthorizerDefinition,
+  JwtAuthorizerInput,
+  LambdaAuthorizerDefinition,
+  LambdaAuthorizerInput,
+  LambdaAuthorizerTarget,
+  RequestAuthorizerFunctionDefinition,
+  RequestAuthorizerFunctionInput,
+  RequestAuthorizerHandler,
+} from "voke";
 
 const defaultIdentitySource = "$request.header.Authorization";
 
@@ -136,9 +74,10 @@ export const createAuthorizers = <
 
 export const requestAuthorizer = <
   const TContext extends Record<string, unknown> = Record<string, unknown>,
+  const TVariables extends RuntimeVariableCatalog = Record<never, never>,
 >(
-  input: RequestAuthorizerFunctionInput<TContext>
-): RequestAuthorizerFunctionDefinition<string, TContext> =>
+  input: RequestAuthorizerFunctionInput<TContext, TVariables>
+): RequestAuthorizerFunctionDefinition<string, TContext, TVariables> =>
   Object.freeze({
     context: input.context,
     handler: input.handler,
@@ -147,4 +86,5 @@ export const requestAuthorizer = <
     name: input.name,
     routes: Object.freeze([]) as readonly [],
     synthesis: input.synthesis,
+    variables: input.variables,
   });

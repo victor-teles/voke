@@ -5,24 +5,22 @@ import {
   jwtAuthorizer,
   lambdaAuthorizer,
   requestAuthorizer,
-} from "../src/authorizers";
-import { parameter, secret } from "../src/aws";
+  parameter,
+  secret,
+  sqs,
+  sqsEventSource,
+  sqsMessageBatch,
+} from "@voke/aws";
 import {
   dynamodbTable,
   secret as cloudFormationSecret,
   sqsQueue,
   ssmParameter,
-} from "../src/cloudformation";
+} from "@voke/aws/cloudformation";
+
 import { defineConfig } from "../src/config";
 import { VokeConfigError } from "../src/errors";
-import {
-  defineFunction,
-  defineFunctions,
-  http,
-  sqs,
-  sqsEventSource,
-  sqsMessageBatch,
-} from "../src/invoke";
+import { defineFunction, defineFunctions, http } from "../src/invoke";
 import type { SqsMessageBatch, StandardSchemaV1 } from "../src/invoke";
 import { createInternalModel } from "../src/model";
 import { Voke } from "../src/route-builder";
