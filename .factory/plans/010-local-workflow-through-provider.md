@@ -446,8 +446,8 @@ should need the D5 files.
 
 ## Execution notes (2026-11-14)
 
-Done on branch `feature/local-workflow-through-provider`, stacked on plan 004 (`feature/one-command-deploy`,
-PR #55, open). Uncommitted. Gates: `bun run check` 0 errors, `bun run typecheck` 18/18, `bun run test`
+Done on branch `feature/local-workflow-through-provider` (PR #56), stacked on plan 004 (`feature/one-command-deploy`,
+PR #55, open). Gates: `bun run check` 0 errors, `bun run typecheck` 18/18, `bun run test`
 23/23 tasks (core 216, `@voke/aws` 65, `@voke/testing` 1, examples green), no Docker or network.
 
 - `ProviderLocalCapability` is typed (`devEnvironment` may be async and returns
