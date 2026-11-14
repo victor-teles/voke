@@ -476,3 +476,72 @@ In the `aws()` `local.devEnvironment` (`packages/aws/src/index.ts`):
 - Reviewers should check that no code path reads or prints the generated keys, that child processes
   cannot see real AWS credentials, that the port is published on loopback only, and the
   outputs-file staleness check.
+
+## Execution notes (2026-11-14)
+
+Done except the real-emulator e2e, on branch `feature/aws-emulator-local-provider`, stacked on plan 006
+(`feature/first-run-experience`, PR #58, open). Uncommitted. Gates: `bun run check` 0 errors,
+`bun run typecheck` 18/18, `bun run test` 23/23 tasks (`@voke/aws` 99, core 243), all without Docker or
+network. `packages/core/src` is unchanged.
+
+- **Lifecycle:** `LocalProvider` now uses `files`, `prepareStart`, `startCommands`/`stopCommands`/
+  `resetCommands`, `waitUntilReady`, an async `environment`, `unsetEnvironment`, `flags`, and
+  `bindings: "outputs" | "guessed"`. `floci()` returns `FlociLocalProvider` (with `composeConfig` and a
+  synchronous `environment`). The ported Floci tests keep their commands, compose file and environment.
+  The only changes are Floci's failure hint, which no longer calls it the default, and
+  `unsetEnv: []` on its runner calls.
+- **`awsEmulator()`** (`local-aws-emulator.ts`):
+  - Writes the AWS Dockerfile (arch-specific RPM) and a host-usable `config` into
+    `.voke/local/aws-emulator/`.
+  - Builds the image only when `docker image inspect` fails or `--rebuild` is passed.
+  - Runs `docker run` on `127.0.0.1:<port>` with `--memory=2g`, the state volume and `-t off`.
+  - Waits for `ca.pem` and `/__admin/health`, with a 30 s timeout that suggests `docker logs`.
+  - Its environment passes the credentials, config and CA files by path and unsets the real AWS
+    credential variables.
+- **Resources-only synthesis:** `synthesizeCloudFormationFromModel(model, { scope: "resources" })`.
+  `resourceOutputBindings(model)` maps stack outputs to `VOKE_RESOURCE_*` names.
+- **Bootstrap, CLI fallback (Step 4b):**
+  - Shipped path: `aws cloudformation deploy --no-fail-on-empty-changeset` of the resources-only
+    template, then `describe-stacks` captured through an injectable `capture` (Node `child_process`,
+    with the same env and unset rules). The result is written to `.voke/local/outputs.json`.
+  - Why 4b: 004's SDK client has no option for the emulator's per-run CA or credentials file, and
+    adding one would need new SDK dependencies or a reshaped 004 API.
+  - `stop` and `reset` delete the outputs file.
+- **`voke dev`:** with the emulator, `aws().local.devEnvironment` awaits the environment, binds from the
+  outputs file only when provider, stack and endpoint match (otherwise it prints the
+  `voke local start && voke local bootstrap` hint to stderr), and returns `unsetEnvironment`. Floci
+  keeps derived names.
+- **Default:** `aws()` uses `awsEmulator()`. `aws({ local: floci() })` selects Floci.
+- **`createAwsClientConfig()`:** its doc comment explains why the explicit endpoint matters, and a test
+  pins it.
+- **Docs:** ADR `docs/adr/0009-aws-emulator-local-provider.md`, the guide `guides/local-aws.mdx` (added to
+  `meta.json`), the README Local AWS section (emulator first, Floci second), and `docs/e2e-testing.md`.
+
+Adaptations and deviations:
+
+- New test files `local-aws-emulator.test.ts` and `resources-only-synthesis.test.ts` (instead of growing
+  `local.test.ts`).
+- Files outside the listed scope:
+  - `packages/aws/src/diagnostics.ts` reads the tool name from `startCommands`.
+  - `packages/aws/src/testing.ts` throws a clear `TypeError` for a Local AWS Provider with an async
+    environment; `createStackTestContext` stays Floci-shaped.
+  - `packages/core/test/config-typecheck.ts` and the custom `LocalProvider` fixtures in core tests use
+    the new interface.
+  - `apps/docs/content/docs/reference/cli.mdx` no longer says Floci is the default.
+- `voke local start` prints the endpoint, state directory and next command for the emulator through an
+  injectable output in `createLocalWorkflow`. Core's workflow context has no output seam, and adding
+  one would be a core change.
+- **Gated e2e:** `aws-emulator.e2e.test.ts` provisions a table, a queue and a bucket and checks their
+  outputs. Its data-plane check uses S3 (`@aws-sdk/client-s3` is already a dependency) instead of
+  DynamoDB/SQS, whose clients `@voke/aws` does not depend on.
+- **Unverified:** the pinned-version download path assumes `LTS/<version>/aws-emulator-<version>-1-<arch>.rpm`.
+  The plan gives only the file name.
+
+Not run:
+
+- **Real emulator:** `VOKE_E2E_EMULATOR=1 bun test test/aws-emulator.e2e.test.ts` and the
+  `examples/hello-api` start → bootstrap → dev check were not run. They need Docker and a download of the
+  AWS Emulator package (a 1.2 GB image), which was not authorized. A unit test with a fake outputs file
+  covers the dev binding.
+- **`docker ps` loopback check:** not run. The `docker run` arguments publish on `127.0.0.1` only, and a
+  test asserts it.

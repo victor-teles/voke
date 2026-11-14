@@ -5,6 +5,7 @@ import {
   sqsQueue,
   synthesizeCloudFormation,
 } from "@voke/aws/cloudformation";
+import { floci } from "@voke/aws/local";
 import { createStackTestContext } from "@voke/aws/testing";
 
 test("prepares a Local Floci E2E context and seed plan", () => {
@@ -16,7 +17,7 @@ test("prepares a Local Floci E2E context and seed plan", () => {
     },
     stage: "local",
   });
-  const context = createStackTestContext({ template });
+  const context = createStackTestContext({ local: floci(), template });
   const deployedContext = createStackTestContext({
     outputs: {
       ApiUrl: "https://example.execute-api.us-east-1.amazonaws.com",

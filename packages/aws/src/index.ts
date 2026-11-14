@@ -15,8 +15,9 @@ import {
   createLocalAwsEnvironment,
   createLocalResourceBindings,
   createLocalWorkflow,
+  readLocalStackOutputs,
 } from "./local";
-import { floci } from "./local-provider";
+import { awsEmulator } from "./local-aws-emulator";
 import type { LocalProvider } from "./local-provider";
 import { createAwsRuntimeVariableProvider } from "./runtime-variables";
 
@@ -111,15 +112,33 @@ const validateAwsModel = (model: VokeModel): void => {
   validateAwsLambdaModel(model);
 };
 
+/** Bindings from `voke local bootstrap`'s outputs file; none, with a hint, when it is missing or stale. */
+const localStackBindings = async (
+  expected: Parameters<typeof readLocalStackOutputs>[0]
+): Promise<Record<string, string>> => {
+  const bindings = await readLocalStackOutputs(expected);
+
+  if (bindings === undefined) {
+    console.error(
+      "Local resources are not provisioned. Run: voke local start && voke local bootstrap"
+    );
+  }
+
+  return bindings ?? {};
+};
+
 export interface AwsProviderOptions {
   /** Lambda settings for every Function: runtime, architecture and log retention. */
   lambda?: AwsLambdaOptions;
-  /** The Local AWS Provider for `voke local` and `voke dev`. Defaults to Floci. */
+  /**
+   * The Local AWS Provider for `voke local` and `voke dev`. Defaults to the AWS Emulator,
+   * `awsEmulator()`; pass `floci()` from "@voke/aws/local" for Floci.
+   */
   local?: LocalProvider;
 }
 
 export const aws = (options: AwsProviderOptions = {}): VokeProvider => {
-  const localProvider = options.local ?? floci();
+  const localProvider = options.local ?? awsEmulator();
   const lambda = defineAwsLambdaSettings(options.lambda);
 
   return {
@@ -143,22 +162,34 @@ export const aws = (options: AwsProviderOptions = {}): VokeProvider => {
     },
     diagnostics: createAwsDiagnostics(localProvider),
     local: {
-      devEnvironment: ({ endpoint, model, region }) => {
-        const environment = createLocalAwsEnvironment({
+      devEnvironment: async ({ config, endpoint, model, region, stage }) => {
+        const environment = await createLocalAwsEnvironment({
           endpoint,
           provider: localProvider,
           region,
         });
-        const bindings = createLocalResourceBindings(
-          synthesizeCloudFormationFromModel(model, { lambda }),
-          {
-            accountId: localProvider.defaults.accountId,
-            endpoint: environment.AWS_ENDPOINT_URL,
-            region,
-          }
-        );
+        const bindings =
+          localProvider.bindings === "outputs"
+            ? await localStackBindings({
+                endpoint: environment.AWS_ENDPOINT_URL,
+                provider: localProvider.name,
+                stack: `${config.name}-${stage}`,
+              })
+            : createLocalResourceBindings(
+                synthesizeCloudFormationFromModel(model, { lambda }),
+                {
+                  accountId: localProvider.defaults.accountId,
+                  endpoint: environment.AWS_ENDPOINT_URL,
+                  region,
+                }
+              );
 
-        return { environment: { ...environment, ...bindings } };
+        return {
+          environment: { ...environment, ...bindings },
+          ...(localProvider.unsetEnvironment === undefined
+            ? {}
+            : { unsetEnvironment: localProvider.unsetEnvironment }),
+        };
       },
       workflow: createLocalWorkflow(localProvider),
     },

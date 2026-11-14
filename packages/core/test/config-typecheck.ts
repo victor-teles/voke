@@ -8,11 +8,11 @@ import type { FunctionRegistry } from "../src/invoke";
 declare const assertConfigInput: (config: VokeConfigInput) => void;
 
 const customProvider: LocalProvider = {
+  bindings: "guessed",
   bootstrapPlan: ({ environment }) => ({
     commands: [],
     environment,
   }),
-  composeConfig: () => "",
   defaults: {
     accountId: "111111111111",
     endpoint: "http://localhost:9999",
@@ -29,10 +29,11 @@ const customProvider: LocalProvider = {
     VOKE_INVOKE_RUNTIME: "local",
     VOKE_LOCAL_PROVIDER: "custom-local-aws",
   }),
+  files: () => ({}),
   name: "custom-local-aws",
-  resetCommand: () => [],
-  startCommand: () => [],
-  stopCommand: () => [],
+  resetCommands: () => [],
+  startCommands: () => [],
+  stopCommands: () => [],
 };
 
 assertConfigInput({

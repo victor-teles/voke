@@ -309,16 +309,18 @@ ARN targets are preferred because they make account and region ownership explici
 
 ## Local AWS
 
-`voke local` runs through the configured Provider. With `aws()`, the default Local AWS Provider is [Floci](https://floci.io/), a local AWS emulator that runs on port `4566` and works with the standard AWS SDK/CLI endpoint variable `AWS_ENDPOINT_URL`.
+`voke local` runs through the configured Provider's Local AWS Provider. With `aws()`, that is the official **AWS Emulator**, run in Docker: your resources run in the emulator and your Functions run in the local Gateway.
 
 ```bash
-voke local start
-voke local bootstrap --name hello-api --stage local
-voke local stop
-voke local reset
+voke local start       # builds the emulator image once (about 1.2 GB), then starts it on https://127.0.0.1:9297
+voke local bootstrap   # creates the declared resources and writes their names to .voke/local/outputs.json
+voke dev               # binds VOKE_RESOURCE_* from that file
+voke local stop        # state is in memory, so stop and reset discard it
 ```
 
-To change the Local AWS Provider or its defaults, pass it to `aws()` in `voke.config.ts`:
+Voke passes the emulator's generated credentials by file path, never prints them, and removes your real AWS credentials and profile from local commands and from `voke dev`. Telemetry is off unless you pass `awsEmulator({ telemetry: true })`. Build every AWS SDK client with `createAwsClientConfig()`: locally it sets an explicit endpoint, without which SQS calls would follow queue URLs to real AWS. See the Local AWS guide.
+
+**Floci** is the other Local AWS Provider. It keeps state between restarts and uses a smaller image:
 
 ```ts
 import { aws } from "@voke/aws";
@@ -330,19 +332,23 @@ export default defineConfig({
 });
 ```
 
-You can also use the local helpers directly:
+The local helpers are also available directly:
 
 ```ts
 import {
+  awsEmulator,
   createLocalAwsEnvironment,
-  createLocalResourceBindings,
   floci,
+  readLocalStackOutputs,
 } from "@voke/aws/local";
 
-const provider = floci();
-const compose = provider.composeConfig();
-const env = createLocalAwsEnvironment({ provider });
-const bindings = createLocalResourceBindings(template);
+const env = createLocalAwsEnvironment({ provider: floci() });
+const compose = floci().composeConfig();
+const bindings = await readLocalStackOutputs({
+  endpoint: awsEmulator().defaults.endpoint,
+  provider: "aws-emulator",
+  stack: "hello-api-local",
+});
 ```
 
 ## Serverless Framework Migration

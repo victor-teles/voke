@@ -48,6 +48,12 @@ export const bindResource = <TValue extends string = string>(
   };
 };
 
+/**
+ * Config for every AWS SDK client: `new SQSClient(createAwsClientConfig())`. Under a Local AWS
+ * Provider it sets an explicit `endpoint`, which is a safety guarantee, not a convenience: SQS queue
+ * URLs carry the real AWS host (`https://sqs.<region>.amazonaws.com/...`), and a client without an
+ * explicit endpoint sends queue calls to that host, that is, to real AWS.
+ */
 export const createAwsClientConfig = (
   options: Partial<AwsClientConfig> = {}
 ): AwsClientConfig => {

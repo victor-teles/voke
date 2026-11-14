@@ -196,11 +196,14 @@ test("keeps local AWS provider helpers in @voke/aws/local", async () => {
 
   expect(Object.keys(local).toSorted()).toEqual([
     "LocalProviderError",
+    "awsEmulator",
     "createLocalAwsEnvironment",
     "createLocalBootstrapPlan",
     "createLocalResourceBindings",
     "createLocalWorkflow",
     "floci",
+    "localOutputsPath",
+    "readLocalStackOutputs",
   ]);
   expect("floci" in voke).toBe(false);
 });
