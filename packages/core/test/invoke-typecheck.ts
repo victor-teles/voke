@@ -13,7 +13,7 @@ const schema = <TInput, TOutput = TInput>(): StandardSchemaV1<
   TOutput
 > => ({
   "~standard": {
-    validate: (value) => ({ data: value as unknown as TOutput, success: true }),
+    validate: (value) => ({ value: value as unknown as TOutput }),
     vendor: "voke-test",
     version: 1,
   },

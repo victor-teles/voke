@@ -37,10 +37,20 @@ export {
   type InvokeTransport,
   type RouteAuthContext,
   type InvokeTransportResponse,
-  type StandardSchemaIssue,
-  type StandardSchemaResult,
-  type StandardSchemaV1,
 } from "./invoke";
+export {
+  formatValidationIssue,
+  readStandardResult,
+  type StandardSchemaFailureResult,
+  type StandardSchemaInput,
+  type StandardSchemaIssue,
+  type StandardSchemaOutput,
+  type StandardSchemaPathSegment,
+  type StandardSchemaResult,
+  type StandardSchemaSuccessResult,
+  type StandardSchemaV1,
+  type ValidationIssue,
+} from "./standard-schema";
 export {
   VokeConfigError,
   VokeDeployError,

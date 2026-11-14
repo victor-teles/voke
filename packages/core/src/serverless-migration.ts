@@ -1984,7 +1984,7 @@ import type { StandardSchemaV1 } from "voke";
 
 const messageSchema: StandardSchemaV1<unknown, unknown> = {
   "~standard": {
-    validate: (value: unknown) => ({ data: value, success: true }),
+    validate: (value: unknown) => ({ value }),
     vendor: "voke-migration",
     version: 1,
   },
@@ -2023,7 +2023,7 @@ import type { StandardSchemaV1 } from "voke";
 
 const outputSchema: StandardSchemaV1<unknown, unknown> = {
   "~standard": {
-    validate: (value: unknown) => ({ data: value, success: true }),
+    validate: (value: unknown) => ({ value }),
     vendor: "voke-migration",
     version: 1,
   },

@@ -110,8 +110,8 @@ test("loads AWS secrets and parameters through the configured aws() provider", a
         "~standard": {
           validate: (value) =>
             typeof value === "string"
-              ? { data: value, success: true }
-              : { issues: [{ message: "expected string" }], success: false },
+              ? { value }
+              : { issues: [{ message: "expected string" }] },
           vendor: "voke-test",
           version: 1,
         },
@@ -152,8 +152,8 @@ test("maps missing AWS variables and binary secrets to Runtime Variable results"
         "~standard": {
           validate: (value) =>
             typeof value === "string"
-              ? { data: value, success: true }
-              : { issues: [{ message: "expected string" }], success: false },
+              ? { value }
+              : { issues: [{ message: "expected string" }] },
           vendor: "voke-test",
           version: 1,
         },
@@ -169,8 +169,8 @@ test("maps missing AWS variables and binary secrets to Runtime Variable results"
         "~standard": {
           validate: (value) =>
             typeof value === "string"
-              ? { data: value, success: true }
-              : { issues: [{ message: "expected string" }], success: false },
+              ? { value }
+              : { issues: [{ message: "expected string" }] },
           vendor: "voke-test",
           version: 1,
         },
@@ -217,8 +217,8 @@ test("resolves AWS Runtime Variables from Voke-managed resource bindings", async
           "~standard": {
             validate: (value) =>
               typeof value === "string"
-                ? { data: value, success: true }
-                : { issues: [{ message: "expected string" }], success: false },
+                ? { value }
+                : { issues: [{ message: "expected string" }] },
             vendor: "voke-test",
             version: 1,
           },

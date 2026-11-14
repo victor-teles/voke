@@ -216,7 +216,7 @@ import type { StandardSchemaV1 } from "voke";
 
 const userInput: StandardSchemaV1<{ id: string }, { id: string }> = {
   "~standard": {
-    validate: (value) => ({ data: value, success: true }),
+    validate: (value) => ({ value }),
     vendor: "example",
     version: 1,
   },

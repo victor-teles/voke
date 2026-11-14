@@ -13,7 +13,7 @@ import { sqs } from "../src/sqs";
 
 const schema = <TValue>(): StandardSchemaV1<TValue, TValue> => ({
   "~standard": {
-    validate: (value) => ({ data: value as TValue, success: true }),
+    validate: (value) => ({ value: value as TValue }),
     vendor: "voke-test",
     version: 1,
   },

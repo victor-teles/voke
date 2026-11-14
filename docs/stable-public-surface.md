@@ -14,7 +14,7 @@ Use the root package for the common Function-first Gateway authoring path:
 - Config: root exports `defineConfig`
 - Runtime Variable primitives (provider-neutral): `createVariableSource`, `createVariableProvider`
 - Error classes: `VokeConfigError`, `VokeModelError`, `VokeResourceBindingError`, `VokeRuntimeVariableError`, `InvokeError`
-- Provider building blocks: `functionRegistryEntries`, `createHandlerExportName`, `runRequestAuthorizer`, and the `BuildPlan`, `ProviderBuildInput` and `RouteAuthContext` types
+- Provider building blocks: `functionRegistryEntries`, `createHandlerExportName`, `runRequestAuthorizer`, `readStandardResult` and `formatValidationIssue` (read a Standard Schema result), and the `BuildPlan`, `ProviderBuildInput` and `RouteAuthContext` types
 - HTTP helpers: use `@voke/http`
 - Runtime AWS binding helpers: use `@voke/aws`
 - CloudFormation synthesis entrypoint: use `@voke/aws/cloudformation`

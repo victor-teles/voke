@@ -1,13 +1,16 @@
-import type { StandardSchemaIssue, StandardSchemaV1 } from "voke";
+import type {
+  StandardSchemaIssue,
+  StandardSchemaResult,
+  StandardSchemaV1,
+} from "voke";
 export type {
   StandardSchemaIssue,
   StandardSchemaResult,
   StandardSchemaV1,
 } from "voke";
 
-type Validation<TOutput> =
-  | { data: TOutput; success: true }
-  | { issues: StandardSchemaIssue[]; success: false };
+// Results follow the Standard Schema specification: `{ value }` or `{ issues }`.
+type Validation<TOutput> = StandardSchemaResult<TOutput>;
 
 interface VokeSchemaMetadata {
   kind: string;
@@ -44,12 +47,9 @@ type InferObjectOutput<TShape extends Record<string, StandardSchemaV1>> = {
 };
 
 function success(): Validation<undefined>;
-function success<TOutput>(data: TOutput): Validation<TOutput>;
-function success<TOutput>(data?: TOutput): Validation<TOutput | undefined> {
-  return {
-    data,
-    success: true,
-  };
+function success<TOutput>(value: TOutput): Validation<TOutput>;
+function success<TOutput>(value?: TOutput): Validation<TOutput | undefined> {
+  return { value };
 }
 
 const failure = (
@@ -57,7 +57,6 @@ const failure = (
   path: readonly PropertyKey[] = []
 ): Validation<never> => ({
   issues: [{ message, path }],
-  success: false,
 });
 
 const withPath = (
@@ -97,7 +96,7 @@ const stringWithRules = (
       .map((rule) => rule(value))
       .filter((issue): issue is StandardSchemaIssue => issue !== undefined);
 
-    return issues.length === 0 ? success(value) : { issues, success: false };
+    return issues.length === 0 ? success(value) : { issues };
   }) as StringSchema;
 
   schema.min = (length) =>
@@ -149,9 +148,7 @@ const numberWithRules = (
       .map((rule) => rule(candidate))
       .filter((issue): issue is StandardSchemaIssue => issue !== undefined);
 
-    return issues.length === 0
-      ? success(candidate)
-      : { issues, success: false };
+    return issues.length === 0 ? success(candidate) : { issues };
   }) as NumberSchema;
 
   schema.int = () =>
@@ -258,9 +255,9 @@ const object = <const TShape extends Record<string, StandardSchemaV1>>(
           input[key]
         ) as Validation<unknown>;
 
-        if (result.success) {
-          if (result.data !== undefined || key in input) {
-            output[key] = result.data;
+        if (result.issues === undefined) {
+          if (result.value !== undefined || key in input) {
+            output[key] = result.value;
           }
           continue;
         }
@@ -270,7 +267,7 @@ const object = <const TShape extends Record<string, StandardSchemaV1>>(
 
       return issues.length === 0
         ? success(output as InferObjectOutput<TShape>)
-        : { issues, success: false };
+        : { issues };
     }
   );
 
@@ -290,8 +287,8 @@ const array = <const TItem extends StandardSchemaV1>(
         InferOutput<TItem>
       >;
 
-      if (result.success) {
-        output.push(result.data);
+      if (result.issues === undefined) {
+        output.push(result.value);
       } else {
         issues.push(
           ...result.issues.map((issue) => ({
@@ -302,7 +299,7 @@ const array = <const TItem extends StandardSchemaV1>(
       }
     }
 
-    return issues.length === 0 ? success(output) : { issues, success: false };
+    return issues.length === 0 ? success(output) : { issues };
   });
 
 const undefinedSchema = (): VokeSchema<unknown, undefined> =>

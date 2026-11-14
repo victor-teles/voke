@@ -15,7 +15,7 @@ const standardSchema = <TInput, TOutput = TInput>(
   validate: (value: TInput) => TOutput
 ): StandardSchemaV1<TInput, TOutput> => ({
   "~standard": {
-    validate: (value) => ({ data: validate(value), success: true }),
+    validate: (value) => ({ value: validate(value) }),
     vendor: "voke-test",
     version: 1,
   },
@@ -237,7 +237,6 @@ test("returns route validation issues with the public error envelope", async () 
     "~standard": {
       validate: () => ({
         issues: [{ message: "Expected string", path: ["name"] }],
-        success: false,
       }),
       vendor: "voke-test",
       version: 1,
@@ -320,7 +319,7 @@ test("supports the minimal Voke schema helper surface", () => {
       tags: ["typescript"],
     })
   ).toEqual({
-    data: {
+    value: {
       active: true,
       age: 42,
       kind: "admin",
@@ -328,7 +327,6 @@ test("supports the minimal Voke schema helper surface", () => {
       metadata: null,
       tags: ["typescript"],
     },
-    success: true,
   });
 
   expect(
@@ -347,7 +345,6 @@ test("supports the minimal Voke schema helper surface", () => {
       { message: "Expected number to be at least 18", path: ["age"] },
       { message: 'Expected one of "admin", "user"', path: ["kind"] },
     ],
-    success: false,
   });
 });
 

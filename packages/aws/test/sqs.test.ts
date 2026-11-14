@@ -7,7 +7,7 @@ import { secret, sqs } from "../src/index";
 
 const order: StandardSchemaV1<{ id: string }, { id: string }> = {
   "~standard": {
-    validate: (value) => ({ data: value as { id: string }, success: true }),
+    validate: (value) => ({ value: value as { id: string } }),
     vendor: "voke-test",
     version: 1,
   },

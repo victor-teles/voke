@@ -7,7 +7,7 @@ import { aws, sqs } from "../src/index";
 
 const messageSchema = {
   "~standard": {
-    validate: (value: unknown) => ({ data: value, success: true as const }),
+    validate: (value: unknown) => ({ value }),
     vendor: "test",
     version: 1,
   },

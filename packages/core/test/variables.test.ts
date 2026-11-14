@@ -15,8 +15,8 @@ const objectSchema: StandardSchemaV1<unknown, { enabled: boolean }> = {
       value !== null &&
       "enabled" in value &&
       typeof value.enabled === "boolean"
-        ? { data: { enabled: value.enabled }, success: true }
-        : { issues: [{ message: "enabled is required" }], success: false },
+        ? { value: { enabled: value.enabled } }
+        : { issues: [{ message: "enabled is required" }] },
     vendor: "voke-test",
     version: 1,
   },
