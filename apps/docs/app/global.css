@@ -3,6 +3,7 @@
 @source "../content/**/*.{md,mdx}";
 @import "fumadocs-ui/css/neutral.css";
 @import "fumadocs-ui/css/preset.css";
+@import "fumadocs-twoslash/twoslash.css";
 
 :root {
   --color-fd-background: #fbfaf6;
@@ -14,8 +15,9 @@
   --color-fd-border: #ded7c8;
   --color-fd-primary: #0f5f59;
   --color-fd-primary-foreground: #fbfaf6;
-  --color-fd-secondary: #263238;
-  --color-fd-secondary-foreground: #fbfaf6;
+  /* Fumadocs draws subtle surfaces (search box, tab lists, buttons) with "secondary". */
+  --color-fd-secondary: #ede9df;
+  --color-fd-secondary-foreground: #17140f;
   --color-fd-accent: #d6f1e7;
   --color-fd-accent-foreground: #0f3f3b;
   --font-sans: "Avenir Next", Avenir, "Segoe UI", sans-serif;
@@ -32,8 +34,8 @@
   --color-fd-border: #2d3834;
   --color-fd-primary: #74d3c5;
   --color-fd-primary-foreground: #0b1d1a;
-  --color-fd-secondary: #f0b86b;
-  --color-fd-secondary-foreground: #23160a;
+  --color-fd-secondary: #1d2422;
+  --color-fd-secondary-foreground: #f7f1e5;
   --color-fd-accent: #20332f;
   --color-fd-accent-foreground: #c6f3eb;
 }
@@ -84,38 +86,8 @@ samp {
   box-shadow: 0 24px 60px rgb(23 20 15 / 0.08);
 }
 
-.voke-code-keyword {
-  color: #b45309;
-}
-
-.voke-code-symbol {
-  color: #0f5f59;
-}
-
-.voke-code-string {
-  color: #1d4ed8;
-}
-
-.voke-code-property {
-  color: #9333ea;
-}
-
-.voke-code-muted {
-  color: var(--color-fd-muted-foreground);
-}
-
-.dark .voke-code-keyword {
-  color: #f0b86b;
-}
-
-.dark .voke-code-symbol {
-  color: #74d3c5;
-}
-
-.dark .voke-code-string {
-  color: #93c5fd;
-}
-
-.dark .voke-code-property {
-  color: #d8b4fe;
+/* The Twoslash popup's positioner forms its own stacking context, which the sticky docs sidebar
+   (z-index 20) would paint over. Lift the positioner to the popup's own level. */
+:has(> .fd-twoslash-popover) {
+  z-index: 50;
 }

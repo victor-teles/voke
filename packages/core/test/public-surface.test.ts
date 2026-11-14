@@ -6,7 +6,7 @@ import * as voke from "../src/index";
 const documentationFiles = [
   "../../../README.md",
   "../../../apps/docs/app/layout.tsx",
-  "../../../apps/docs/app/page.tsx",
+  "../../../apps/docs/app/(home)/page.tsx",
   "../../../apps/docs/content/docs/index.mdx",
   "../../../apps/docs/content/docs/getting-started.mdx",
   "../../../apps/docs/content/docs/guides/functions.mdx",
@@ -19,7 +19,7 @@ const documentationFiles = [
 const teachingSurfaceFiles = [
   "../../../README.md",
   "../../../apps/docs/app/layout.tsx",
-  "../../../apps/docs/app/page.tsx",
+  "../../../apps/docs/app/(home)/page.tsx",
   "../../../apps/docs/content/docs/index.mdx",
   "../../../apps/docs/content/docs/getting-started.mdx",
   "../../../apps/docs/content/docs/guides/functions.mdx",
