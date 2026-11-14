@@ -137,8 +137,22 @@ test("builds the image only when it is missing, or with --rebuild", async () => 
   await prepare?.(lifecycle("/state", { rebuild: "true" }), present);
 
   expect(calls).toEqual([
-    ["docker", "image", "inspect", "voke-aws-emulator:latest-aarch64"],
-    ["docker", "image", "inspect", "voke-aws-emulator:latest-aarch64"],
+    [
+      "docker",
+      "image",
+      "inspect",
+      "--format",
+      "{{.Id}}",
+      "voke-aws-emulator:latest-aarch64",
+    ],
+    [
+      "docker",
+      "image",
+      "inspect",
+      "--format",
+      "{{.Id}}",
+      "voke-aws-emulator:latest-aarch64",
+    ],
     [
       "docker",
       "build",
@@ -291,9 +305,13 @@ test("bootstrap deploys resources only and writes the stack outputs for voke dev
     [];
   const captured: { command: string[]; unsetEnv: readonly string[] }[] = [];
   const lines: string[] = [];
+  // Only the project's state counts as running, so a lookup elsewhere fails like a stopped emulator.
   const provider = awsEmulator(
     {},
-    { ...offline, exists: () => Promise.resolve(true) }
+    {
+      ...offline,
+      exists: (path) => Promise.resolve(path.startsWith(state)),
+    }
   );
   const workflow = createLocalWorkflow(provider, {
     capture: (command, options) => {

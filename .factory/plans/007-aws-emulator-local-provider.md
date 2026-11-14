@@ -537,11 +537,23 @@ Adaptations and deviations:
 - **Unverified:** the pinned-version download path assumes `LTS/<version>/aws-emulator-<version>-1-<arch>.rpm`.
   The plan gives only the file name.
 
-Not run:
+Real-emulator verification (2026-11-14, operator-approved, Docker 29.8.2 on arm64, AWS CLI 2.34.45):
 
-- **Real emulator:** `VOKE_E2E_EMULATOR=1 bun test test/aws-emulator.e2e.test.ts` and the
-  `examples/hello-api` start → bootstrap → dev check were not run. They need Docker and a download of the
-  AWS Emulator package (a 1.2 GB image), which was not authorized. A unit test with a fake outputs file
-  covers the dev binding.
-- **`docker ps` loopback check:** not run. The `docker run` arguments publish on `127.0.0.1` only, and a
-  test asserts it.
+- **Gated e2e:** `VOKE_E2E_EMULATOR=1 bun test test/aws-emulator.e2e.test.ts` passes (1 pass, 13 s with
+  the image built).
+  - The image build, loopback start and health wait worked on the first run.
+  - Bootstrap created `emulator-e2e-local` and recorded generated names (for example
+    `emulator-e2e-local-UsersTable-C38D2461A097`).
+  - S3 put/get went through `createAwsClientConfig()` in a child started with the provider environment.
+  - Stop removed the container and the outputs file.
+- **Bug found by the first run:** `createLocalBootstrapPlan` recomputed the emulator environment without
+  the state directory, so a project directory other than the process cwd failed with "AWS Emulator is
+  not running". Fixed by passing `directory` through. The unit test now fails for a lookup outside the
+  project's state.
+- **`examples/hello-api` through the real CLI:** `voke local start` → `voke local bootstrap` →
+  `createDevPlan` gives `VOKE_RESOURCE_USERS_TABLE_NAME=hello-api-local-UsersTable-98B5E4403BDA`, equal
+  to the `UsersTableName` output. The dev plan unsets the four real-credential variables. `voke local
+stop` removed the container and `.voke/local/outputs.json`.
+- **Loopback:** `docker ps` showed `127.0.0.1:9398->9398/tcp` for a started emulator. The remaining
+  `9297/tcp` is the Dockerfile's `EXPOSE`, not published.
+- `docker image inspect` now uses `--format {{.Id}}`, so a start prints one line, not the image JSON.

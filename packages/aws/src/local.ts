@@ -51,6 +51,8 @@ export {
 } from "./local-provider";
 
 interface LocalBootstrapPlanBaseOptions {
+  /** The Local AWS Provider's state directory; see `LocalAwsEnvironmentOptions.directory`. */
+  directory?: string;
   endpoint?: string;
   name: string;
   provider: LocalProvider;
@@ -213,6 +215,7 @@ export const createLocalBootstrapPlan = async (
   const templatePath =
     options.templatePath ?? ".voke/local/cloudformation.json";
   const environment = await createLocalAwsEnvironment({
+    directory: options.directory,
     endpoint: options.endpoint,
     provider: options.provider,
     region: options.region,
@@ -418,6 +421,8 @@ export const createLocalWorkflow = (
       region: config.region,
     });
     const plan = await createLocalBootstrapPlan({
+      directory: lifecycleOf(context).directory,
+      endpoint: context.options.endpoint,
       name: config.name,
       provider,
       region: config.region,

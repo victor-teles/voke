@@ -218,7 +218,14 @@ export const awsEmulator = (
 
       if (!rebuild) {
         try {
-          await run(["docker", "image", "inspect", image]);
+          await run([
+            "docker",
+            "image",
+            "inspect",
+            "--format",
+            "{{.Id}}",
+            image,
+          ]);
           return;
         } catch {
           // Not built yet.
