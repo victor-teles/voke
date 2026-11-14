@@ -497,8 +497,8 @@ macOS and Linux must not change.
 
 ## Execution notes (2026-11-14)
 
-Done on branch `feature/first-run-experience`, stacked on plan 005 (`feature/production-safe-defaults`,
-PR #57, open). Uncommitted. Gates: `bun run check` 0 errors, `bun run typecheck` 18/18, `bun run test`
+Done on branch `feature/first-run-experience` (PR #58), stacked on plan 005 (`feature/production-safe-defaults`,
+PR #57, open). Gates: `bun run check` 0 errors, `bun run typecheck` 18/18, `bun run test`
 23/23 tasks (core 243, `@voke/aws` 82, `@voke/build` 5).
 
 - **CLI:** `cli-spec.ts` holds one command table that drives `voke --help`, `voke <command> --help`,
