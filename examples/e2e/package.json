@@ -6,7 +6,7 @@
   "scripts": {
     "test": "bun test",
     "typecheck": "bunx tsgo --project tsconfig.json --noEmit",
-    "build": "bun build ./src/index.ts --outdir ./dist --target bun",
+    "build": "voke build ./src/index.ts",
     "clean": "rm -rf dist coverage"
   },
   "dependencies": {

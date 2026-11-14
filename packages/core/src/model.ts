@@ -42,7 +42,6 @@ export interface VokeModelBuild {
   entrypoints: string[];
   entrypoint: string;
   outdir: string;
-  target: "bun";
 }
 
 export interface VokeModelApi {
@@ -635,7 +634,6 @@ export const createInternalModel = (
       entrypoint: config.entrypoint,
       entrypoints: config.build.entrypoints,
       outdir: config.build.outdir,
-      target: config.build.target,
     },
     functions: modelFunctions,
     local: {

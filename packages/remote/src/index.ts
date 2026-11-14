@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { json, jsonError } from "@voke/http";
 import type { Hono } from "hono";
 import {
@@ -187,10 +189,11 @@ const stableStringify = (value: unknown): string => {
 };
 
 const fingerprint = (value: unknown): string => {
-  const hasher = new Bun.CryptoHasher("sha256");
-  hasher.update(stableStringify(value));
+  const digest = createHash("sha256")
+    .update(stableStringify(value))
+    .digest("hex");
 
-  return `sha256:${hasher.digest("hex")}`;
+  return `sha256:${digest}`;
 };
 
 const schemaMetadata = (schema: StandardSchemaV1 | undefined): JsonSchema => {
@@ -361,7 +364,7 @@ const remoteContractEnvName = (project: string): string =>
   `VOKE_REMOTE_${toEnvKey(project)}_CONTRACT_URL`;
 
 const resolveRemoteOrigin = (project: string): string => {
-  const origin = Bun.env[remoteOriginEnvName(project)];
+  const origin = process.env[remoteOriginEnvName(project)];
 
   if (origin === undefined || origin.trim() === "") {
     throw new VokeConfigError(

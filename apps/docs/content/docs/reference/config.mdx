@@ -18,17 +18,18 @@ export default defineConfig({
 
 ## Core fields
 
-| Field            | Purpose                                                                 |
-| ---------------- | ----------------------------------------------------------------------- |
-| `name`           | Service name used for generated resource names and deployment commands. |
-| `stage`          | Deployment stage, such as `local`, `dev`, or `prod`.                    |
-| `region`         | AWS region for synthesized and deployed resources.                      |
-| `entrypoint`     | Source entrypoint for build, synth, and dev workflows.                  |
-| `functions`      | Optional Function Registry used by config-aware workflows.              |
-| `remotes`        | Remote Function Registry targets for local cross-project invocation.    |
-| `cloudFormation` | Resource and output declarations for template synthesis.                |
-| `runtime`        | Runtime options, including Lambda runtime selection.                    |
-| `local`          | Local provider configuration for Floci-backed AWS workflows.            |
+| Field            | Purpose                                                                      |
+| ---------------- | ---------------------------------------------------------------------------- |
+| `name`           | Service name used for generated resource names and deployment commands.      |
+| `stage`          | Deployment stage, such as `local`, `dev`, or `prod`.                         |
+| `region`         | AWS region for synthesized and deployed resources.                           |
+| `entrypoint`     | Source entrypoint for build, synth, and dev workflows.                       |
+| `build`          | Bundle `entrypoints`, `outdir`, and `external` modules (AWS SDK by default). |
+| `functions`      | Optional Function Registry used by config-aware workflows.                   |
+| `remotes`        | Remote Function Registry targets for local cross-project invocation.         |
+| `cloudFormation` | Resource and output declarations for template synthesis.                     |
+| `runtime`        | Runtime options, including Lambda runtime selection.                         |
+| `local`          | Local provider configuration for Floci-backed AWS workflows.                 |
 
 ## Resource bindings
 

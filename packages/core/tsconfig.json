@@ -2,6 +2,18 @@
   "extends": "../../tsconfig.json",
   "include": ["src/**/*.ts", "test/**/*.ts"],
   "compilerOptions": {
-    "strictNullChecks": true
+    "strictNullChecks": true,
+    // Core tests exercise the split @voke/* packages, which depend on core.
+    // Declaring them as dependencies would create a workspace cycle, so tests
+    // resolve them from source instead (Bun honors these paths at runtime).
+    "paths": {
+      "@voke/aws": ["../aws/src/index.ts"],
+      "@voke/aws/*": ["../aws/src/*.ts"],
+      "@voke/build": ["../build/src/index.ts"],
+      "@voke/http": ["../http/src/index.ts"],
+      "@voke/remote": ["../remote/src/index.ts"],
+      "@voke/schema": ["../schema/src/index.ts"],
+      "@voke/testing": ["../testing/src/index.ts"]
+    }
   }
 }

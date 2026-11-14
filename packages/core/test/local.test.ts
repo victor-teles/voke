@@ -18,10 +18,8 @@ import {
   LocalProviderError,
 } from "../src/local";
 import type { LocalProvider } from "../src/local";
-
-const restoreEnv = (name: string, value?: string): void => {
-  Bun.env[name] = value;
-};
+import { setEnv } from "./support/env";
+import { tempPath } from "./support/temp";
 
 test("creates a Floci-ready local AWS environment", () => {
   const env = createLocalAwsEnvironment({
@@ -50,7 +48,7 @@ test("uses AWS_ENDPOINT_URL as the standard local AWS SDK endpoint", () => {
   };
 
   Bun.env.AWS_ENDPOINT_URL = "http://localhost:4566";
-  restoreEnv("VOKE_AWS_ENDPOINT_URL");
+  setEnv("VOKE_AWS_ENDPOINT_URL", undefined);
   Bun.env.AWS_REGION = "us-west-2";
 
   expect(createAwsClientConfig()).toEqual({
@@ -58,9 +56,9 @@ test("uses AWS_ENDPOINT_URL as the standard local AWS SDK endpoint", () => {
     region: "us-west-2",
   });
 
-  restoreEnv("AWS_ENDPOINT_URL", previous.endpoint);
-  restoreEnv("VOKE_AWS_ENDPOINT_URL", previous.vokeEndpoint);
-  restoreEnv("AWS_REGION", previous.region);
+  setEnv("AWS_ENDPOINT_URL", previous.endpoint);
+  setEnv("VOKE_AWS_ENDPOINT_URL", previous.vokeEndpoint);
+  setEnv("AWS_REGION", previous.region);
 });
 
 test("generates a Docker Compose file for Floci", () => {
@@ -210,7 +208,9 @@ test("derives Floci local bindings from configured endpoint and account", () => 
 });
 
 test("creates a local bootstrap plan for CloudFormation through Floci", async () => {
-  const templatePath = `/private/tmp/voke-local-${crypto.randomUUID()}/template.json`;
+  const templatePath = tempPath(
+    `voke-local-${crypto.randomUUID()}/template.json`
+  );
   const template = synthesizeCloudFormation({
     name: "orders-api",
     resources: {
@@ -246,7 +246,9 @@ test("creates a local bootstrap plan for CloudFormation through Floci", async ()
 });
 
 test("keeps provided templates as a local bootstrap escape hatch", async () => {
-  const templatePath = `/private/tmp/voke-local-template-escape-${crypto.randomUUID()}/template.json`;
+  const templatePath = tempPath(
+    `voke-local-template-escape-${crypto.randomUUID()}/template.json`
+  );
   const template = synthesizeCloudFormation({
     name: "escape-api",
     stage: "sandbox",
@@ -279,7 +281,9 @@ test("keeps provided templates as a local bootstrap escape hatch", async () => {
 });
 
 test("creates a local bootstrap plan by synthesizing from Voke config", async () => {
-  const templatePath = `/private/tmp/voke-local-config-${crypto.randomUUID()}/template.json`;
+  const templatePath = tempPath(
+    `voke-local-config-${crypto.randomUUID()}/template.json`
+  );
   const config = defineConfig({
     cloudFormation: {
       environment: {
@@ -333,7 +337,9 @@ test("creates a local bootstrap plan by synthesizing from Voke config", async ()
 });
 
 test("delegates local environment and bootstrap to a custom provider", async () => {
-  const templatePath = `/private/tmp/voke-custom-provider-${crypto.randomUUID()}/template.json`;
+  const templatePath = tempPath(
+    `voke-custom-provider-${crypto.randomUUID()}/template.json`
+  );
   const customProvider: LocalProvider = {
     bootstrapPlan: (options) => ({
       commands: [["customctl", "apply", options.name, options.templatePath]],
@@ -403,7 +409,7 @@ test("delegates local environment and bootstrap to a custom provider", async () 
 });
 
 test("creates a local bootstrap plan by loading voke.config.ts", async () => {
-  const directory = `/private/tmp/voke-local-config-file-${crypto.randomUUID()}`;
+  const directory = tempPath(`voke-local-config-file-${crypto.randomUUID()}`);
   const configPath = `${directory}/voke.config.ts`;
   const templatePath = `${directory}/.voke/local/cloudformation.json`;
 
@@ -443,7 +449,7 @@ export default defineConfig({
 });
 
 test("runs local start, stop, reset, and bootstrap through the CLI parser", async () => {
-  const directory = `/private/tmp/voke-local-cli-${crypto.randomUUID()}`;
+  const directory = tempPath(`voke-local-cli-${crypto.randomUUID()}`);
   const composePath = `${directory}/docker-compose.yml`;
   const templatePath = `${directory}/template.json`;
   const calls: { command: string[]; env?: Record<string, string> }[] = [];
@@ -516,7 +522,7 @@ test("runs local start, stop, reset, and bootstrap through the CLI parser", asyn
 });
 
 test("runs CLI local commands through a configured custom provider", async () => {
-  const directory = `/private/tmp/voke-local-custom-cli-${crypto.randomUUID()}`;
+  const directory = tempPath(`voke-local-custom-cli-${crypto.randomUUID()}`);
   const configPath = `${directory}/voke.config.ts`;
   const composePath = `${directory}/compose.yml`;
   const templatePath = `${directory}/template.json`;
@@ -631,7 +637,7 @@ export default defineConfig({
 });
 
 test("wraps Floci local start failures with actionable Docker Compose guidance", async () => {
-  const directory = `/private/tmp/voke-local-floci-failure-${crypto.randomUUID()}`;
+  const directory = tempPath(`voke-local-floci-failure-${crypto.randomUUID()}`);
   const composePath = `${directory}/docker-compose.yml`;
 
   await expect(
@@ -655,7 +661,9 @@ Floci is Voke's default optional local AWS provider. Make sure Docker Compose is
 });
 
 test("wraps Floci bootstrap failures with start guidance and preserves env", async () => {
-  const templatePath = `/private/tmp/voke-local-bootstrap-failure-${crypto.randomUUID()}/template.json`;
+  const templatePath = tempPath(
+    `voke-local-bootstrap-failure-${crypto.randomUUID()}/template.json`
+  );
   let commandEnv: Record<string, string> | undefined;
 
   await expect(
@@ -685,7 +693,9 @@ test("wraps Floci bootstrap failures with start guidance and preserves env", asy
 });
 
 test("wraps custom provider failures without Floci-specific guidance", async () => {
-  const directory = `/private/tmp/voke-local-custom-failure-${crypto.randomUUID()}`;
+  const directory = tempPath(
+    `voke-local-custom-failure-${crypto.randomUUID()}`
+  );
   const configPath = `${directory}/voke.config.ts`;
   const composePath = `${directory}/compose.yml`;
 

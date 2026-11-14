@@ -12,6 +12,7 @@ import type { VokeEnv } from "./context";
 import { VokeConfigError } from "./errors";
 import { json, jsonError } from "./http";
 import { Voke } from "./route-builder";
+import { readEnv, sleep } from "./runtime-env";
 import {
   createRuntimeVariableCache,
   createRuntimeVariables,
@@ -1039,7 +1040,7 @@ const resolveRuntime = (options: InvokeOptions): InvokeRuntime => {
     return options.runtime;
   }
 
-  return Bun.env.VOKE_INVOKE_RUNTIME === "aws" ? "aws" : "local";
+  return readEnv("VOKE_INVOKE_RUNTIME") === "aws" ? "aws" : "local";
 };
 
 const deployedName = (definition: BaseFunctionDefinition): string =>
@@ -1690,7 +1691,7 @@ const sleepAndThrow = async (
   message: string,
   functionName: string
 ) => {
-  await Bun.sleep(timeoutMs);
+  await sleep(timeoutMs);
   throw new InvokeError(message, {
     code: "TIMEOUT",
     functionName,
@@ -2324,7 +2325,7 @@ const formatEventSourceSummary = (eventSource: EventSourceDefinition): string =>
   ].join(" ");
 
 const routeUrl = (path: string): string | undefined => {
-  const origin = Bun.env.VOKE_DEV_ORIGIN;
+  const origin = readEnv("VOKE_DEV_ORIGIN");
 
   if (origin === undefined) {
     return undefined;
@@ -2341,10 +2342,10 @@ const formatRouteSummary = (route: AnyRouteDefinition): string => {
 };
 
 const devOrigin = (): string =>
-  (Bun.env.VOKE_DEV_ORIGIN ?? "http://localhost:3000").replace(/[/]+$/u, "");
+  (readEnv("VOKE_DEV_ORIGIN") ?? "http://localhost:3000").replace(/[/]+$/u, "");
 
 const devReadyMs = (): number => {
-  const startedAt = Number(Bun.env.VOKE_DEV_STARTED_AT);
+  const startedAt = Number(readEnv("VOKE_DEV_STARTED_AT"));
 
   if (!Number.isFinite(startedAt)) {
     return 0;

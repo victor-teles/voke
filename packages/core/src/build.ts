@@ -5,9 +5,10 @@ import type { AnyFunctionDefinition } from "./invoke";
 export interface BuildPlan {
   command: string[];
   entrypoints: string[];
+  /** Files to write after the bundler succeeds, keyed by path. */
+  files: Record<string, string>;
   outdir: string;
   outputs: Record<string, BuildPlanOutput>;
-  target: "bun";
 }
 
 export interface BuildPlanOutput {
@@ -64,6 +65,12 @@ export const createBuildPlan = (
     ])
   );
 
+  // The bundle is ESM in a .js file; a sibling package.json with "type": "module"
+  // tells the Lambda Node.js runtime to load it as an ES module.
+  const files = {
+    [`${outdir}/package.json`]: `${JSON.stringify({ type: "module" })}\n`,
+  };
+
   return {
     command: [
       "bun",
@@ -72,11 +79,14 @@ export const createBuildPlan = (
       "--outdir",
       outdir,
       "--target",
-      config.build.target,
+      "node",
+      "--format",
+      "esm",
+      ...config.build.external.flatMap((pattern) => ["--external", pattern]),
     ],
     entrypoints,
+    files,
     outdir,
     outputs,
-    target: config.build.target,
   };
 };

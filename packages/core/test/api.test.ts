@@ -24,10 +24,8 @@ import { VokeConfigError } from "../src/errors";
 import { defineFunction, defineFunctions } from "../src/invoke";
 import type { StandardSchemaV1 } from "../src/invoke";
 import { ok as json } from "../src/response";
-
-const restoreEnv = (name: string, value?: string): void => {
-  Bun.env[name] = value;
-};
+import { setEnv } from "./support/env";
+import { tempPath } from "./support/temp";
 
 const lambdaEvent = (overrides: Record<string, unknown>): LambdaEvent => {
   const requestContext = {
@@ -98,8 +96,8 @@ test("wraps a Hono app with a default name and handler", () => {
     },
     build: {
       entrypoints: ["./src/index.ts"],
+      external: ["@aws-sdk/*"],
       outdir: "./dist",
-      target: "bun",
     },
     cloudFormation: {
       environment: {},
@@ -363,7 +361,7 @@ test("returns default JSON errors for missing routes", async () => {
 });
 
 test("creates a starter API project", async () => {
-  const directory = `/private/tmp/voke-created-api-${crypto.randomUUID()}`;
+  const directory = tempPath(`voke-created-api-${crypto.randomUUID()}`);
 
   await createApiProject({
     directory,
@@ -403,7 +401,7 @@ test("creates a starter API project", async () => {
 });
 
 test("generated starter test suite passes with local package links", async () => {
-  const directory = `/private/tmp/voke-created-api-smoke-${crypto.randomUUID()}`;
+  const directory = tempPath(`voke-created-api-smoke-${crypto.randomUUID()}`);
 
   await createApiProject({
     directory,
@@ -425,7 +423,12 @@ test("generated starter test suite passes with local package links", async () =>
   const stderr = await new Response(process.stderr).text();
   const stdout = await new Response(process.stdout).text();
 
-  expect(`${stdout}\n${stderr}`).toContain("responds to health checks");
+  const output = `${stdout}\n${stderr}`;
+
+  // Bun does not print passing test names in non-interactive output, so assert on the
+  // summary: exactly the one generated test ran and passed.
+  expect(output).toMatch(/^\s*1 pass$/mu);
+  expect(output).toMatch(/^\s*0 fail$/mu);
   expect(exitCode).toBe(0);
 });
 
@@ -459,8 +462,8 @@ test("normalizes project and CloudFormation settings through defineConfig", () =
     },
     build: {
       entrypoints: ["./src/api.ts"],
+      external: ["@aws-sdk/*"],
       outdir: "./build",
-      target: "bun",
     },
     cloudFormation: {
       environment: {
@@ -552,7 +555,7 @@ test("exposes AWS resource helpers from @voke/aws", () => {
 });
 
 test("loads voke.config.ts default export", async () => {
-  const directory = `/private/tmp/voke-config-${crypto.randomUUID()}`;
+  const directory = tempPath(`voke-config-${crypto.randomUUID()}`);
   const configPath = `${directory}/voke.config.ts`;
 
   await Bun.$`mkdir -p ${directory}`;
@@ -591,7 +594,7 @@ export default defineConfig({
 });
 
 test("synth CLI reads voke.config.ts and writes the configured template path", async () => {
-  const directory = `/private/tmp/voke-synth-config-${crypto.randomUUID()}`;
+  const directory = tempPath(`voke-synth-config-${crypto.randomUUID()}`);
   const out = `${directory}/build/template.json`;
   const configPath = `${directory}/voke.config.ts`;
 
@@ -640,7 +643,7 @@ export default defineConfig({
 });
 
 test("experimental deploy and remove CLI commands default to voke.config.ts", async () => {
-  const directory = `/private/tmp/voke-deploy-config-${crypto.randomUUID()}`;
+  const directory = tempPath(`voke-deploy-config-${crypto.randomUUID()}`);
   const configPath = `${directory}/voke.config.ts`;
   const calls: string[][] = [];
 
@@ -698,8 +701,8 @@ export default defineConfig({
 });
 
 test("runs create and build through the CLI parser", async () => {
-  const directory = `/private/tmp/voke-cli-api-${crypto.randomUUID()}`;
-  const buildDirectory = `/private/tmp/voke-cli-build-${crypto.randomUUID()}`;
+  const directory = tempPath(`voke-cli-api-${crypto.randomUUID()}`);
+  const buildDirectory = tempPath(`voke-cli-build-${crypto.randomUUID()}`);
   const entrypoint = `${directory}/src/smoke.ts`;
 
   await runCli(["create", "api", "cli-api", directory]);
@@ -831,14 +834,14 @@ test("creates typed AWS resource bindings and client config from environment", (
     region: "sa-east-1",
   });
 
-  restoreEnv("VOKE_RESOURCE_ORDERS_TABLE_NAME", previous.table);
-  restoreEnv("VOKE_RESOURCE_EVENTS_QUEUE_URL", previous.queue);
-  restoreEnv("AWS_REGION", previous.region);
-  restoreEnv("VOKE_AWS_ENDPOINT_URL", previous.endpoint);
+  setEnv("VOKE_RESOURCE_ORDERS_TABLE_NAME", previous.table);
+  setEnv("VOKE_RESOURCE_EVENTS_QUEUE_URL", previous.queue);
+  setEnv("AWS_REGION", previous.region);
+  setEnv("VOKE_AWS_ENDPOINT_URL", previous.endpoint);
 });
 
 test("runs synth and experimental deploy/remove through the CLI parser", async () => {
-  const directory = `/private/tmp/voke-cfn-${crypto.randomUUID()}`;
+  const directory = tempPath(`voke-cfn-${crypto.randomUUID()}`);
   const templatePath = `${directory}/template.json`;
   const configPath = `${directory}/voke.config.ts`;
   const commands: string[][] = [];

@@ -6,6 +6,7 @@ import { GetParameterCommand, SSMClient } from "@aws-sdk/client-ssm";
 
 import { createResourceBindingName } from "./bindings";
 import { VokeRuntimeVariableError } from "./errors";
+import { readEnv } from "./runtime-env";
 import { createVariableProvider, createVariableSource } from "./variables";
 import type {
   RuntimeVariableOptions,
@@ -109,7 +110,7 @@ const secretIdFromSource = (
     return source.secretId;
   }
 
-  return Bun.env[createResourceBindingName(source.resource, "id")] ?? "";
+  return readEnv(createResourceBindingName(source.resource, "id")) ?? "";
 };
 
 const parameterNameFromSource = (
@@ -122,7 +123,7 @@ const parameterNameFromSource = (
     return source.name;
   }
 
-  return Bun.env[createResourceBindingName(source.resource, "name")] ?? "";
+  return readEnv(createResourceBindingName(source.resource, "name")) ?? "";
 };
 
 export const createAwsRuntimeVariableProvider = (): RuntimeVariableProvider => {

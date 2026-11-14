@@ -13,6 +13,7 @@ import type {
   StandardSchemaV1,
 } from "./invoke";
 import { InvokeError, invokeRegistryFunction } from "./invoke";
+import { readEnv, sha256Hex } from "./runtime-env";
 
 type JsonPrimitive = boolean | null | number | string;
 
@@ -185,12 +186,8 @@ const stableStringify = (value: unknown): string => {
   return JSON.stringify(value);
 };
 
-const fingerprint = (value: unknown): string => {
-  const hasher = new Bun.CryptoHasher("sha256");
-  hasher.update(stableStringify(value));
-
-  return `sha256:${hasher.digest("hex")}`;
-};
+const fingerprint = (value: unknown): string =>
+  `sha256:${sha256Hex(stableStringify(value))}`;
 
 const schemaMetadata = (schema: StandardSchemaV1 | undefined): JsonSchema => {
   const schemaWithMetadata = schema as
@@ -360,7 +357,7 @@ const remoteContractEnvName = (project: string): string =>
   `VOKE_REMOTE_${toEnvKey(project)}_CONTRACT_URL`;
 
 const resolveRemoteOrigin = (project: string): string => {
-  const origin = Bun.env[remoteOriginEnvName(project)];
+  const origin = readEnv(remoteOriginEnvName(project));
 
   if (origin === undefined || origin.trim() === "") {
     throw new VokeConfigError(

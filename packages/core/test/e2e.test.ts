@@ -25,6 +25,7 @@ import {
 } from "../src/invoke";
 import type { StandardSchemaV1 } from "../src/invoke";
 import { ok as json } from "../src/response";
+import { withEnv } from "./support/env";
 
 interface TestHttpApiEvent {
   rawPath: string;
@@ -54,27 +55,6 @@ const userInputSchema: StandardSchemaV1<{ id: string }, { id: string }> = {
     vendor: "voke-test",
     version: 1,
   },
-};
-
-const withEnv = async <TResult>(
-  values: Record<string, string>,
-  operation: () => Promise<TResult>
-): Promise<TResult> => {
-  const previous = Object.fromEntries(
-    Object.keys(values).map((name) => [name, Bun.env[name]])
-  );
-
-  for (const [name, value] of Object.entries(values)) {
-    Bun.env[name] = value;
-  }
-
-  try {
-    return await operation();
-  } finally {
-    for (const [name, value] of Object.entries(previous)) {
-      Bun.env[name] = value;
-    }
-  }
 };
 
 test("creates a local API test client with API Gateway semantics", async () => {

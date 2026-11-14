@@ -51,7 +51,7 @@ export const bindResource = <TValue extends string = string>(
     envName,
     name,
     value: () => {
-      const value = Bun.env[envName];
+      const value = process.env[envName];
 
       if (value === undefined || value === "") {
         throw new VokeResourceBindingError(
@@ -69,12 +69,14 @@ export const createAwsClientConfig = (
 ): AwsClientConfig => {
   const endpoint =
     options.endpoint ??
-    Bun.env.VOKE_AWS_ENDPOINT_URL ??
-    Bun.env.AWS_ENDPOINT_URL;
+    process.env.VOKE_AWS_ENDPOINT_URL ??
+    process.env.AWS_ENDPOINT_URL;
   const region =
-    [options.region, Bun.env.AWS_REGION, Bun.env.AWS_DEFAULT_REGION].find(
-      (value) => value !== undefined && value !== ""
-    ) ?? "us-east-1";
+    [
+      options.region,
+      process.env.AWS_REGION,
+      process.env.AWS_DEFAULT_REGION,
+    ].find((value) => value !== undefined && value !== "") ?? "us-east-1";
 
   return {
     region,

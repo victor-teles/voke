@@ -8,6 +8,8 @@ import { schema } from "@voke/schema";
 import { createFunctions, fn, http, route, voke } from "../src/index";
 import type { Middleware } from "../src/index";
 import type { StandardSchemaV1 } from "../src/invoke";
+import { setEnv } from "./support/env";
+import { tempPath } from "./support/temp";
 
 const standardSchema = <TInput, TOutput = TInput>(
   validate: (value: TInput) => TOutput
@@ -88,7 +90,7 @@ test("rejects reserved Function Registry keys", () => {
 
 test("auto-loads voke.config.ts when composing a Gateway", async () => {
   const previousPwd = Bun.env.PWD;
-  const directory = "/private/tmp/voke-autoload-config-test";
+  const directory = tempPath("voke-autoload-config-test");
   await Bun.$`mkdir -p ${directory}`;
   await Bun.write(
     `${directory}/voke.config.ts`,
@@ -111,13 +113,13 @@ test("auto-loads voke.config.ts when composing a Gateway", async () => {
     expect(gateway.config.stage).toBe("test");
     await expect(functions.invoke("ping")).resolves.toEqual({ ok: true });
   } finally {
-    Bun.env.PWD = previousPwd;
+    setEnv("PWD", previousPwd);
   }
 });
 
 test("fails clearly when voke.config.ts cannot be auto-loaded", async () => {
   const previousPwd = Bun.env.PWD;
-  const directory = "/private/tmp/voke-missing-config-test";
+  const directory = tempPath("voke-missing-config-test");
   await Bun.$`mkdir -p ${directory}`;
   Bun.env.PWD = directory;
 
@@ -132,10 +134,10 @@ test("fails clearly when voke.config.ts cannot be auto-loaded", async () => {
     });
 
     expect(() => voke(functions)).toThrow(
-      `Voke config file not found: ${directory}/voke.config.ts`
+      `Voke config file not found: ${directory}/voke.config.ts. In a deployed bundle voke.config.ts is not on disk; pass it explicitly: voke(functions, { config }).`
     );
   } finally {
-    Bun.env.PWD = previousPwd;
+    setEnv("PWD", previousPwd);
   }
 });
 

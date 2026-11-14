@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { rm } from "node:fs/promises";
 
 import { createBuildPlan } from "../src/build";
 import { runCli } from "../src/cli";
@@ -6,6 +7,7 @@ import { defineConfig } from "../src/config";
 import { defineFunction, defineFunctions } from "../src/invoke";
 import type { StandardSchemaV1 } from "../src/invoke";
 import { Voke } from "../src/route-builder";
+import { tempPath } from "./support/temp";
 
 const schema = <TValue>(): StandardSchemaV1<TValue, TValue> => ({
   "~standard": {
@@ -43,8 +45,8 @@ test("normalizes build inputs and Lambda handler output from config", () => {
 
   expect(config.build).toEqual({
     entrypoints: ["./src/api.ts", "./src/functions/send-welcome-email.ts"],
+    external: ["@aws-sdk/*"],
     outdir: "./build",
-    target: "bun",
   });
   expect(config.cloudFormation.handler).toBe("api.handler");
   expect(createBuildPlan(config)).toEqual({
@@ -56,9 +58,16 @@ test("normalizes build inputs and Lambda handler output from config", () => {
       "--outdir",
       "./build",
       "--target",
-      "bun",
+      "node",
+      "--format",
+      "esm",
+      "--external",
+      "@aws-sdk/*",
     ],
     entrypoints: ["./src/api.ts", "./src/functions/send-welcome-email.ts"],
+    files: {
+      "./build/package.json": '{"type":"module"}\n',
+    },
     outdir: "./build",
     outputs: {
       "./src/api.ts": {
@@ -70,12 +79,11 @@ test("normalizes build inputs and Lambda handler output from config", () => {
         handler: "email.handler",
       },
     },
-    target: "bun",
   });
 });
 
 test("build CLI uses config by default and lets flags override one-off runs", async () => {
-  const directory = `/private/tmp/voke-build-cli-${crypto.randomUUID()}`;
+  const directory = tempPath(`voke-build-cli-${crypto.randomUUID()}`);
   const configPath = `${directory}/voke.config.ts`;
   const commands: string[][] = [];
 
@@ -124,7 +132,11 @@ export default defineConfig({
       "--outdir",
       "./configured-dist",
       "--target",
-      "bun",
+      "node",
+      "--format",
+      "esm",
+      "--external",
+      "@aws-sdk/*",
     ],
     [
       "bun",
@@ -133,9 +145,27 @@ export default defineConfig({
       "--outdir",
       "./tmp-build",
       "--target",
-      "bun",
+      "node",
+      "--format",
+      "esm",
+      "--external",
+      "@aws-sdk/*",
     ],
   ]);
+
+  // The CLI writes the module-type package.json the build plan declares. These outdirs
+  // are relative, so they resolve against the test's working directory.
+  try {
+    expect(await Bun.file("./configured-dist/package.json").json()).toEqual({
+      type: "module",
+    });
+    expect(await Bun.file("./tmp-build/package.json").json()).toEqual({
+      type: "module",
+    });
+  } finally {
+    await rm("./configured-dist", { force: true, recursive: true });
+    await rm("./tmp-build", { force: true, recursive: true });
+  }
 });
 
 test("includes route-backed and invokable Function entrypoints in build plans", () => {
@@ -176,7 +206,11 @@ test("includes route-backed and invokable Function entrypoints in build plans", 
       "--outdir",
       "./dist",
       "--target",
-      "bun",
+      "node",
+      "--format",
+      "esm",
+      "--external",
+      "@aws-sdk/*",
     ],
     entrypoints: [
       "./src/index.ts",
@@ -198,4 +232,50 @@ test("includes route-backed and invokable Function entrypoints in build plans", 
       },
     },
   });
+});
+
+test("bundles the AWS SDK when build.external is empty", () => {
+  const plan = createBuildPlan({
+    build: { external: [] },
+    entrypoint: "./src/index.ts",
+    name: "pinned-sdk",
+  });
+
+  expect(plan.command).toEqual([
+    "bun",
+    "build",
+    "./src/index.ts",
+    "--outdir",
+    "./dist",
+    "--target",
+    "node",
+    "--format",
+    "esm",
+  ]);
+});
+
+test("passes each build.external pattern to the bundler", () => {
+  const plan = createBuildPlan({
+    build: { external: ["@aws-sdk/*", "sharp"] },
+    entrypoint: "./src/index.ts",
+    name: "native-deps",
+  });
+
+  expect(plan.command.slice(-4)).toEqual([
+    "--external",
+    "@aws-sdk/*",
+    "--external",
+    "sharp",
+  ]);
+});
+
+test("rejects the removed build.target option with the replacement behavior", () => {
+  const input = {
+    build: { target: "bun" },
+    name: "legacy-target",
+  } as unknown as Parameters<typeof defineConfig>[0];
+
+  expect(() => defineConfig(input)).toThrow(
+    'Invalid Voke config at build.target: "build.target" was removed; Voke always builds an ESM bundle for the Lambda Node.js runtime'
+  );
 });

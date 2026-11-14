@@ -363,7 +363,7 @@ export const createRuntimeVariables = <
     providers
   );
   const handles = {} as Record<string, RuntimeVariableHandle>;
-  const env = options.env ?? Bun.env;
+  const env = options.env ?? process.env;
   const clock = options.clock ?? (() => Date.now());
   const cache = options.cache ?? createRuntimeVariableCache();
 

@@ -11,6 +11,7 @@ import type {
   JsonSchema,
 } from "../src/remote";
 import { createRemoteFunctions, generateRemoteModules } from "../src/remote";
+import { setEnv } from "./support/env";
 
 const schema = <TValue>(
   jsonSchema: JsonSchema
@@ -66,8 +67,8 @@ const withGatewayFetch = async <TResult>(
 const usersOrigin = "http://users.local";
 
 afterEach(() => {
-  Bun.env.VOKE_DEV_SUMMARY = previousEnv.VOKE_DEV_SUMMARY;
-  Bun.env.VOKE_REMOTE_USERS_ORIGIN = previousEnv.VOKE_REMOTE_USERS_ORIGIN;
+  setEnv("VOKE_DEV_SUMMARY", previousEnv.VOKE_DEV_SUMMARY);
+  setEnv("VOKE_REMOTE_USERS_ORIGIN", previousEnv.VOKE_REMOTE_USERS_ORIGIN);
   console.info = previousInfo;
 });
 

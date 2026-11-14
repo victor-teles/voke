@@ -16,6 +16,7 @@ import type {
 import type { VokeProvider } from "./provider";
 import { defineRemoteConfig } from "./remote";
 import type { VokeRemoteConfig, VokeRemoteConfigInput } from "./remote";
+import { readEnv } from "./runtime-env";
 
 export interface VokeConfig {
   api: VokeApiConfig;
@@ -42,8 +43,9 @@ export interface VokeApiConfig {
 
 export interface VokeBuildConfig {
   entrypoints: string[];
+  /** Module patterns left out of the bundle. Defaults to the AWS SDK, which the Lambda Node.js runtime provides. */
+  external: string[];
   outdir: string;
-  target: "bun";
 }
 
 export interface VokeCloudFormationConfig {
@@ -125,7 +127,23 @@ export const createHandlerNameFromEntrypoint = (entrypoint: string): string => {
 
 const unique = (values: string[]): string[] => [...new Set(values)];
 
+const defaultBuildExternal = ["@aws-sdk/*"];
+
+const assertNoBuildTarget = (input: VokeConfigInput): void => {
+  if (input.build !== undefined && "target" in input.build) {
+    throw VokeConfigError.validation([
+      {
+        message:
+          '"build.target" was removed; Voke always builds an ESM bundle for the Lambda Node.js runtime',
+        path: "build.target",
+      },
+    ]);
+  }
+};
+
 const defineBuildConfig = (input: VokeConfigInput): VokeBuildConfig => {
+  assertNoBuildTarget(input);
+
   const entrypoint = input.entrypoint ?? "./src/index.ts";
   const functionEntrypoints = Object.entries(input.functions ?? {})
     .filter(([key]) => key !== "invoke")
@@ -137,8 +155,8 @@ const defineBuildConfig = (input: VokeConfigInput): VokeBuildConfig => {
     entrypoints: unique(
       input.build?.entrypoints ?? [entrypoint, ...functionEntrypoints]
     ),
+    external: [...(input.build?.external ?? defaultBuildExternal)],
     outdir: input.build?.outdir ?? "./dist",
-    target: input.build?.target ?? "bun",
   };
 };
 
@@ -208,7 +226,8 @@ const defineRemotesConfig = (
 };
 
 export const defineConfig = (input: VokeConfigInput): VokeConfig => {
-  const stage = input.stage ?? Bun.env.VOKE_STAGE ?? Bun.env.STAGE ?? "local";
+  const stage =
+    input.stage ?? readEnv("VOKE_STAGE") ?? readEnv("STAGE") ?? "local";
   const remotes = defineRemotesConfig(input, stage);
 
   return {
@@ -221,7 +240,7 @@ export const defineConfig = (input: VokeConfigInput): VokeConfig => {
     local: defineLocalConfig(input),
     name: input.name,
     ...(input.provider === undefined ? {} : { provider: input.provider }),
-    region: input.region ?? Bun.env.AWS_REGION ?? "us-east-1",
+    region: input.region ?? readEnv("AWS_REGION") ?? "us-east-1",
     ...(Object.keys(remotes).length > 0 ? { remotes } : {}),
     runtime: defineRuntimeConfig(input),
     stage,
@@ -235,7 +254,7 @@ export const loadVokeConfig = async (
   } = {}
 ): Promise<VokeConfig> => {
   const path = options.path ?? "voke.config.ts";
-  const cwd = options.cwd ?? Bun.env.PWD ?? ".";
+  const cwd = options.cwd ?? readEnv("PWD") ?? ".";
   const absolutePath = path.startsWith("/") ? path : `${cwd}/${path}`;
   const configFile = Bun.file(absolutePath);
 

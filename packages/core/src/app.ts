@@ -18,6 +18,7 @@ import type { FunctionRegistry, FunctionRegistryInput } from "./invoke";
 import type { VokeProvider } from "./provider";
 import { mountDevFunctionEndpoints } from "./remote";
 import { error as responseError } from "./response";
+import { readEnv } from "./runtime-env";
 import type {
   RuntimeVariableOverrides,
   RuntimeVariableProvider,
@@ -201,7 +202,7 @@ export const createGateway = (options: GatewayOptions = {}): Hono<VokeEnv> => {
     );
     mountFunctionRoutes(gateway, configInput.functions);
 
-    if (Bun.env.VOKE_DEV_SUMMARY === "1") {
+    if (readEnv("VOKE_DEV_SUMMARY") === "1") {
       mountDevFunctionEndpoints(gateway, {
         functions: configInput.functions,
         project: configInput.name,
@@ -214,7 +215,7 @@ export const createGateway = (options: GatewayOptions = {}): Hono<VokeEnv> => {
 };
 
 const loadRuntimeConfig = (): VokeConfigInput => {
-  const cwd = Bun.env.PWD ?? ".";
+  const cwd = readEnv("PWD") ?? ".";
   const path = `${cwd}/voke.config.ts`;
 
   try {
@@ -234,9 +235,10 @@ const loadRuntimeConfig = (): VokeConfigInput => {
       throw error;
     }
 
-    throw new VokeConfigError(`Voke config file not found: ${path}`, {
-      cause: error,
-    });
+    throw new VokeConfigError(
+      `Voke config file not found: ${path}. In a deployed bundle voke.config.ts is not on disk; pass it explicitly: voke(functions, { config }).`,
+      { cause: error }
+    );
   }
 };
 

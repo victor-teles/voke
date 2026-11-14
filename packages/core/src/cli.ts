@@ -561,6 +561,10 @@ export const build = async (
   });
 
   await (options.run ?? runCommand)(plan.command);
+
+  for (const [path, contents] of Object.entries(plan.files)) {
+    await Bun.write(path, contents);
+  }
 };
 
 export const dev = async (

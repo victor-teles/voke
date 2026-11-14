@@ -21,6 +21,7 @@ import {
 import type { InvokeError, StandardSchemaV1 } from "../src/invoke";
 import { Voke } from "../src/route-builder";
 import { createVariableProvider, createVariableSource } from "../src/variables";
+import { setEnv } from "./support/env";
 
 const schema = <TInput, TOutput = TInput>(
   validate: (value: TInput) => TOutput
@@ -39,10 +40,6 @@ const failingSchema = (message: string): StandardSchemaV1<unknown, never> => ({
     version: 1,
   },
 });
-
-const restoreEnv = (name: string, value?: string): void => {
-  Bun.env[name] = value;
-};
 
 const ansi = {
   bold: "\u001B[1m",
@@ -349,9 +346,9 @@ test("prints a human function summary automatically under voke dev", () => {
     createGateway({ functions });
   } finally {
     console.info = previousInfo;
-    restoreEnv("VOKE_DEV_ORIGIN", previousOrigin);
-    restoreEnv("VOKE_DEV_STARTED_AT", previousStartedAt);
-    restoreEnv("VOKE_DEV_SUMMARY", previousSummary);
+    setEnv("VOKE_DEV_ORIGIN", previousOrigin);
+    setEnv("VOKE_DEV_STARTED_AT", previousStartedAt);
+    setEnv("VOKE_DEV_SUMMARY", previousSummary);
   }
 
   expect(logs.map((log) => log.trimEnd())).toEqual([
