@@ -38,3 +38,6 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # Node runtime test output (packages/core/test/node-runtime.test.ts)
 .tmp-node-runtime
+
+# Build tool cache directory
+.build/
