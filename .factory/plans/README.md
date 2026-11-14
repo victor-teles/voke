@@ -34,18 +34,18 @@ serves `GET /health` from an API Gateway v2 event.
 
 ## Execution order & status
 
-| Plan | Title                                                                                           | Priority | Effort | Depends on          | Status |
-| ---- | ----------------------------------------------------------------------------------------------- | -------- | ------ | ------------------- | ------ |
-| 001  | The repository runs on Bun 1.4.4 with a deterministic test suite, and every PR is checked by CI | P1       | S      | —                   | DONE   |
-| 002  | A built Voke bundle starts and serves requests on the AWS Lambda Node.js runtime                | P1       | M      | 001                 | DONE   |
-| 009  | `@voke/aws` owns all AWS code at parity, and core's AWS copies are deleted                      | P1       | L      | 002                 | DONE   |
-| 003  | Every Function declared in the entrypoint is synthesized and gets a working Lambda handler      | P1       | L      | 009                 | DONE   |
-| 008  | Every config setting and authoring API has exactly one spelling                                 | P2       | M      | 009, 003            | DONE   |
+| Plan | Title                                                                                           | Priority | Effort | Depends on          | Status                        |
+| ---- | ----------------------------------------------------------------------------------------------- | -------- | ------ | ------------------- | ----------------------------- |
+| 001  | The repository runs on Bun 1.4.4 with a deterministic test suite, and every PR is checked by CI | P1       | S      | —                   | DONE                          |
+| 002  | A built Voke bundle starts and serves requests on the AWS Lambda Node.js runtime                | P1       | M      | 001                 | DONE                          |
+| 009  | `@voke/aws` owns all AWS code at parity, and core's AWS copies are deleted                      | P1       | L      | 002                 | DONE                          |
+| 003  | Every Function declared in the entrypoint is synthesized and gets a working Lambda handler      | P1       | L      | 009                 | DONE                          |
+| 008  | Every config setting and authoring API has exactly one spelling                                 | P2       | M      | 009, 003            | DONE                          |
 | 004  | `voke deploy` takes a project from source to a live URL in one command                          | P1       | L      | 009, 003 (008)      | DONE (real-AWS proof not run) |
-| 010  | `voke local` and `voke dev` run through the Provider's local workflow                           | P2       | M      | 009 (003, 008, 004) | TODO   |
-| 005  | A freshly deployed Voke stack has production-safe Lambda and HTTP defaults                      | P2       | M      | 009, 003, 008       | TODO   |
-| 006  | A new user goes from nothing to a deployed API with three commands and clear CLI feedback       | P2       | M      | 004, 008, 010       | TODO   |
-| 007  | `voke local` and `voke dev` run against the official AWS Emulator with real stack outputs       | P2       | M      | 010 (004 optional)  | TODO   |
+| 010  | `voke local` and `voke dev` run through the Provider's local workflow                           | P2       | M      | 009 (003, 008, 004) | TODO                          |
+| 005  | A freshly deployed Voke stack has production-safe Lambda and HTTP defaults                      | P2       | M      | 009, 003, 008       | TODO                          |
+| 006  | A new user goes from nothing to a deployed API with three commands and clear CLI feedback       | P2       | M      | 004, 008, 010       | TODO                          |
+| 007  | `voke local` and `voke dev` run against the official AWS Emulator with real stack outputs       | P2       | M      | 010 (004 optional)  | TODO                          |
 
 Dependencies in parentheses are ordering only (shared files), not hard prerequisites.
 
