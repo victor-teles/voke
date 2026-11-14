@@ -31,13 +31,62 @@ Each setting has exactly one spelling.
 | `environment`        | Environment variables set on every deployed Function.                            |
 | `build`              | Bundle `entrypoints`, `outdir`, and `external` modules (AWS SDK by default).     |
 | `cloudFormation.out` | Where `voke synth` writes the template.                                          |
-| `runtime`            | Runtime options, including Lambda runtime selection.                             |
-| `local`              | Local provider configuration for Floci-backed AWS workflows.                     |
+| `runtime`            | `timeout` (seconds) and `memory` (MB) for every Function.                        |
 | `remotes`            | Remote Function Registry targets for local cross-project invocation.             |
 | `api.name`           | Name of the HTTP API. Defaults to `name`.                                        |
+| `api.cors`           | Browser cross-origin access: `true` or `{ origins, methods, headers, ... }`.     |
 | `dev`                | `voke dev` entrypoint and environment overrides.                                 |
 
 The config file must use a default export: `export default defineConfig({ ... })`.
+
+## Defaults
+
+A freshly deployed stack needs no tuning. These defaults apply unless you set the value:
+
+| Setting                | Default                                   | Where to change it                                              |
+| ---------------------- | ----------------------------------------- | --------------------------------------------------------------- |
+| Function timeout       | 15 seconds                                | `runtime.timeout`; per Function `synthesis.timeout`             |
+| Function memory        | 1024 MB                                   | `runtime.memory`; per Function `synthesis.memory`               |
+| HTTP CORS              | off                                       | `api.cors`                                                      |
+| Lambda Node.js runtime | `nodejs22.x`                              | `aws({ lambda: { runtime } })`; per Function `awsLambda()`      |
+| Lambda architecture    | `arm64`                                   | `aws({ lambda: { architecture } })`; per Function `awsLambda()` |
+| Log retention          | 14 days                                   | `aws({ lambda: { logRetentionDays } })`                         |
+| SQS visibility timeout | 6 × the consumer's timeout + batch window | `sqsQueue({ visibilityTimeoutSeconds })`                        |
+
+```ts
+// voke.config.ts
+import { aws } from "@voke/aws";
+import { sqsQueue } from "@voke/aws/cloudformation";
+import { defineConfig } from "voke";
+
+export default defineConfig({
+  name: "orders",
+  provider: aws({ lambda: { runtime: "nodejs24.x", logRetentionDays: 30 } }),
+  runtime: { timeout: 20, memory: 512 },
+  api: { cors: { origins: ["https://app.example"], credentials: true } },
+  resources: { jobsQueue: sqsQueue({ visibilityTimeoutSeconds: 180 }) },
+});
+```
+
+Override one Function where it is declared, in the project entrypoint:
+
+```ts
+import { awsLambda } from "@voke/aws";
+import { fn } from "voke";
+
+export const report = fn({
+  synthesis: { timeout: 120, provider: awsLambda({ architecture: "x86_64" }) },
+  handler: () => ({ ok: true }),
+});
+```
+
+Voke checks the AWS limits when it builds the model: memory 128–10240 MB, timeout 1–900 seconds,
+and at most 30 seconds for a Function with HTTP routes (the API Gateway HTTP API integration
+limit). An explicit queue visibility timeout lower than a consumer's timeout is an error.
+
+`api.cors: true` allows any origin, method and header without credentials. With
+`credentials: true`, list explicit `origins`. The same value configures the local Gateway
+(`voke dev`, `gateway.request(...)`) and the deployed HTTP API.
 
 ## Resource bindings
 

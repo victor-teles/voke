@@ -516,3 +516,68 @@ Replace the module-level `handleRouteError` (`app.ts:112-133`) with a handler cr
   Provider maps and limits them itself.
 - Deferred: top-level `timeout`/`memory` on `fn`/`http`/`sqs`, security headers, structured
   logging, DLQs, and an `@voke/aws` log-group retention override per Function.
+
+## Execution notes (2026-11-14)
+
+Done on branch `feature/production-safe-defaults`, stacked on plan 010 (`feature/local-workflow-through-provider`,
+PR #56, open). Uncommitted. Gates: `bun run check` 0 errors, `bun run typecheck` 18/18, `bun run test`
+23/23 tasks (core 224, `@voke/aws` 74).
+
+- **Core:** `runtime.lambda` and `VokeNodeRuntime` are gone. `defineConfig` rejects `runtime.lambda` with
+  the `aws({ lambda: { runtime } })` pointer, and the model rejects `synthesis.runtime`.
+  `runtime.timeout` (default 15) and `runtime.memory` (default 1024) are validated as positive
+  integers. `api.cors` normalizes `true` to wildcards and rejects `credentials: true` with a `"*"` origin
+  and empty origins. `FunctionSynthesisConfig` gains `timeout`, `memory` and `provider`. The model
+  carries `timeout`, `memory`, the untouched `provider` record and `apis.http.cors`.
+- **Gateway:** unhandled errors return `INTERNAL_SERVER_ERROR` / `Internal server error`. They are logged once
+  as a JSON line, and `details.message` is added only when `VOKE_DEV_SUMMARY=1`. `hono/cors` runs before
+  user middleware when `api.cors` is set.
+- **`@voke/aws`:** new `lambda-settings.ts` with `aws({ lambda: { runtime, architecture, logRetentionDays } })`
+  (validated when `aws()` is called) and `awsLambda()` per-Function records. `validateAwsLambdaModel`
+  checks memory 128–10240, timeout 1–900, at most 30 s for HTTP-routed Functions, the record type and
+  values, and an explicit queue visibility timeout below a consumer's timeout. Synthesis adds
+  `Architectures`, `MemorySize`, `Timeout`, `LoggingConfig` and a per-Function `AWS::Logs::LogGroup`
+  (`/aws/lambda/<deployedName>`, 14 days), `CorsConfiguration`, and derived `VisibilityTimeout`.
+  `deploy` threads the same settings into its template.
+- **Migrator:** emits `aws({ lambda: { runtime } })` and `synthesis.provider: awsLambda({ runtime })`.
+- **Done criteria:**
+  - `voke synth` for hello-api exits 0 with the expected properties.
+  - `synthesis.timeout: 31` on an HTTP Function fails `voke synth` with the 30 s message (checked in a
+    temporary project).
+  - The `runtime.lambda`/`nodejs` grep over core `src` (excluding the migrator) is empty.
+
+AWS documentation checked on 2026-11-14 (no STOP condition):
+
+- Lambda memory 128–10,240 MB and timeout 1–900 s. CloudFormation now allows 32,768 MB for Lambda
+  Managed Instances; Voke keeps the standard Lambda limit.
+  https://docs.aws.amazon.com/lambda/latest/dg/configuration-memory.html,
+  https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-lambda-function.html
+- `LoggingConfig.LogGroup` takes a name, so `Ref` works and implies creation order; no `DependsOn` is
+  needed. https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-properties-lambda-function-loggingconfig.html
+- `RetentionInDays` allowed values match the list exactly.
+  https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-logs-loggroup.html
+- HTTP API integration timeout: 30 s and it cannot be raised.
+  https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-quotas.html
+- `CorsConfiguration` fields, with `*` valid in origins, methods and headers.
+  https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-properties-apigatewayv2-api-cors.html
+- SQS: visibility timeout at least 6× the Function timeout **plus `MaximumBatchingWindowInSeconds`**, and
+  Lambda rejects mappings where the Function timeout exceeds the visibility timeout.
+  https://docs.aws.amazon.com/lambda/latest/dg/services-sqs-configure.html
+
+Adaptations and deviations:
+
+- The derived visibility timeout adds the batching window, per the AWS guidance above (the plan said 6×).
+- The Function timeout and memory limit errors use `VokeModelError.validation` at
+  `functions.<name>.synthesis.<field>`, and the `aws()` option errors use `VokeConfigError.validation`
+  at `aws.lambda.<field>`.
+- New files outside the listed scope:
+  - `packages/core/src/numbers.ts`, a positive-integer issue helper shared by config and model;
+  - `packages/aws/src/lambda-settings.ts`;
+  - `packages/aws/src/deploy.ts`, which passes the settings into the deployed template;
+  - the four CloudFormation fixtures under `packages/core/test/fixtures`, regenerated and reviewed;
+  - `public-surface.test.ts`, which now lists `awsLambda`.
+- `voke` now also exports the `VokeCorsConfig`, `VokeRuntimeConfig` and `VokeModelFunction` types.
+- The config reference no longer lists the top-level `local` setting that plan 010 removed.
+- `docs/error-conventions.md` does not point users at `voke/response`: core exports no response helpers.
+- Not verified: the explicit log group under the local emulator (`voke local bootstrap` against Floci),
+  which needs Docker, and any real AWS deploy.

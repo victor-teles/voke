@@ -36,33 +36,39 @@ const customProvider: LocalProvider = {
 };
 
 assertConfigInput({
-  name: "node-runtime-api",
+  name: "runtime-defaults-api",
   runtime: {
-    lambda: "nodejs22.x",
+    memory: 512,
+    timeout: 30,
   },
 });
 
 assertConfigInput({
-  name: "new-node-runtime-api",
+  name: "lambda-runtime-api",
   runtime: {
+    // @ts-expect-error The Lambda runtime moved to aws({ lambda: { runtime } }).
     lambda: "nodejs24.x",
   },
 });
 
+assertConfigInput({ api: { cors: true }, name: "open-cors-api" });
+
 assertConfigInput({
-  name: "unsupported-runtime-api",
-  runtime: {
-    // @ts-expect-error Voke only supports nodejs22.x and nodejs24.x.
-    lambda: "nodejs20.x",
+  api: {
+    cors: {
+      credentials: true,
+      headers: ["authorization"],
+      maxAgeSeconds: 600,
+      origins: ["https://app.example"],
+    },
   },
+  name: "explicit-cors-api",
 });
 
 assertConfigInput({
-  name: "non-node-runtime-api",
-  runtime: {
-    // @ts-expect-error Voke only supports nodejs22.x and nodejs24.x.
-    lambda: "python3.12",
-  },
+  // @ts-expect-error CORS origins are a list.
+  api: { cors: { origins: "https://app.example" } },
+  name: "bad-cors-api",
 });
 
 // The Local AWS Provider is an AWS Provider option: aws({ local }).

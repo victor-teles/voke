@@ -29,7 +29,9 @@
           "Resource": "ordersQueue"
         }
       },
-      "Properties": {},
+      "Properties": {
+        "VisibilityTimeout": 90
+      },
       "Type": "AWS::SQS::Queue"
     },
     "PriorityQueue": {
@@ -39,7 +41,9 @@
           "Resource": "priorityQueue"
         }
       },
-      "Properties": {},
+      "Properties": {
+        "VisibilityTimeout": 120
+      },
       "Type": "AWS::SQS::Queue"
     },
     "ProcessOrdersFunctionRole": {
@@ -120,12 +124,27 @@
         },
         "FunctionName": "orders-worker-prod-processOrders",
         "Handler": "process-orders.handler",
+        "Architectures": ["arm64"],
+        "LoggingConfig": {
+          "LogGroup": {
+            "Ref": "ProcessOrdersFunctionLogGroup"
+          }
+        },
+        "MemorySize": 1024,
         "Role": {
           "Fn::GetAtt": ["ProcessOrdersFunctionRole", "Arn"]
         },
-        "Runtime": "nodejs22.x"
+        "Runtime": "nodejs22.x",
+        "Timeout": 15
       },
       "Type": "AWS::Lambda::Function"
+    },
+    "ProcessOrdersFunctionLogGroup": {
+      "Properties": {
+        "LogGroupName": "/aws/lambda/orders-worker-prod-processOrders",
+        "RetentionInDays": 14
+      },
+      "Type": "AWS::Logs::LogGroup"
     },
     "ProcessOrdersFunctionOrdersQueueEventSourceMapping": {
       "Properties": {

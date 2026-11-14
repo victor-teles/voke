@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 
 import {
   aws,
+  awsLambda,
   createAuthorizers,
   jwtAuthorizer,
   lambdaAuthorizer,
@@ -137,7 +138,7 @@ test("matches the CloudFormation snapshot for an API stack with explicit functio
         EMAIL_FROM: "hello@example.com",
       },
       handler: "send-welcome-email.handler",
-      runtime: "nodejs24.x",
+      provider: awsLambda({ runtime: "nodejs24.x" }),
     },
   });
   const template = synthesizeCloudFormation({

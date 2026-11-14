@@ -7,10 +7,10 @@ import type {
   RequestAuthorizerFunctionDefinition,
   RequestAuthorizerHandler,
 } from "./authorizers";
-import type { VokeNodeRuntime } from "./config";
 import type { VokeEnv } from "./context";
 import { VokeConfigError } from "./errors";
 import { json, jsonError } from "./http";
+import type { VokeModelProviderExtensionRecord } from "./model";
 import type { VokeProvider } from "./provider";
 import { Voke } from "./route-builder";
 import { readEnv, sleep } from "./runtime-env";
@@ -99,7 +99,15 @@ export interface FunctionSynthesisConfig {
   entrypoint?: string;
   environment?: Record<string, string>;
   handler?: string;
-  runtime?: VokeNodeRuntime;
+  /** Memory for this Function, in MB. Overrides `runtime.memory`. */
+  memory?: number;
+  /**
+   * Provider-specific settings, keyed by Provider name. Voke copies them to the model untouched;
+   * the Provider validates and applies them. Each Provider package exports a builder for its record.
+   */
+  provider?: Record<string, VokeModelProviderExtensionRecord>;
+  /** Maximum run time for this Function, in seconds. Overrides `runtime.timeout`. */
+  timeout?: number;
 }
 
 export interface StandardSchemaIssue {

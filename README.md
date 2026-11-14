@@ -112,6 +112,20 @@ const tableName = usersTable.value();
 
 Resource helpers are included for DynamoDB, SQS, SNS, EventBridge, S3, Secrets Manager, and Parameter Store.
 
+### Defaults
+
+A deployed stack is production-safe without tuning: each Function gets 15 seconds, 1024 MB, `arm64`, `nodejs22.x`, and its own log group that keeps logs for 14 days. An SQS queue's visibility timeout follows the Functions that consume it. Unhandled errors return `Internal server error` and are logged, never sent to the client. Change a default with `runtime.timeout`/`runtime.memory`, `aws({ lambda: { runtime, architecture, logRetentionDays } })`, or per Function with `synthesis` (see the config reference).
+
+Turn on CORS for browser clients. The same setting applies to `voke dev` and the deployed HTTP API:
+
+```ts
+export default defineConfig({
+  name: "hello-api",
+  provider: aws(),
+  api: { cors: { origins: ["https://app.example"], credentials: true } },
+});
+```
+
 ## Runtime Variables
 
 Declare provider-backed runtime values on the Function that uses them, then read them through `context.variables`. AWS Secrets Manager and SSM Parameter Store are available from `voke/aws` without importing AWS clients in application code:

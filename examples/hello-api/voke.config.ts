@@ -3,16 +3,16 @@ import { dynamodbTable, sqsQueue } from "@voke/aws/cloudformation";
 import { defineConfig } from "voke";
 
 export default defineConfig({
+  api: {
+    cors: true,
+  },
   entrypoint: "./src/index.ts",
   name: "hello-api",
-  provider: aws(),
+  provider: aws({ lambda: { runtime: "nodejs24.x" } }),
   region: "us-east-1",
   resources: {
     eventsQueue: sqsQueue(),
     usersTable: dynamodbTable({ partitionKey: "id" }),
-  },
-  runtime: {
-    lambda: "nodejs24.x",
   },
   stage: "local",
 });

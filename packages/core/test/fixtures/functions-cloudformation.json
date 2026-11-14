@@ -91,12 +91,27 @@
         },
         "FunctionName": "sendWelcomeEmail",
         "Handler": "send-welcome-email.handler",
+        "Architectures": ["arm64"],
+        "LoggingConfig": {
+          "LogGroup": {
+            "Ref": "SendWelcomeEmailFunctionLogGroup"
+          }
+        },
+        "MemorySize": 1024,
         "Role": {
           "Fn::GetAtt": ["SendWelcomeEmailFunctionRole", "Arn"]
         },
-        "Runtime": "nodejs24.x"
+        "Runtime": "nodejs24.x",
+        "Timeout": 15
       },
       "Type": "AWS::Lambda::Function"
+    },
+    "SendWelcomeEmailFunctionLogGroup": {
+      "Properties": {
+        "LogGroupName": "/aws/lambda/sendWelcomeEmail",
+        "RetentionInDays": 14
+      },
+      "Type": "AWS::Logs::LogGroup"
     }
   }
 }

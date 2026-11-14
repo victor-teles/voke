@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { rm } from "node:fs/promises";
 
 import {
@@ -30,7 +30,7 @@ import { VokeConfigError } from "../src/errors";
 import { fn, createFunctions, http } from "../src/invoke";
 import type { StandardSchemaV1 } from "../src/invoke";
 import { route } from "../src/route-builder";
-import { setEnv } from "./support/env";
+import { setEnv, withEnv } from "./support/env";
 import { tempPath } from "./support/temp";
 
 const lambdaEvent = (overrides: Record<string, unknown>): LambdaEvent => {
@@ -405,41 +405,11 @@ test("normalizes project and CloudFormation settings through defineConfig", () =
       ordersTable: dynamodbTable({ partitionKey: "id" }),
     },
     runtime: {
-      lambda: "nodejs22.x",
+      memory: 1024,
+      timeout: 15,
     },
     stage: "prod",
   });
-});
-
-test("only supports nodejs22 and nodejs24 Lambda runtimes in defineConfig", () => {
-  expect(
-    defineConfig({
-      name: "runtime-api",
-      runtime: {
-        lambda: "nodejs24.x",
-      },
-    }).runtime.lambda
-  ).toBe("nodejs24.x");
-  expect(() =>
-    defineConfig({
-      name: "runtime-api",
-      runtime: {
-        lambda: "nodejs20.x",
-      },
-    } as unknown as Parameters<typeof defineConfig>[0])
-  ).toThrow(
-    'Invalid Voke config at runtime.lambda: expected one of "nodejs22.x", "nodejs24.x"; received "nodejs20.x"'
-  );
-  expect(() =>
-    defineConfig({
-      name: "runtime-api",
-      runtime: {
-        lambda: "python3.12",
-      },
-    } as unknown as Parameters<typeof defineConfig>[0])
-  ).toThrow(
-    'Invalid Voke config at runtime.lambda: expected one of "nodejs22.x", "nodejs24.x"; received "python3.12"'
-  );
 });
 
 test("exposes AWS resource helpers from @voke/aws", () => {
@@ -781,4 +751,120 @@ export default defineConfig({
   const template = await Bun.file(templatePath).json();
 
   expect(template.Resources.Function.Type).toBe("AWS::Lambda::Function");
+});
+
+const failingGateway = (stage: string) =>
+  voke(
+    createFunctions({
+      http: http({
+        routes: [
+          route.get("/boom", {
+            handler: () => {
+              throw new Error("db password=hunter2");
+            },
+          }),
+        ],
+      }),
+    }),
+    { config: { name: "failing-api", stage } }
+  );
+
+test("never sends an unhandled error message to the client, even on the local stage", async () => {
+  const errorLog = spyOn(console, "error").mockImplementation(() => {});
+
+  try {
+    for (const stage of ["local", "prod"]) {
+      const response = await withEnv({ VOKE_DEV_SUMMARY: undefined }, () =>
+        failingGateway(stage).request("/boom")
+      );
+      const body = await response.text();
+
+      expect(response.status).toBe(500);
+      expect(JSON.parse(body)).toEqual({
+        error: {
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Internal server error",
+        },
+      });
+      expect(body).not.toContain("hunter2");
+    }
+
+    expect(errorLog).toHaveBeenCalledTimes(2);
+
+    const [line] = errorLog.mock.calls[0] ?? [];
+
+    expect(typeof line).toBe("string");
+    expect(JSON.parse(String(line))).toMatchObject({
+      level: "error",
+      message: "db password=hunter2",
+      name: "Error",
+      stack: expect.any(String),
+    });
+  } finally {
+    errorLog.mockRestore();
+  }
+});
+
+test("includes the original error message only under voke dev", async () => {
+  const errorLog = spyOn(console, "error").mockImplementation(() => {});
+  const gateway = failingGateway("local");
+
+  try {
+    const response = await withEnv({ VOKE_DEV_SUMMARY: "1" }, () =>
+      gateway.request("/boom")
+    );
+
+    expect(await response.json()).toEqual({
+      error: {
+        code: "INTERNAL_SERVER_ERROR",
+        details: { message: "db password=hunter2" },
+        message: "Internal server error",
+      },
+    });
+  } finally {
+    errorLog.mockRestore();
+  }
+});
+
+const corsGateway = (
+  cors?: boolean | { credentials: boolean; origins: string[] }
+) =>
+  voke(
+    createFunctions({
+      http: http({
+        routes: [route.get("/health", { handler: () => ({ ok: true }) })],
+      }),
+    }),
+    {
+      config: {
+        ...(cors === undefined ? {} : { api: { cors } }),
+        name: "cors-api",
+      },
+    }
+  );
+
+const preflight = {
+  headers: {
+    "Access-Control-Request-Method": "GET",
+    Origin: "https://app.example",
+  },
+  method: "OPTIONS",
+};
+
+test("answers CORS preflight locally the way api.cors configures the deployed API", async () => {
+  const open = await corsGateway(true).request("/health", preflight);
+  const explicit = await corsGateway({
+    credentials: true,
+    origins: ["https://app.example"],
+  }).request("/health", preflight);
+  const off = await corsGateway().request("/health", preflight);
+
+  expect(open.headers.get("access-control-allow-origin")).toBe("*");
+  expect(open.headers.get("access-control-allow-methods")).toBe("*");
+  expect(open.headers.get("access-control-allow-headers")).toBe("*");
+  expect(explicit.headers.get("access-control-allow-origin")).toBe(
+    "https://app.example"
+  );
+  expect(explicit.headers.get("access-control-allow-credentials")).toBe("true");
+  expect(off.headers.get("access-control-allow-origin")).toBeNull();
 });

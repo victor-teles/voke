@@ -21,7 +21,7 @@ import { VokeConfigError } from "../src/errors";
 import { fn, createFunctions, http } from "../src/invoke";
 import type { SqsMessageBatch, StandardSchemaV1 } from "../src/invoke";
 import { createInternalModel } from "../src/model";
-import { Voke } from "../src/route-builder";
+import { route, Voke } from "../src/route-builder";
 
 const schema = <TValue>(): StandardSchemaV1<TValue, TValue> => ({
   "~standard": {
@@ -52,7 +52,7 @@ test("builds a small serializable model from normalized config", () => {
         ordersTable: dynamodbTable({ partitionKey: "pk", sortKey: "sk" }),
       },
       runtime: {
-        lambda: "nodejs22.x",
+        memory: 512,
       },
       stage: "prod",
     }),
@@ -110,8 +110,9 @@ test("builds a small serializable model from normalized config", () => {
         eventSources: [],
         handler: "index.api",
         invokable: false,
+        memory: 512,
         routes: ["GET /orders", "POST /orders"],
-        runtime: "nodejs22.x",
+        timeout: 15,
         variables: {},
       },
     },
@@ -340,7 +341,14 @@ test("maps explicit function definitions from config into the model", () => {
         EMAIL_FROM: "hello@example.com",
       },
       handler: "send-welcome-email.handler",
-      runtime: "nodejs24.x",
+      memory: 256,
+      provider: {
+        aws: {
+          properties: { architecture: "x86_64" },
+          type: "lambda.function",
+        },
+      },
+      timeout: 60,
     },
   });
   const model = createInternalModel({
@@ -371,8 +379,12 @@ test("maps explicit function definitions from config into the model", () => {
     eventSources: [],
     handler: "send-welcome-email.handler",
     invokable: true,
+    memory: 256,
+    provider: {
+      aws: { properties: { architecture: "x86_64" }, type: "lambda.function" },
+    },
     routes: [],
-    runtime: "nodejs24.x",
+    timeout: 60,
     variables: {},
   });
 });
@@ -779,4 +791,72 @@ test("rejects invalid AWS resource-key Runtime Variables during model creation",
       ],
     });
   }
+});
+
+test("resolves Function timeout and memory from synthesis, then runtime, then defaults", () => {
+  const model = createInternalModel({
+    functions: createFunctions({
+      configured: fn({
+        handler: () => ({ ok: true }),
+        output: schema<{ ok: boolean }>(),
+      }),
+      tuned: fn({
+        handler: () => ({ ok: true }),
+        output: schema<{ ok: boolean }>(),
+        synthesis: { memory: 2048, timeout: 120 },
+      }),
+    }),
+    name: "resolution-api",
+    runtime: { timeout: 45 },
+  });
+
+  expect(model.functions.configured).toMatchObject({
+    memory: 1024,
+    timeout: 45,
+  });
+  expect(model.functions.tuned).toMatchObject({ memory: 2048, timeout: 120 });
+  expect("provider" in (model.functions.configured ?? {})).toBe(false);
+});
+
+test("rejects invalid Function synthesis timeout, memory and the moved runtime", () => {
+  const modelWith = (synthesis: Record<string, unknown>) => () =>
+    createInternalModel({
+      functions: createFunctions({
+        worker: fn({
+          handler: () => ({ ok: true }),
+          output: schema<{ ok: boolean }>(),
+          synthesis: synthesis as never,
+        }),
+      }),
+      name: "invalid-synthesis-api",
+    });
+
+  expect(modelWith({ timeout: 0 })).toThrow(
+    "Invalid Voke config at functions.worker.synthesis.timeout: expected a positive integer number of seconds; received 0"
+  );
+  expect(modelWith({ memory: 64.5 })).toThrow(
+    "Invalid Voke config at functions.worker.synthesis.memory: expected a positive integer number of MB; received 64.5"
+  );
+  expect(modelWith({ runtime: "nodejs24.x" })).toThrow(
+    'Invalid Voke config at functions.worker.synthesis.runtime: "synthesis.runtime" moved; use synthesis.provider.aws'
+  );
+});
+
+test("carries normalized CORS onto the HTTP API model", () => {
+  const model = createInternalModel({
+    api: { cors: true },
+    functions: createFunctions({
+      api: http({
+        routes: [route.get("/health", { handler: () => ({ ok: true }) })],
+      }),
+    }),
+    name: "cors-api",
+  });
+
+  expect(model.apis.http?.cors).toEqual({
+    credentials: false,
+    headers: ["*"],
+    methods: ["*"],
+    origins: ["*"],
+  });
 });
