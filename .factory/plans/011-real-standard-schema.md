@@ -287,8 +287,8 @@ list any remaining match and confirm it is unrelated).
 
 ## Execution notes (2026-11-14)
 
-Done on branch `feature/real-standard-schema`, stacked on plan 007 (`feature/aws-emulator-local-provider`,
-PR #59). Uncommitted. Gates: `bun run check` 0 errors, `bun run typecheck` 18/18, `bun run test`
+Done on branch `feature/real-standard-schema` (PR #60), stacked on plan 007 (`feature/aws-emulator-local-provider`,
+PR #59). Gates: `bun run check` 0 errors, `bun run typecheck` 18/18, `bun run test`
 23/23 tasks (core 247, `@voke/aws` 99, `@voke/schema` 2).
 
 - **One module:** `packages/core/src/standard-schema.ts` holds the specification-shaped types
