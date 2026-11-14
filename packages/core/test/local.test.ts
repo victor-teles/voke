@@ -282,17 +282,15 @@ test("creates a local bootstrap plan by synthesizing from Voke config", async ()
     `voke-local-config-${crypto.randomUUID()}/template.json`
   );
   const config = defineConfig({
-    cloudFormation: {
-      environment: {
-        LOG_LEVEL: "info",
-      },
-      resources: {
-        ordersTable: dynamodbTable({ partitionKey: "id" }),
-      },
-    },
     entrypoint: "./src/index.ts",
+    environment: {
+      LOG_LEVEL: "info",
+    },
     name: "orders-api",
     region: "sa-east-1",
+    resources: {
+      ordersTable: dynamodbTable({ partitionKey: "id" }),
+    },
     stage: "local",
   });
 
@@ -414,10 +412,8 @@ export default defineConfig({
   name: "jobs-api",
   stage: "local",
   region: "sa-east-1",
-  cloudFormation: {
-    resources: {
-      jobsQueue: sqsQueue(),
-    },
+  resources: {
+    jobsQueue: sqsQueue(),
   },
 });
 `

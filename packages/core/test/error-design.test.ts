@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import { bindResource } from "@voke/aws";
 
 import { runCli } from "../src/cli";
-import { defineConfig } from "../src/config";
+import { defineConfig, loadVokeConfig } from "../src/config";
 import { createDevPlan } from "../src/dev";
 import {
   VokeConfigError,
@@ -13,6 +13,7 @@ import {
 } from "../src/errors";
 import { createInternalModel } from "../src/model";
 import { createServerlessMigration } from "../src/serverless-migration";
+import { withEnv } from "./support/env";
 import { tempPath } from "./support/temp";
 
 test("standardizes framework error types for public workflows", async () => {
@@ -27,20 +28,18 @@ test("standardizes framework error types for public workflows", async () => {
 
   expect(() =>
     createInternalModel({
-      cloudFormation: {
-        resources: {
-          ordersTable: {
-            actions: ["dynamodb:GetItem"],
-            bindingAttribute: "",
-            bindingValue: "ref",
-            cloudFormationType: "AWS::DynamoDB::Table",
-            outputName: "Name",
-            policyResource: "getAttArn",
-            properties: {},
-          },
+      name: "bad-model-api",
+      resources: {
+        ordersTable: {
+          actions: ["dynamodb:GetItem"],
+          bindingAttribute: "",
+          bindingValue: "ref",
+          cloudFormationType: "AWS::DynamoDB::Table",
+          outputName: "Name",
+          policyResource: "getAttArn",
+          properties: {},
         },
       },
-      name: "bad-model-api",
     })
   ).toThrow(VokeModelError);
 
@@ -72,20 +71,18 @@ test("explains bad config and model input with actionable details", () => {
 
   try {
     createInternalModel({
-      cloudFormation: {
-        resources: {
-          ordersTable: {
-            actions: ["dynamodb:GetItem"],
-            bindingAttribute: "",
-            bindingValue: "ref",
-            cloudFormationType: "AWS::DynamoDB::Table",
-            outputName: "Name",
-            policyResource: "getAttArn",
-            properties: {},
-          },
+      name: "bad-model-api",
+      resources: {
+        ordersTable: {
+          actions: ["dynamodb:GetItem"],
+          bindingAttribute: "",
+          bindingValue: "ref",
+          cloudFormationType: "AWS::DynamoDB::Table",
+          outputName: "Name",
+          policyResource: "getAttArn",
+          properties: {},
         },
       },
-      name: "bad-model-api",
     });
   } catch (error) {
     expect(error).toBeInstanceOf(VokeModelError);
@@ -158,5 +155,49 @@ test("rejects the removed config-first and single-function settings with a path"
   );
   expect(reject({ api: { function: "api" } })).toThrow(
     "Invalid Voke config at api.function"
+  );
+});
+
+test("rejects nested cloudFormation resources and environment with the top-level replacement", () => {
+  expect(reject({ cloudFormation: { resources: {} } })).toThrow(
+    'Invalid Voke config at cloudFormation.resources: "cloudFormation.resources" was removed; declare resources at the top level: resources: { ... }'
+  );
+  expect(reject({ cloudFormation: { environment: {} } })).toThrow(
+    'Invalid Voke config at cloudFormation.environment: "cloudFormation.environment" was removed; declare environment at the top level: environment: { ... }'
+  );
+  expect(
+    defineConfig({
+      cloudFormation: { out: "./stack.json" },
+      environment: { LOG_LEVEL: "info" },
+      name: "top-level",
+      resources: {},
+    })
+  ).toMatchObject({
+    cloudFormation: { out: "./stack.json" },
+    environment: { LOG_LEVEL: "info" },
+    resources: {},
+  });
+});
+
+test("reads the stage from VOKE_STAGE only", async () => {
+  await withEnv({ STAGE: "prod", VOKE_STAGE: undefined }, () => {
+    expect(defineConfig({ name: "stage" }).stage).toBe("local");
+  });
+  await withEnv({ STAGE: undefined, VOKE_STAGE: "prod" }, () => {
+    expect(defineConfig({ name: "stage" }).stage).toBe("prod");
+  });
+});
+
+test("requires a default export from voke.config.ts", async () => {
+  const directory = tempPath(`voke-named-config-${crypto.randomUUID()}`);
+  const configPath = `${directory}/voke.config.ts`;
+
+  await Bun.write(
+    configPath,
+    'export const config = { name: "named-export" };\n'
+  );
+
+  await expect(loadVokeConfig({ path: configPath })).rejects.toThrow(
+    `Voke config must export a default config from ${configPath}`
   );
 });

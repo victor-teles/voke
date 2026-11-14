@@ -1,4 +1,3 @@
-import type { VokeApi } from "./api";
 import { handleAwsLambdaRequest } from "./aws-lambda";
 import type {
   AwsLambdaContext,
@@ -28,7 +27,7 @@ type TestBody = string | ArrayBuffer | Blob | FormData | URLSearchParams;
 
 export type TestClientTarget =
   | HonoLikeApp
-  | VokeApi
+  | { app: HonoLikeApp }
   | {
       baseUrl: string;
       fetch?: FetchLike;
@@ -306,7 +305,9 @@ export const createHttpApiEvent = (
   } as AwsLambdaHttpApiV2Event;
 };
 
-const createLocalRequester = (target: HonoLikeApp | VokeApi): Requester => {
+const createLocalRequester = (
+  target: HonoLikeApp | { app: HonoLikeApp }
+): Requester => {
   const app = "app" in target ? target.app : target;
 
   return async (

@@ -18,24 +18,22 @@ test("creates a config-first Bun hot reload dev plan with local bindings", async
 
   const plan = await createDevPlan(
     defineConfig({
-      cloudFormation: {
-        environment: {
-          LOG_LEVEL: "debug",
-        },
-        resources: {
-          eventsQueue: sqsQueue(),
-          ordersTable: dynamodbTable(),
-        },
-      },
       dev: {
         environment: {
           FEATURE_FLAG: "enabled",
         },
       },
       entrypoint,
+      environment: {
+        LOG_LEVEL: "debug",
+      },
       name: "orders-api",
       provider: aws(),
       region: "sa-east-1",
+      resources: {
+        eventsQueue: sqsQueue(),
+        ordersTable: dynamodbTable(),
+      },
       stage: "local",
     })
   );
@@ -294,13 +292,11 @@ export default defineConfig({
   stage: "local",
   region: "sa-east-1",
   entrypoint: "${apiEntrypoint}",
-  cloudFormation: {
-    environment: {
-      LOG_LEVEL: "info",
-    },
-    resources: {
-      jobsQueue: sqsQueue(),
-    },
+  environment: {
+    LOG_LEVEL: "info",
+  },
+  resources: {
+    jobsQueue: sqsQueue(),
   },
 });
 `

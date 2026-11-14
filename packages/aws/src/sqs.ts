@@ -331,7 +331,7 @@ const parseSqsMessageBatch = async <
   } as StandardSchemaOutput<typeof schema>;
 };
 
-export const sqsEventSource = (
+const sqsEventSource = (
   queue: string,
   options: SqsEventSourceOptions = {}
 ): SqsEventSourceDefinition => ({
@@ -340,7 +340,7 @@ export const sqsEventSource = (
   source: "sqs",
 });
 
-export const sqsMessageBatch = <
+const sqsMessageBatch = <
   const TBodySchema extends AnyStandardSchema,
   const TInvalidMessageBody extends SqsInvalidMessageBodyMode = "fail",
 >(

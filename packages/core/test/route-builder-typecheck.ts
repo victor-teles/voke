@@ -1,5 +1,5 @@
-import { createGateway } from "../src/app";
-import { defineFunction, defineFunctions } from "../src/invoke";
+import { voke } from "../src/app";
+import { fn, createFunctions } from "../src/invoke";
 import type { StandardSchemaV1 } from "../src/invoke";
 import { Voke } from "../src/route-builder";
 
@@ -36,17 +36,17 @@ const healthRoute = app.get("/health", {
   output: schema<{ ok: boolean }>(),
 });
 
-const functions = defineFunctions({
-  health: defineFunction({
+const functions = createFunctions({
+  health: fn({
     handler: () => ({ ok: true }),
     output: schema<{ ok: boolean }>(),
   }),
-  lookupUser: defineFunction({
+  lookupUser: fn({
     handler: (payload) => ({ id: payload.id, name: "Victor" }),
     input: schema<{ id: string }>(),
     output: schema<{ id: string; name: string }>(),
   }),
-  users: defineFunction({
+  users: fn({
     routes: [getUserRoute, createUserRoute, healthRoute],
   }),
 });
@@ -75,7 +75,7 @@ const _lookupUser: Promise<{ id: string; name: string }> = functions.invoke(
   "lookupUser",
   { id: "usr_1" }
 );
-const gateway = createGateway({ functions });
+const gateway = voke(functions, { config: { name: "api" } });
 const _gatewayResponse: Response | Promise<Response> =
   gateway.request("/health");
 

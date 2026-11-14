@@ -69,7 +69,6 @@ export type {
   RequestAuthorizerFunctionInput,
   RequestAuthorizerHandler,
 } from "./authorizers";
-export { toEnvKey } from "./env-key";
 export type { VokeEnv } from "./context";
 export {
   createInternalModel as createVokeModel,

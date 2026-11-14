@@ -1873,7 +1873,7 @@ const sendEventToFunction = async (
   return await definition.handler(parsedEvent, context);
 };
 
-export function defineFunction<
+export function fn<
   const TInputSchema extends AnyStandardSchema,
   const TOutputSchema extends AnyStandardSchema,
   const TVariables extends RuntimeVariableCatalog = Record<never, never>,
@@ -1884,7 +1884,7 @@ export function defineFunction<
     TVariables
   >
 ): InvokableFunctionDefinition<string, TInputSchema, TOutputSchema, TVariables>;
-export function defineFunction<
+export function fn<
   const TOutputSchema extends AnyStandardSchema,
   const TVariables extends RuntimeVariableCatalog = Record<never, never>,
 >(
@@ -1893,7 +1893,7 @@ export function defineFunction<
     TVariables
   >
 ): InvokableFunctionDefinition<string, undefined, TOutputSchema, TVariables>;
-export function defineFunction<
+export function fn<
   const TInputSchema extends SqsMessageBatchSchema<
     AnyStandardSchema,
     SqsInvalidMessageBodyMode
@@ -1902,7 +1902,7 @@ export function defineFunction<
 >(
   definition: EventFunctionDefinitionInput<TInputSchema, TVariables>
 ): EventFunctionDefinition<string, TInputSchema, TVariables>;
-export function defineFunction<
+export function fn<
   const TRoutes extends readonly AnyRouteDefinition[],
   const TVariables extends RuntimeVariableCatalog = Record<never, never>,
 >(
@@ -1910,7 +1910,7 @@ export function defineFunction<
     readonly variables?: TVariables;
   }
 ): RouteFunctionDefinition<string, TRoutes, TVariables>;
-export function defineFunction(
+export function fn(
   definition:
     | InvokableFunctionWithInputDefinitionInput<
         AnyStandardSchema,
@@ -1966,8 +1966,6 @@ export function defineFunction(
     routes: definition.routes ?? [],
   };
 }
-
-export const fn = defineFunction;
 
 export const http = <
   const TRoutes extends AnyRouteDefinition | readonly AnyRouteDefinition[],
@@ -2218,7 +2216,7 @@ export const formatDevFunctionSummary = (
   return [formatDevHeader(), ...sections].join("\n\n").trimEnd();
 };
 
-export const defineFunctions = <const TRegistry extends FunctionRegistryInput>(
+export const createFunctions = <const TRegistry extends FunctionRegistryInput>(
   registry: TRegistry
 ): FunctionRegistry<TRegistry> => {
   const functions = {} as Record<string, AnyFunctionDefinition>;
@@ -2308,8 +2306,6 @@ export const defineFunctions = <const TRegistry extends FunctionRegistryInput>(
 
   return Object.freeze(functions) as FunctionRegistry<TRegistry>;
 };
-
-export const createFunctions = defineFunctions;
 
 export const withInvokeTrace = async <TResult>(
   trace: InvokeTrace,

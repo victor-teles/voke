@@ -148,3 +148,19 @@ voke(providerFunctions, {
   // @ts-expect-error Set the Provider in config: voke(functions, { config: { provider } }).
   provider: { name: "test" },
 });
+
+// One spelling per setting: resources and environment are top-level; cloudFormation holds only `out`.
+assertConfigInput({
+  cloudFormation: { out: "./dist/stack.json" },
+  environment: { LOG_LEVEL: "info" },
+  name: "top-level-resources",
+  resources: {},
+});
+
+assertConfigInput({
+  cloudFormation: {
+    // @ts-expect-error Declare resources at the top level.
+    resources: {},
+  },
+  name: "nested-resources",
+});

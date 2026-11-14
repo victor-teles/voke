@@ -23,33 +23,16 @@ import type {
   RuntimeVariableProvider,
 } from "./variables";
 
-export interface ApiRouteModule<TEnv extends VokeEnv = VokeEnv> {
-  basePath?: string;
-  routes: Hono<TEnv>;
-}
-
-export interface ApiAppOptions {
-  config: VokeConfigInput;
-  middleware?: MiddlewareHandler<VokeEnv>[];
-  routes?: ApiRouteModule[];
-}
-
-export interface GatewayOptions {
-  config?: VokeConfigInput;
-  functions?: FunctionRegistry | FunctionRegistryInput;
-  middleware?: MiddlewareHandler<VokeEnv>[];
-  routes?: ApiRouteModule[];
-  variables?: {
-    overrides?: RuntimeVariableOverrides;
-    providers?: readonly RuntimeVariableProvider[];
-  };
+export interface GatewayVariableOptions {
+  overrides?: RuntimeVariableOverrides;
+  providers?: readonly RuntimeVariableProvider[];
 }
 
 export interface VokeOptions {
   /** Project config. The Provider is set here (`provider: aws()`), never on `voke()`. */
   config?: VokeConfigInput;
   middleware?: MiddlewareHandler<VokeEnv>[];
-  variables?: GatewayOptions["variables"];
+  variables?: GatewayVariableOptions;
 }
 
 export type Middleware = MiddlewareHandler<VokeEnv>;
@@ -129,16 +112,22 @@ const handleRouteError = (error: Error): Response => {
   );
 };
 
-const apiAppConfig = new WeakMap<object, VokeConfig>();
+// The configured Provider supplies its Runtime Variable providers (for example the AWS
+// Secrets Manager/SSM loader); explicit providers are added after them.
+const gatewayVariableProviders = (
+  config: VokeConfig,
+  variables: GatewayVariableOptions | undefined
+): RuntimeVariableProvider[] => [
+  ...(config.provider?.runtime?.variables?.() ?? []),
+  ...(variables?.providers ?? []),
+];
 
-export const getApiAppConfig = (app: object): VokeConfig | undefined =>
-  apiAppConfig.get(app);
-
-export const createApiApp = (options: ApiAppOptions): Hono<VokeEnv> => {
+const createGatewayApp = (
+  config: VokeConfig,
+  functions: FunctionRegistry | FunctionRegistryInput,
+  options: VokeOptions
+): Hono<VokeEnv> => {
   const app = new Hono<VokeEnv>();
-  const config = defineConfig(options.config);
-
-  apiAppConfig.set(app, config);
 
   app.use("*", async (c, next) => {
     const env = (c.env ??= {});
@@ -153,66 +142,22 @@ export const createApiApp = (options: ApiAppOptions): Hono<VokeEnv> => {
   app.notFound(() =>
     jsonError("Route not found", { code: "NOT_FOUND", status: 404 })
   );
-
   app.onError(handleRouteError);
 
-  for (const route of options.routes ?? []) {
-    app.route(route.basePath ?? "/", route.routes);
+  assertUniqueFunctionRoutes(functions);
+  assertRouteParamSchemas(functions);
+  activateFunctionRegistry(functions, activationKey(config), {
+    variableOverrides: options.variables?.overrides,
+    variableProviders: gatewayVariableProviders(config, options.variables),
+  });
+  mountFunctionRoutes(app, functions, config.provider);
+
+  if (readEnv("VOKE_DEV_SUMMARY") === "1") {
+    mountDevFunctionEndpoints(app, { functions, project: config.name });
+    console.info(formatDevFunctionSummary(functions));
   }
 
   return app;
-};
-
-// The configured Provider supplies its Runtime Variable providers (for example the AWS
-// Secrets Manager/SSM loader); explicit providers are added after them.
-const gatewayVariableProviders = (
-  options: GatewayOptions
-): RuntimeVariableProvider[] => {
-  const provider = options.config?.provider;
-
-  return [
-    ...(provider?.runtime?.variables?.() ?? []),
-    ...(options.variables?.providers ?? []),
-  ];
-};
-
-export const createGateway = (options: GatewayOptions = {}): Hono<VokeEnv> => {
-  const configInput: VokeConfigInput = {
-    ...options.config,
-    name: options.config?.name ?? "api",
-  };
-  const gateway = createApiApp({
-    config: configInput,
-    middleware: options.middleware,
-    routes: options.routes,
-  });
-  const { functions } = options;
-
-  if (functions !== undefined) {
-    const config = getApiAppConfig(gateway);
-
-    assertUniqueFunctionRoutes(functions);
-    assertRouteParamSchemas(functions);
-    activateFunctionRegistry(
-      functions,
-      activationKey(config ?? defineConfig(configInput)),
-      {
-        variableOverrides: options.variables?.overrides,
-        variableProviders: gatewayVariableProviders(options),
-      }
-    );
-    mountFunctionRoutes(gateway, functions, configInput.provider);
-
-    if (readEnv("VOKE_DEV_SUMMARY") === "1") {
-      mountDevFunctionEndpoints(gateway, {
-        functions,
-        project: configInput.name,
-      });
-      console.info(formatDevFunctionSummary(functions));
-    }
-  }
-
-  return gateway;
 };
 
 const loadRuntimeConfig = (): VokeConfigInput => {
@@ -221,8 +166,8 @@ const loadRuntimeConfig = (): VokeConfigInput => {
 
   try {
     // oxlint-disable-next-line unicorn/prefer-module, node/global-require -- voke(functions) composes synchronously, so source config loading needs Bun's sync require path.
-    const module = require(path) as { config?: unknown; default?: unknown };
-    const config = module.default ?? module.config;
+    const module = require(path) as { default?: unknown };
+    const config = module.default;
 
     if (config === undefined) {
       throw new VokeConfigError(
@@ -247,14 +192,8 @@ export const voke = <const TFunctions extends FunctionRegistry>(
   functions: TFunctions,
   options: VokeOptions = {}
 ): GatewayRuntime<TFunctions> => {
-  const configInput = options.config ?? loadRuntimeConfig();
-  const config = defineConfig(configInput);
-  const app = createGateway({
-    config: configInput,
-    functions,
-    middleware: options.middleware,
-    variables: options.variables,
-  });
+  const config = defineConfig(options.config ?? loadRuntimeConfig());
+  const app = createGatewayApp(config, functions, options);
 
   return {
     app,
@@ -265,11 +204,3 @@ export const voke = <const TFunctions extends FunctionRegistry>(
     request: app.request.bind(app) as Hono<VokeEnv>["request"],
   };
 };
-
-export const routeModule = <TEnv extends VokeEnv>(
-  routes: Hono<TEnv>,
-  options: { basePath?: string } = {}
-): ApiRouteModule<TEnv> => ({
-  basePath: options.basePath,
-  routes,
-});

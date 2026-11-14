@@ -4,8 +4,7 @@ import { bindResource } from "@voke/aws";
 import { dynamodbTable, sqsQueue } from "@voke/aws/cloudformation";
 import { Hono } from "hono";
 
-import { api } from "../src/api";
-import { createGateway } from "../src/app";
+import { voke } from "../src/app";
 import { synthesizeCloudFormation } from "../src/cloudformation";
 import { awsContext, awsEvent, requestId } from "../src/context";
 import type { VokeEnv } from "../src/context";
@@ -15,11 +14,7 @@ import {
   createStackTestContext,
   createTestClient,
 } from "../src/e2e";
-import {
-  defineFunctions,
-  defineFunction,
-  withInvokeTrace,
-} from "../src/invoke";
+import { createFunctions, fn, withInvokeTrace } from "../src/invoke";
 import type { StandardSchemaV1 } from "../src/invoke";
 import { ok as json } from "../src/response";
 import { withEnv } from "./support/env";
@@ -145,12 +140,12 @@ test("creates explicit HTTP API events for local harness assertions", () => {
   });
 });
 
-test("supports Voke API targets in the local test client", async () => {
+test("supports Gateway-shaped { app } targets in the local test client", async () => {
   const app = new Hono();
 
   app.put("/health", () => json({ ok: true }));
 
-  const client = createTestClient(api(app, { name: "health-api" }));
+  const client = createTestClient({ app });
   const response = await client.put("/health");
 
   expect(response.status).toBe(200);
@@ -319,7 +314,7 @@ test("creates stack contexts with endpoint, account, and region overrides", () =
 });
 
 test("creates invoke test helpers for worker flows", async () => {
-  const getUser = defineFunction({
+  const getUser = fn({
     handler: (payload, context) => ({
       id: payload.id,
       name: "Victor",
@@ -332,7 +327,7 @@ test("creates invoke test helpers for worker flows", async () => {
       requestId: string | number | boolean | undefined;
     }>(),
   });
-  const registry = defineFunctions({ getUser });
+  const registry = createFunctions({ getUser });
   const client = createInvokeTestClient(registry);
 
   const user = await client.invoke(
@@ -371,8 +366,8 @@ test("creates invoke test helpers for worker flows", async () => {
 });
 
 test("creates invoke test helpers for registry functions", async () => {
-  const registry = defineFunctions({
-    pingWorker: defineFunction({
+  const registry = createFunctions({
+    pingWorker: fn({
       handler: (_payload, context) => ({
         ok: true,
         requestId: context.trace.requestId,
@@ -406,8 +401,8 @@ test("creates invoke test helpers for registry functions", async () => {
 });
 
 test("propagates invoke trace through local API to function calls", async () => {
-  const functions = defineFunctions({
-    getApiUser: defineFunction({
+  const functions = createFunctions({
+    getApiUser: fn({
       handler: (payload, context) => ({
         id: payload.id,
         requestId: context.trace.requestId,
@@ -419,7 +414,7 @@ test("propagates invoke trace through local API to function calls", async () => 
       }>(),
     }),
   });
-  createGateway({ functions });
+  voke(functions, { config: { name: "api" } });
 
   const app = new Hono();
 
@@ -446,11 +441,11 @@ test("propagates invoke trace through local API to function calls", async () => 
 });
 
 test("merges nested invoke traces with explicit invoke options winning", async () => {
-  const audit = defineFunction({
+  const audit = fn({
     handler: (_payload, context) => context.trace,
     output: schema<Record<string, string | number | boolean | undefined>>(),
   });
-  const client = createInvokeTestClient(defineFunctions({ auditTrace: audit }));
+  const client = createInvokeTestClient(createFunctions({ auditTrace: audit }));
 
   const auditTrace = await withInvokeTrace(
     { requestId: "outer", tenant: "acme" },
@@ -477,15 +472,15 @@ test("exposes local resource bindings to API and function code", async () => {
     template,
   });
   const ordersQueue = bindResource("ordersQueue", "url");
-  const functions = defineFunctions({
-    readQueue: defineFunction({
+  const functions = createFunctions({
+    readQueue: fn({
       handler: () => ({
         queueUrl: ordersQueue.value(),
       }),
       output: schema<{ queueUrl: string }>(),
     }),
   });
-  createGateway({ functions });
+  voke(functions, { config: { name: "api" } });
 
   const app = new Hono();
 

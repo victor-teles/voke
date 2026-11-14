@@ -5,15 +5,14 @@ import {
   lambdaAuthorizer,
   requestAuthorizer,
   secret,
-  sqsEventSource,
-  sqsMessageBatch,
+  sqs,
 } from "@voke/aws";
 import type { MiddlewareHandler } from "hono";
 
-import { createGateway } from "../src/app";
+import { voke } from "../src/app";
 import type { VokeEnv } from "../src/context";
 import { VokeConfigError } from "../src/errors";
-import { defineFunction, defineFunctions, http } from "../src/invoke";
+import { fn, createFunctions, http } from "../src/invoke";
 import type { InvokeError, StandardSchemaV1 } from "../src/invoke";
 import { Voke } from "../src/route-builder";
 import { createVariableProvider, createVariableSource } from "../src/variables";
@@ -53,8 +52,8 @@ test("executes route-backed functions through typed route calls and gateway requ
   };
   const app = new Voke().use(middleware);
 
-  const functions = defineFunctions({
-    users: defineFunction({
+  const functions = createFunctions({
+    users: fn({
       routes: [
         app.get("/users/:id", {
           handler: (req) => ({
@@ -98,7 +97,7 @@ test("executes route-backed functions through typed route calls and gateway requ
     }),
   });
 
-  createGateway({ functions });
+  voke(functions, { config: { name: "api" } });
 
   const routeResult = await functions.route("GET", "/users/:id", {
     headers: new Headers({ "x-request-id": "req_1" }),
@@ -113,7 +112,7 @@ test("executes route-backed functions through typed route calls and gateway requ
     includePosts: true,
   });
 
-  const gateway = createGateway({ functions });
+  const gateway = voke(functions, { config: { name: "api" } });
   const getResponse = await gateway.request("/users/usr_2?includePosts=false", {
     headers: { "x-request-id": "req_2" },
   });
@@ -148,7 +147,7 @@ test("runs local Request Authorizer Functions before protected routes", async ()
   const authorizers = createAuthorizers({
     session: lambdaAuthorizer({ function: "authorizeSession" }),
   });
-  const functions = defineFunctions({
+  const functions = createFunctions({
     authorizeSession: requestAuthorizer({
       handler: async (request, context) => ({
         authorized:
@@ -173,8 +172,8 @@ test("runs local Request Authorizer Functions before protected routes", async ()
       }),
     }),
   });
-  const gateway = createGateway({
-    functions,
+  const gateway = voke(functions, {
+    config: { name: "api" },
     variables: { providers: [provider] },
   });
 
@@ -192,7 +191,7 @@ test("runs local Request Authorizer Functions before protected routes", async ()
 
 test("supports injected Route Auth Context for direct route calls", async () => {
   const app = new Voke();
-  const functions = defineFunctions({
+  const functions = createFunctions({
     users: http({
       routes: app.get("/me", {
         handler: (request) => ({
@@ -217,7 +216,7 @@ test("returns stable local authorizer failures", async () => {
   const authorizers = createAuthorizers({
     session: lambdaAuthorizer({ function: "authorizeSession" }),
   });
-  const functions = defineFunctions({
+  const functions = createFunctions({
     authorizeSession: requestAuthorizer({
       handler: (request) => ({
         authorized: request.headers.get("authorization") === "Bearer valid",
@@ -257,7 +256,7 @@ test("returns stable local authorizer failures", async () => {
       ],
     }),
   });
-  const gateway = createGateway({ functions });
+  const gateway = voke(functions, { config: { name: "api" } });
 
   const missing = await gateway.request("/me");
   const denied = await gateway.request("/me", {
@@ -304,30 +303,28 @@ test("prints a human function summary automatically under voke dev", () => {
   };
 
   try {
-    const functions = defineFunctions({
-      getUser: defineFunction({
+    const functions = createFunctions({
+      getUser: fn({
         handler: () => ({ id: "usr_1" }),
         output: schema<unknown, { id: string }>(() => ({ id: "usr_1" })),
         variables: {
           userSecret: secret("/prod/users/secret"),
         },
       }),
-      processOrders: defineFunction({
-        events: [
-          sqsEventSource("ordersQueue", {
-            batchSize: 10,
-            maxBatchingWindowSeconds: 5,
-          }),
-        ],
+      processOrders: sqs({
+        batchSize: 10,
         handler: (batch) => batch.ok(),
-        input: sqsMessageBatch(
-          schema<unknown, { id: string }>(() => ({ id: "ord_1" }))
-        ),
-        variables: {
-          orderSecret: secret("/prod/orders/secret"),
-        },
+        maxBatchingWindowSeconds: 5,
+        message: schema<
+          unknown,
+          {
+            id: string;
+          }
+        >(() => ({ id: "ord_1" })),
+        queue: "ordersQueue",
+        variables: { orderSecret: secret("/prod/orders/secret") },
       }),
-      routes: defineFunction({
+      routes: fn({
         routes: [
           app.get("/health", {
             handler: () => ({ ok: true }),
@@ -339,7 +336,7 @@ test("prints a human function summary automatically under voke dev", () => {
       }),
     });
 
-    createGateway({ functions });
+    voke(functions, { config: { name: "api" } });
   } finally {
     console.info = previousInfo;
     setEnv("VOKE_DEV_ORIGIN", previousOrigin);
@@ -373,8 +370,8 @@ ${ansi.cyan}${ansi.bold}Event Functions${ansi.reset}
 
 test("returns a stable Voke error envelope when route body validation fails through gateway requests", async () => {
   const app = new Voke();
-  const functions = defineFunctions({
-    users: defineFunction({
+  const functions = createFunctions({
+    users: fn({
       routes: [
         app.post("/users", {
           body: failingSchema("name is required"),
@@ -383,7 +380,7 @@ test("returns a stable Voke error envelope when route body validation fails thro
       ],
     }),
   });
-  const gateway = createGateway({ functions });
+  const gateway = voke(functions, { config: { name: "api" } });
 
   const response = await gateway.request("/users", {
     body: JSON.stringify({}),
@@ -402,8 +399,8 @@ test("returns a stable Voke error envelope when route body validation fails thro
 
 test("returns stable Voke error envelopes when route params, query, or headers validation fails through gateway requests", async () => {
   const app = new Voke();
-  const functions = defineFunctions({
-    users: defineFunction({
+  const functions = createFunctions({
+    users: fn({
       routes: [
         app.get("/params/:id", {
           handler: () => ({ ok: true }),
@@ -420,7 +417,7 @@ test("returns stable Voke error envelopes when route params, query, or headers v
       ],
     }),
   });
-  const gateway = createGateway({ functions });
+  const gateway = voke(functions, { config: { name: "api" } });
 
   const paramsResponse = await gateway.request("/params/usr_1");
   const queryResponse = await gateway.request("/query?page=nope");
@@ -451,8 +448,8 @@ test("returns stable Voke error envelopes when route params, query, or headers v
 
 test("returns a stable Voke error envelope when route output validation fails through gateway requests", async () => {
   const app = new Voke();
-  const functions = defineFunctions({
-    users: defineFunction({
+  const functions = createFunctions({
+    users: fn({
       routes: [
         app.get("/users/:id", {
           handler: () => ({ id: "" }),
@@ -461,7 +458,7 @@ test("returns a stable Voke error envelope when route output validation fails th
       ],
     }),
   });
-  const gateway = createGateway({ functions });
+  const gateway = voke(functions, { config: { name: "api" } });
 
   const response = await gateway.request("/users/usr_1");
 
@@ -476,8 +473,8 @@ test("returns a stable Voke error envelope when route output validation fails th
 
 test("invokes routes without request parts when the route does not require them", async () => {
   const app = new Voke();
-  const functions = defineFunctions({
-    routes: defineFunction({
+  const functions = createFunctions({
+    routes: fn({
       routes: [
         app.get("/health", {
           handler: () => ({ ok: true }),
@@ -486,7 +483,7 @@ test("invokes routes without request parts when the route does not require them"
     }),
   });
 
-  createGateway({ functions });
+  voke(functions, { config: { name: "api" } });
 
   await expect(functions.route("GET", "/health")).resolves.toEqual({
     ok: true,
@@ -494,7 +491,7 @@ test("invokes routes without request parts when the route does not require them"
 });
 
 test("returns a stable Voke error envelope for missing gateway routes", async () => {
-  const gateway = createGateway();
+  const gateway = voke(createFunctions({}), { config: { name: "api" } });
 
   const response = await gateway.request("/missing");
 
@@ -509,8 +506,8 @@ test("returns a stable Voke error envelope for missing gateway routes", async ()
 
 test("uses the same route validation classification for typed route calls and gateway requests", async () => {
   const app = new Voke();
-  const functions = defineFunctions({
-    users: defineFunction({
+  const functions = createFunctions({
+    users: fn({
       routes: [
         app.get("/users/:id", {
           handler: () => ({ ok: true }),
@@ -519,7 +516,7 @@ test("uses the same route validation classification for typed route calls and ga
       ],
     }),
   });
-  const gateway = createGateway({ functions });
+  const gateway = voke(functions, { config: { name: "api" } });
 
   await expect(
     functions.route("GET", "/users/:id", {
@@ -544,15 +541,15 @@ test("uses the same route validation classification for typed route calls and ga
 
 test("rejects duplicate HTTP method and path pairs across gateway functions", () => {
   const app = new Voke();
-  const functions = defineFunctions({
-    admins: defineFunction({
+  const functions = createFunctions({
+    admins: fn({
       routes: [
         app.get("/users/:id", {
           handler: () => ({ from: "admins" }),
         }),
       ],
     }),
-    users: defineFunction({
+    users: fn({
       routes: [
         app.get("/users/:id", {
           handler: () => ({ from: "users" }),
@@ -561,16 +558,18 @@ test("rejects duplicate HTTP method and path pairs across gateway functions", ()
     }),
   });
 
-  expect(() => createGateway({ functions })).toThrow(VokeConfigError);
-  expect(() => createGateway({ functions })).toThrow(
+  expect(() => voke(functions, { config: { name: "api" } })).toThrow(
+    VokeConfigError
+  );
+  expect(() => voke(functions, { config: { name: "api" } })).toThrow(
     "Duplicate Gateway route GET /users/:id"
   );
 });
 
 test("does not execute route-only functions through function invocation", async () => {
   const app = new Voke();
-  const functions = defineFunctions({
-    routes: defineFunction({
+  const functions = createFunctions({
+    routes: fn({
       routes: [
         app.get("/health", {
           handler: () => ({ ok: true }),
@@ -579,7 +578,7 @@ test("does not execute route-only functions through function invocation", async 
     }),
   });
 
-  createGateway({ functions });
+  voke(functions, { config: { name: "api" } });
 
   await expect(
     functions.invoke(

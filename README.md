@@ -17,11 +17,9 @@ export default defineConfig({
   stage: "local",
   region: "us-east-1",
   entrypoint: "./src/index.ts",
-  cloudFormation: {
-    resources: {
-      usersTable: dynamodbTable({ partitionKey: "id" }),
-      eventsQueue: sqsQueue(),
-    },
+  resources: {
+    usersTable: dynamodbTable({ partitionKey: "id" }),
+    eventsQueue: sqsQueue(),
   },
 });
 ```

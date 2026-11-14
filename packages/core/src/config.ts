@@ -22,9 +22,13 @@ export interface VokeConfig {
   build: VokeBuildConfig;
   cloudFormation: VokeCloudFormationConfig;
   dev: VokeDevConfig;
+  /** Environment variables set on every deployed Function. */
+  environment: Record<string, string>;
   local: VokeLocalConfig;
   provider?: VokeProvider;
   remotes?: Record<string, VokeRemoteConfig>;
+  /** Infrastructure resources (queues, tables, buckets, ...) the project declares. */
+  resources: Record<string, VokeResourceInput>;
   runtime: VokeRuntimeConfig;
 }
 
@@ -40,9 +44,8 @@ export interface VokeBuildConfig {
 }
 
 export interface VokeCloudFormationConfig {
+  /** Where `voke synth` writes the template. */
   out: string;
-  environment: Record<string, string>;
-  resources: Record<string, VokeResourceInput>;
 }
 
 export interface VokeResourceInput {
@@ -142,6 +145,15 @@ const removedSettings = (
     });
   }
 
+  for (const key of ["resources", "environment"]) {
+    if (raw.cloudFormation !== undefined && key in raw.cloudFormation) {
+      issues.push({
+        message: `"cloudFormation.${key}" was removed; declare ${key} at the top level: ${key}: { ... }`,
+        path: `cloudFormation.${key}`,
+      });
+    }
+  }
+
   if (raw.cloudFormation !== undefined && "handler" in raw.cloudFormation) {
     issues.push({
       message: `"cloudFormation.handler" ${generatedHandlerMessage}`,
@@ -189,21 +201,9 @@ const defineBuildConfig = (input: VokeConfigInput): VokeBuildConfig => {
 
 const defineCloudFormationConfig = (
   input: VokeConfigInput
-): VokeCloudFormationConfig => {
-  const cloudFormation = input.cloudFormation ?? {};
-
-  return {
-    environment: {
-      ...input.environment,
-      ...cloudFormation.environment,
-    },
-    out: cloudFormation.out ?? "./dist/cloudformation.json",
-    resources: {
-      ...input.resources,
-      ...cloudFormation.resources,
-    },
-  };
-};
+): VokeCloudFormationConfig => ({
+  out: input.cloudFormation?.out ?? "./dist/cloudformation.json",
+});
 
 const defineDevConfig = (input: VokeConfigInput): VokeDevConfig => ({
   entrypoint: input.dev?.entrypoint ?? input.entrypoint ?? "./src/index.ts",
@@ -251,8 +251,7 @@ const defineRemotesConfig = (
 export const defineConfig = (input: VokeConfigInput): VokeConfig => {
   assertNoRemovedSettings(input);
 
-  const stage =
-    input.stage ?? readEnv("VOKE_STAGE") ?? readEnv("STAGE") ?? "local";
+  const stage = input.stage ?? readEnv("VOKE_STAGE") ?? "local";
   const remotes = defineRemotesConfig(input, stage);
 
   return {
@@ -261,11 +260,13 @@ export const defineConfig = (input: VokeConfigInput): VokeConfig => {
     cloudFormation: defineCloudFormationConfig(input),
     dev: defineDevConfig(input),
     entrypoint: input.entrypoint ?? "./src/index.ts",
+    environment: { ...input.environment },
     local: defineLocalConfig(input),
     name: input.name,
     ...(input.provider === undefined ? {} : { provider: input.provider }),
     region: input.region ?? readEnv("AWS_REGION") ?? "us-east-1",
     ...(Object.keys(remotes).length > 0 ? { remotes } : {}),
+    resources: { ...input.resources },
     runtime: defineRuntimeConfig(input),
     stage,
   };
@@ -289,7 +290,7 @@ export const loadVokeConfig = async (
   const module = await import(
     `${new URL(`file://${absolutePath}`).href}?t=${Date.now()}`
   );
-  const exportedConfig = module.default ?? module.config;
+  const exportedConfig = module.default;
 
   if (exportedConfig === undefined) {
     throw new VokeConfigError(

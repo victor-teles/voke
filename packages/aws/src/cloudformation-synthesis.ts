@@ -109,11 +109,8 @@ const awsCloudFormationResource = (definition: {
 });
 
 export type SynthesizeCloudFormationOptions = VokeConfigInput & {
-  entrypoint?: string;
-  environment?: Record<string, string>;
   /** The Function Registry discovered from the project entrypoint. */
   functions?: VokeModelInput["functions"];
-  resources?: Record<string, StackResourceDefinition>;
 };
 
 export const dynamodbTable = (

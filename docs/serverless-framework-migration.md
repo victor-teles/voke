@@ -12,7 +12,7 @@ The command writes a small Voke project with:
 - `src/routes/*.ts` for Route Builder declarations from HTTP API and REST API events.
 - `src/functions/*.ts` for SQS Event Source Functions and EventBridge worker skeletons.
 - `src/functions/index.ts` for the generated Function Registry when workers exist.
-- `voke.config.ts` for app settings, the `aws()` Provider, and CloudFormation resources. It does not list Functions.
+- `voke.config.ts` for app settings, the `aws()` Provider, top-level `environment`, and top-level `resources`. It does not list Functions.
 - `MIGRATION_REPORT.md` for generated files, converted behavior, manual work grouped by risk, plugin notes, unknown fields, and compatibility projections.
 - `SERVERLESS_COMPATIBILITY.md` for the compatibility matrix with status, confidence, generated output, and manual work.
 
@@ -42,7 +42,7 @@ Move one function at a time:
 | `service`                          | Supported                                                          | App and package names.                                             |
 | `provider.stage`                   | Supported                                                          | App config and stack stage.                                        |
 | `provider.region`                  | Supported                                                          | App config and stack region.                                       |
-| `provider.environment`             | Supported                                                          | Stack environment starter.                                         |
+| `provider.environment`             | Supported                                                          | Top-level `environment` in `voke.config.ts`.                       |
 | `provider.iamRoleStatements`       | Reported                                                           | Manual CloudFormation review item.                                 |
 | `package.patterns`                 | Reported                                                           | Manual Bun build review item.                                      |
 | `plugins`                          | Reported                                                           | Unsupported plugins are listed in the report.                      |
@@ -50,7 +50,7 @@ Move one function at a time:
 | `functions.*.events[].http`        | Supported                                                          | Route Builder skeleton mounted in a Gateway.                       |
 | `functions.*.events[].sqs`         | Supported when the queue maps to a generated `sqsQueue()` resource | SQS Event Source Function with `sqs({ message, queue, handler })`. |
 | `functions.*.events[].eventBridge` | Supported skeleton                                                 | Voke Function skeleton.                                            |
-| Native CloudFormation resources    | Supported skeleton                                                 | Config-first `voke.config.ts` declarations.                        |
+| Native CloudFormation resources    | Supported skeleton                                                 | Top-level `resources` in `voke.config.ts`.                         |
 | Other events                       | Manual migration                                                   | Unsupported event report item.                                     |
 | Unsafe custom resources            | Manual migration                                                   | Manual step with the concrete resource type.                       |
 

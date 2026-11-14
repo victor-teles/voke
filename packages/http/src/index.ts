@@ -79,31 +79,3 @@ export interface JsonErrorBody {
     message: string;
   };
 }
-
-const defaultErrorCode = (status: number): string => {
-  if (status === 404) {
-    return "NOT_FOUND";
-  }
-
-  if (status >= 400 && status < 500) {
-    return "BAD_REQUEST";
-  }
-
-  return "INTERNAL_SERVER_ERROR";
-};
-
-export const json = <TData>(data: TData, init?: ResponseInit): Response =>
-  ok(data, init);
-
-export const jsonError = (
-  message: string,
-  init: ResponseInit & { code?: string } = {}
-): Response => {
-  const status = init.status ?? 500;
-
-  return error(message, {
-    ...init,
-    code: init.code ?? defaultErrorCode(status),
-    status,
-  });
-};

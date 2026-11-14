@@ -291,7 +291,7 @@ const assertHttpAuthorizerReference = (
 
 const toModelResource = (
   name: string,
-  resource: VokeConfig["cloudFormation"]["resources"][string]
+  resource: VokeConfig["resources"][string]
 ): VokeModelResource => {
   const binding = createResourceBindingDefinition({
     attribute: resource.bindingAttribute,
@@ -467,7 +467,7 @@ export const createInternalModel = (input: VokeModelInput): VokeModel => {
   const { functions: registry = {}, ...configInput } = input;
   const config = defineConfig(configInput as VokeConfigInput);
   const resources = Object.fromEntries(
-    Object.entries(config.cloudFormation.resources).map(([name, resource]) => [
+    Object.entries(config.resources).map(([name, resource]) => [
       name,
       toModelResource(name, resource),
     ])
@@ -537,7 +537,7 @@ export const createInternalModel = (input: VokeModelInput): VokeModel => {
       deployedName: definition.name ?? generatedFunctionName(name),
       entrypoint: definition.synthesis?.entrypoint ?? config.entrypoint,
       environment: {
-        ...config.cloudFormation.environment,
+        ...config.environment,
         ...definition.synthesis?.environment,
       },
       eventSources,

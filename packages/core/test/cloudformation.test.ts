@@ -8,8 +8,6 @@ import {
   requestAuthorizer,
   parameter as runtimeParameter,
   secret as runtimeSecret,
-  sqsEventSource,
-  sqsMessageBatch,
   sqs,
 } from "@voke/aws";
 import {
@@ -25,7 +23,7 @@ import {
 
 import { defineConfig } from "../src/config";
 import { VokeModelError } from "../src/errors";
-import { defineFunctions, defineFunction, http } from "../src/invoke";
+import { createFunctions, fn, http } from "../src/invoke";
 import type { SqsMessageBatch, StandardSchemaV1 } from "../src/invoke";
 import { createInternalModel } from "../src/model";
 import type { VokeModel } from "../src/model";
@@ -40,7 +38,7 @@ const synthesizeCloudFormationFromModel = (model: VokeModel) =>
 
 // The Function keyed "http" owns the bare Function/FunctionRole/Permission logical ids.
 const healthFunctions = () =>
-  defineFunctions({
+  createFunctions({
     http: http({
       routes: new Voke().get("/health", { handler: () => ({ ok: true }) }),
     }),
@@ -105,18 +103,16 @@ const routeResource = (
 
 test("matches the CloudFormation snapshot for an API stack with resources", async () => {
   const template = synthesizeCloudFormation({
-    cloudFormation: {
-      environment: {
-        LOG_LEVEL: "info",
-      },
-      resources: {
-        eventsQueue: sqsQueue(),
-        ordersTable: dynamodbTable({ partitionKey: "pk", sortKey: "sk" }),
-      },
+    environment: {
+      LOG_LEVEL: "info",
     },
     functions: healthFunctions(),
     name: "orders-api",
     region: "sa-east-1",
+    resources: {
+      eventsQueue: sqsQueue(),
+      ordersTable: dynamodbTable({ partitionKey: "pk", sortKey: "sk" }),
+    },
     stage: "prod",
   });
   const snapshot = await Bun.file(
@@ -127,7 +123,7 @@ test("matches the CloudFormation snapshot for an API stack with resources", asyn
 });
 
 test("matches the CloudFormation snapshot for an API stack with explicit functions", async () => {
-  const sendWelcomeEmail = defineFunction({
+  const sendWelcomeEmail = fn({
     handler: (payload) => ({
       queued: true,
       to: payload.email,
@@ -145,17 +141,15 @@ test("matches the CloudFormation snapshot for an API stack with explicit functio
     },
   });
   const template = synthesizeCloudFormation({
-    cloudFormation: {
-      environment: {
-        LOG_LEVEL: "info",
-      },
-      resources: {
-        eventsQueue: sqsQueue(),
-      },
+    environment: {
+      LOG_LEVEL: "info",
     },
-    functions: defineFunctions({ sendWelcomeEmail }),
+    functions: createFunctions({ sendWelcomeEmail }),
     name: "worker-api",
     region: "us-east-1",
+    resources: {
+      eventsQueue: sqsQueue(),
+    },
     stage: "test",
   });
   const snapshot = await Bun.file(
@@ -183,7 +177,7 @@ test("matches the CloudFormation snapshot for SQS event source mappings", async 
     },
   });
   const template = synthesizeCloudFormation({
-    functions: defineFunctions({ processOrders }),
+    functions: createFunctions({ processOrders }),
     name: "orders-worker",
     resources: {
       ordersQueue: sqsQueue(),
@@ -200,8 +194,8 @@ test("matches the CloudFormation snapshot for SQS event source mappings", async 
 
 test("synthesizes route-backed, invokable, and mixed functions from the Function registry", () => {
   const app = new Voke();
-  const functions = defineFunctions({
-    sendReceipt: defineFunction({
+  const functions = createFunctions({
+    sendReceipt: fn({
       handler: (payload: { orderId: string }) => ({
         sent: true,
         to: payload.orderId,
@@ -212,7 +206,7 @@ test("synthesizes route-backed, invokable, and mixed functions from the Function
         entrypoint: "./src/functions/send-receipt.ts",
       },
     }),
-    users: defineFunction({
+    users: fn({
       handler: (payload: { id: string }) => ({
         id: payload.id,
       }),
@@ -293,7 +287,7 @@ test("synthesizes JWT Authorizers for protected HTTP API routes", () => {
     }),
   });
   const template = synthesizeCloudFormation({
-    functions: defineFunctions({
+    functions: createFunctions({
       users: http({
         authorizer: "userJwt",
         authorizers,
@@ -338,7 +332,7 @@ test("synthesizes route authorizer overrides and explicit public routes", () => 
     }),
   });
   const template = synthesizeCloudFormation({
-    functions: defineFunctions({
+    functions: createFunctions({
       users: http({
         authorizer: "userJwt",
         authorizers,
@@ -384,7 +378,7 @@ test("synthesizes Lambda Authorizers for local Request Authorizer Functions", ()
     }),
   });
   const template = synthesizeCloudFormation({
-    functions: defineFunctions({
+    functions: createFunctions({
       authorizeSession: requestAuthorizer({
         handler: () => ({ authorized: true }),
       }),
@@ -444,7 +438,7 @@ test("synthesizes external Lambda Authorizer targets without permissions", () =>
     }),
   });
   const template = synthesizeCloudFormation({
-    functions: defineFunctions({
+    functions: createFunctions({
       users: http({
         authorizers,
         routes: [
@@ -568,8 +562,8 @@ test("generates resource-specific IAM policy statements for each AWS helper", ()
 
 test("synthesizes Runtime Variable permissions only for declaring Functions", () => {
   const template = synthesizeCloudFormation({
-    functions: defineFunctions({
-      checkout: defineFunction({
+    functions: createFunctions({
+      checkout: fn({
         handler: () => "ok",
         output: schema<string>(),
         variables: {
@@ -577,7 +571,7 @@ test("synthesizes Runtime Variable permissions only for declaring Functions", ()
           stripeKey: runtimeSecret("/prod/stripe/key"),
         },
       }),
-      receipt: defineFunction({
+      receipt: fn({
         handler: () => "ok",
         output: schema<string>(),
       }),
@@ -618,8 +612,8 @@ test("synthesizes Runtime Variable permissions only for declaring Functions", ()
 
 test("synthesizes Runtime Variable permissions for managed resource-key declarations", () => {
   const template = synthesizeCloudFormation({
-    functions: defineFunctions({
-      checkout: defineFunction({
+    functions: createFunctions({
+      checkout: fn({
         handler: () => "ok",
         output: schema<string>(),
         variables: {
@@ -675,23 +669,24 @@ test("can synthesize directly from the internal model for advanced usage", () =>
 });
 
 test("synthesizes SQS event source mappings for Function event sources", () => {
-  const processOrders = defineFunction({
-    events: [
-      sqsEventSource("ordersQueue"),
-      sqsEventSource("priorityQueue", {
+  const processOrders = sqs({
+    handler: (batch: SqsMessageBatch<{ orderId: string }>) => batch.ok(),
+    message: schema<{ orderId: string }>(),
+    queues: [
+      "ordersQueue",
+      {
         batchSize: 5,
         enabled: false,
         maxBatchingWindowSeconds: 30,
-      }),
+        queue: "priorityQueue",
+      },
     ],
-    handler: (batch: SqsMessageBatch<{ orderId: string }>) => batch.ok(),
-    input: sqsMessageBatch(schema<{ orderId: string }>()),
     synthesis: {
       entrypoint: "./src/functions/process-orders.ts",
     },
   });
   const template = synthesizeCloudFormation({
-    functions: defineFunctions({ processOrders }),
+    functions: createFunctions({ processOrders }),
     name: "orders-worker",
     resources: {
       ordersQueue: sqsQueue(),
@@ -729,13 +724,13 @@ test("synthesizes SQS event source mappings for Function event sources", () => {
 });
 
 test("rejects invalid SQS event source mappings from direct model synthesis", () => {
-  const processOrders = defineFunction({
-    events: [sqsEventSource("ordersQueue")],
+  const processOrders = sqs({
     handler: (batch: SqsMessageBatch<{ orderId: string }>) => batch.ok(),
-    input: sqsMessageBatch(schema<{ orderId: string }>()),
+    message: schema<{ orderId: string }>(),
+    queue: "ordersQueue",
   });
   const model = createInternalModel({
-    functions: defineFunctions({ processOrders }),
+    functions: createFunctions({ processOrders }),
     name: "orders-worker",
     resources: {
       ordersQueue: sqsQueue(),

@@ -23,9 +23,9 @@ interface RoleResource {
 const synthesize = (functions: ReturnType<typeof createFunctions>) => {
   const provider = aws();
   const config = defineConfig({
-    cloudFormation: { resources: { signingKey: secretResource() } },
     name: "variables-api",
     provider,
+    resources: { signingKey: secretResource() },
   });
 
   return provider.synthesis?.synthesize?.({

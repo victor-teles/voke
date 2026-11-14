@@ -1,7 +1,11 @@
 import { expect, test } from "bun:test";
 import { rm } from "node:fs/promises";
 
-import { bindResource, createAwsClientConfig } from "@voke/aws";
+import {
+  bindResource,
+  createAwsClientConfig,
+  createLambdaHandlers,
+} from "@voke/aws";
 import {
   dynamodbTable,
   s3Bucket,
@@ -11,20 +15,20 @@ import {
   synthesizeCloudFormation,
   ssmParameter,
 } from "@voke/aws/cloudformation";
-import { Hono } from "hono";
-import type { LambdaContext, LambdaEvent } from "hono/aws-lambda";
+import type {
+  APIGatewayProxyResult,
+  LambdaContext,
+  LambdaEvent,
+} from "hono/aws-lambda";
 
-import { api } from "../src/api";
-import { createApiApp, createGateway, routeModule } from "../src/app";
-import { handleAwsLambdaRequest } from "../src/aws-lambda";
+import { voke } from "../src/app";
+import type { Middleware } from "../src/app";
 import { createApiProject, runCli } from "../src/cli";
 import { defineConfig, getConfig, loadVokeConfig } from "../src/config";
 import { awsContext } from "../src/context";
-import type { VokeEnv } from "../src/context";
 import { VokeConfigError } from "../src/errors";
-import { defineFunction, defineFunctions, http } from "../src/invoke";
+import { fn, createFunctions, http } from "../src/invoke";
 import type { StandardSchemaV1 } from "../src/invoke";
-import { ok as json } from "../src/response";
 import { route } from "../src/route-builder";
 import { setEnv } from "./support/env";
 import { tempPath } from "./support/temp";
@@ -84,82 +88,9 @@ const passthroughSchema = <TValue>(): StandardSchemaV1<TValue, TValue> => ({
   },
 });
 
-test("wraps a Hono app with a default name and handler", () => {
-  const app = new Hono();
-  const vokeApi = api(app);
-
-  expect(vokeApi.name).toBe("api");
-  expect(vokeApi.config).toEqual({
-    api: {
-      name: "api",
-    },
-    build: {
-      entrypoints: ["./src/index.ts"],
-      external: ["@aws-sdk/*"],
-      outdir: "./dist",
-    },
-    cloudFormation: {
-      environment: {},
-      out: "./dist/cloudformation.json",
-      resources: {},
-    },
-    dev: {
-      entrypoint: "./src/index.ts",
-      environment: {},
-    },
-    entrypoint: "./src/index.ts",
-    local: {
-      provider: expect.objectContaining({
-        name: "floci",
-      }),
-      providerOptional: true,
-    },
-    name: "api",
-    region: "us-east-1",
-    runtime: {
-      lambda: "nodejs22.x",
-    },
-    stage: "local",
-  });
-  expect(vokeApi.app).toBe(app);
-  expect(vokeApi.fetch).toBeFunction();
-  expect(vokeApi.handler).toBeFunction();
-});
-
-test("uses createApiApp config metadata when wrapping a Hono app", () => {
-  const app = createApiApp({
-    config: {
-      api: {
-        name: "orders-http",
-      },
-      cloudFormation: {
-        environment: {
-          LOG_LEVEL: "debug",
-        },
-      },
-      name: "orders-api",
-      region: "sa-east-1",
-      runtime: {
-        lambda: "nodejs22.x",
-      },
-      stage: "prod",
-    },
-  });
-  const service = api(app);
-
-  expect(service.name).toBe("orders-http");
-  expect(service.config.name).toBe("orders-api");
-  expect(service.config.api).toEqual({
-    name: "orders-http",
-  });
-  expect(service.config.cloudFormation.environment).toEqual({
-    LOG_LEVEL: "debug",
-  });
-});
-
-test("activates local Function Registry invocation through createGateway", async () => {
-  const functions = defineFunctions({
-    greet: defineFunction({
+test("activates local Function Registry invocation through voke()", async () => {
+  const functions = createFunctions({
+    greet: fn({
       handler: (payload) => ({ message: `hello ${payload.name}` }),
       input: passthroughSchema<{ name: string }>(),
       output: passthroughSchema<{ message: string }>(),
@@ -173,12 +104,7 @@ test("activates local Function Registry invocation through createGateway", async
     "Local Function invocation requires Gateway activation"
   );
 
-  const gateway = createGateway({
-    config: {
-      name: "greeting-api",
-    },
-    functions,
-  });
+  const gateway = voke(functions, { config: { name: "greeting-api" } });
 
   expect(gateway.fetch).toBeFunction();
   await expect(functions.invoke("greet", { name: "Victor" })).resolves.toEqual({
@@ -187,34 +113,48 @@ test("activates local Function Registry invocation through createGateway", async
 });
 
 test("rejects a Function Registry passed through config", () => {
-  const functions = defineFunctions({
-    ping: defineFunction({
+  const functions = createFunctions({
+    ping: fn({
       handler: () => ({ ok: true }),
       output: passthroughSchema<{ ok: boolean }>(),
     }),
   });
   const config = { functions, name: "config-functions-api" } as never;
 
-  expect(() => createGateway({ config, functions })).toThrow(VokeConfigError);
-  expect(() => createGateway({ config, functions })).toThrow(
+  expect(() => voke(functions, { config })).toThrow(VokeConfigError);
+  expect(() => voke(functions, { config })).toThrow(
     "functions: Functions are declared in the project entrypoint, not in voke.config.ts"
   );
 });
 
+// The Lambda handler `voke build` generates for the Function keyed "http".
+const lambdaHttpHandler = (gateway: {
+  app: unknown;
+  config: unknown;
+  functions: unknown;
+}) =>
+  createLambdaHandlers({ default: gateway }).http as (
+    event: LambdaEvent,
+    context?: LambdaContext
+  ) => Promise<APIGatewayProxyResult>;
+
 test("handles a Lambda HTTP API v2 GET request", async () => {
-  const app = new Hono();
-
-  app.get("/hello/:name", (c) =>
-    c.json({
-      data: {
-        greeting: c.req.query("greeting"),
-        name: c.req.param("name"),
-      },
-    })
+  const gateway = voke(
+    createFunctions({
+      http: http({
+        routes: [
+          route.get("/hello/:name", {
+            handler: (request) => ({
+              greeting: new URL(request.raw.url).searchParams.get("greeting"),
+              name: request.params.name,
+            }),
+          }),
+        ],
+      }),
+    }),
+    { config: { name: "hello-api" } }
   );
-
-  const vokeApi = api(app, { name: "hello-api" });
-  const response = await vokeApi.handler(
+  const response = await lambdaHttpHandler(gateway)(
     lambdaEvent({
       headers: {
         host: "api.example.com",
@@ -243,12 +183,19 @@ test("handles a Lambda HTTP API v2 GET request", async () => {
 });
 
 test("handles a Lambda HTTP API v2 POST body", async () => {
-  const app = new Hono();
-
-  app.post("/echo", async (c) => c.json({ data: await c.req.json() }));
-
-  const response = await handleAwsLambdaRequest(
-    app,
+  const gateway = voke(
+    createFunctions({
+      http: http({
+        routes: [
+          route.post("/echo", {
+            handler: async (request) => (await request.raw.json()) as unknown,
+          }),
+        ],
+      }),
+    }),
+    { config: { name: "echo-api" } }
+  );
+  const response = await lambdaHttpHandler(gateway)(
     lambdaEvent({
       body: JSON.stringify({ ok: true }),
       headers: {
@@ -269,27 +216,29 @@ test("handles a Lambda HTTP API v2 POST body", async () => {
   expect(JSON.parse(response.body)).toEqual({ data: { ok: true } });
 });
 
-test("composes route modules and exposes config/context helpers", async () => {
-  const routes = new Hono<VokeEnv>();
+const contextHelpers: Middleware = async (c, next) => {
+  await next();
+  c.header("x-service", getConfig(c).name);
+  c.header("x-request-id", awsContext(c)?.awsRequestId ?? "none");
+};
 
-  routes.get("/:id", (c) =>
-    json({
-      id: c.req.param("id"),
-      requestId: awsContext(c)?.awsRequestId,
-      service: getConfig(c).name,
-    })
+test("exposes config and Lambda context helpers to Gateway middleware", async () => {
+  const gateway = voke(
+    createFunctions({
+      http: http({
+        routes: [
+          route.get("/users/:id", {
+            handler: (request) => ({ id: request.params.id }),
+          }),
+        ],
+      }),
+    }),
+    {
+      config: { name: "users-api", region: "sa-east-1", stage: "test" },
+      middleware: [contextHelpers],
+    }
   );
-
-  const app = createApiApp({
-    config: {
-      name: "users-api",
-      region: "sa-east-1",
-      stage: "test",
-    },
-    routes: [routeModule(routes, { basePath: "/users" })],
-  });
-  const service = api(app, { name: "users-api" });
-  const response = await service.handler(
+  const response = await lambdaHttpHandler(gateway)(
     lambdaEvent({
       rawPath: "/users/usr_1",
       requestContext: {
@@ -305,19 +254,19 @@ test("composes route modules and exposes config/context helpers", async () => {
   );
 
   expect(response.statusCode).toBe(200);
-  expect(JSON.parse(response.body)).toEqual({
-    data: {
-      id: "usr_1",
-      requestId: "req_123",
-      service: "users-api",
-    },
-  });
+  expect(JSON.parse(response.body)).toEqual({ data: { id: "usr_1" } });
+  expect(response.headers?.["x-service"]).toBe("users-api");
+  expect(response.headers?.["x-request-id"]).toBe("req_123");
 });
 
 test("returns default JSON errors for missing routes", async () => {
-  const app = createApiApp({ config: { name: "missing-route-api" } });
-  const service = api(app);
-  const response = await service.handler(
+  const gateway = voke(
+    createFunctions({
+      http: http({ routes: [route.get("/health", { handler: () => "ok" })] }),
+    }),
+    { config: { name: "missing-route-api" } }
+  );
+  const response = await lambdaHttpHandler(gateway)(
     lambdaEvent({
       rawPath: "/missing",
       requestContext: {
@@ -416,17 +365,17 @@ test("normalizes project and CloudFormation settings through defineConfig", () =
       outdir: "./build",
     },
     cloudFormation: {
-      environment: {
-        LOG_LEVEL: "debug",
-      },
       out: "./build/stack.json",
-      resources: {
-        ordersTable: dynamodbTable({ partitionKey: "id" }),
-      },
     },
     entrypoint: "./src/api.ts",
+    environment: {
+      LOG_LEVEL: "debug",
+    },
     name: "orders-api",
     region: "sa-east-1",
+    resources: {
+      ordersTable: dynamodbTable({ partitionKey: "id" }),
+    },
     stage: "prod",
   });
 
@@ -440,19 +389,16 @@ test("normalizes project and CloudFormation settings through defineConfig", () =
       outdir: "./build",
     },
     cloudFormation: {
-      environment: {
-        LOG_LEVEL: "debug",
-      },
       out: "./build/stack.json",
-      resources: {
-        ordersTable: dynamodbTable({ partitionKey: "id" }),
-      },
     },
     dev: {
       entrypoint: "./src/api.ts",
       environment: {},
     },
     entrypoint: "./src/api.ts",
+    environment: {
+      LOG_LEVEL: "debug",
+    },
     local: {
       provider: expect.objectContaining({
         name: "floci",
@@ -461,6 +407,9 @@ test("normalizes project and CloudFormation settings through defineConfig", () =
     },
     name: "orders-api",
     region: "sa-east-1",
+    resources: {
+      ordersTable: dynamodbTable({ partitionKey: "id" }),
+    },
     runtime: {
       lambda: "nodejs22.x",
     },
@@ -502,17 +451,15 @@ test("only supports nodejs22 and nodejs24 Lambda runtimes in defineConfig", () =
 test("exposes AWS resource helpers from @voke/aws", () => {
   const template = synthesizeCloudFormation(
     defineConfig({
-      cloudFormation: {
-        resources: {
-          jobsQueue: sqsQueue(),
-          notificationsTopic: snsTopic(),
-          ordersTable: dynamodbTable({ partitionKey: "id" }),
-          publicConfig: ssmParameter({ value: "enabled" }),
-          signingSecret: secret(),
-          uploadsBucket: s3Bucket(),
-        },
-      },
       name: "aws-subpath-api",
+      resources: {
+        jobsQueue: sqsQueue(),
+        notificationsTopic: snsTopic(),
+        ordersTable: dynamodbTable({ partitionKey: "id" }),
+        publicConfig: ssmParameter({ value: "enabled" }),
+        signingSecret: secret(),
+        uploadsBucket: s3Bucket(),
+      },
     })
   );
 
@@ -541,14 +488,14 @@ export default defineConfig({
   stage: "test",
   region: "sa-east-1",
   entrypoint: "./src/service.ts",
+  environment: {
+    LOG_LEVEL: "info",
+  },
+  resources: {
+    jobsQueue: sqsQueue(),
+  },
   cloudFormation: {
     out: "./build/template.json",
-    environment: {
-      LOG_LEVEL: "info",
-    },
-    resources: {
-      jobsQueue: sqsQueue(),
-    },
   },
 });
 `
@@ -561,8 +508,8 @@ export default defineConfig({
   expect(config.region).toBe("sa-east-1");
   expect(config.entrypoint).toBe("./src/service.ts");
   expect(config.cloudFormation.out).toBe("./build/template.json");
-  expect(config.cloudFormation.environment).toEqual({ LOG_LEVEL: "info" });
-  expect(Object.keys(config.cloudFormation.resources)).toEqual(["jobsQueue"]);
+  expect(config.environment).toEqual({ LOG_LEVEL: "info" });
+  expect(Object.keys(config.resources)).toEqual(["jobsQueue"]);
 });
 
 // synth and build import the project entrypoint to discover its Functions.
@@ -610,14 +557,14 @@ export default defineConfig({
   stage: "qa",
   region: "sa-east-1",
   entrypoint: "./src/service.ts",
+  environment: {
+    LOG_LEVEL: "info",
+  },
+  resources: {
+    jobsQueue: sqsQueue(),
+  },
   cloudFormation: {
     out: "${out}",
-    environment: {
-      LOG_LEVEL: "info",
-    },
-    resources: {
-      jobsQueue: sqsQueue(),
-    },
   },
 });
 `
@@ -737,29 +684,27 @@ export default defineConfig({ name: "cli-api", provider: aws() });
 
 // The Function keyed "http" owns the bare Function/FunctionRole/Permission logical ids.
 const healthFunctions = () =>
-  defineFunctions({
+  createFunctions({
     http: http({ routes: [route.get("/health", { handler: () => "ok" })] }),
   });
 
 test("synthesizes a CloudFormation template with API, Lambda, IAM, resources, bindings, and outputs", () => {
   const template = synthesizeCloudFormation({
     ...defineConfig({
-      cloudFormation: {
-        environment: {
-          LOG_LEVEL: "info",
-        },
-        resources: {
-          eventsQueue: sqsQueue(),
-          orderCreatedTopic: snsTopic(),
-          ordersTable: dynamodbTable({ partitionKey: "pk", sortKey: "sk" }),
-          publicConfig: ssmParameter({ value: "enabled" }),
-          signingSecret: secret(),
-          uploadsBucket: s3Bucket(),
-        },
-      },
       entrypoint: "./src/index.ts",
+      environment: {
+        LOG_LEVEL: "info",
+      },
       name: "orders-api",
       region: "sa-east-1",
+      resources: {
+        eventsQueue: sqsQueue(),
+        orderCreatedTopic: snsTopic(),
+        ordersTable: dynamodbTable({ partitionKey: "pk", sortKey: "sk" }),
+        publicConfig: ssmParameter({ value: "enabled" }),
+        signingSecret: secret(),
+        uploadsBucket: s3Bucket(),
+      },
       stage: "prod",
     }),
     functions: healthFunctions(),

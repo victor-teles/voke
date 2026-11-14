@@ -38,12 +38,10 @@ export {
   type ResourceBinding,
 } from "./resources";
 export { parameter, secret } from "./runtime-variables";
-export {
-  createAwsLambdaHandler,
-  handleAwsLambdaRequest,
-  type AwsLambdaContext,
-  type AwsLambdaHttpApiV2Event,
-  type AwsLambdaHttpApiV2Result,
+export type {
+  AwsLambdaContext,
+  AwsLambdaHttpApiV2Event,
+  AwsLambdaHttpApiV2Result,
 } from "./lambda";
 export {
   createLambdaHandlers,
@@ -58,8 +56,6 @@ export {
 export {
   sqs,
   createSqsEventHandler,
-  sqsEventSource,
-  sqsMessageBatch,
   type SqsBatchResult,
   type SqsAwsEvent,
   type SqsEventInvocationInput,
