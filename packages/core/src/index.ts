@@ -1,27 +1,56 @@
 export {
-  createAuthorizers,
-  jwtAuthorizer,
-  lambdaAuthorizer,
-  requestAuthorizer,
-  type AuthorizerRegistry,
-  type AuthorizerRegistryInput,
-  type HttpAuthorizerDefinition,
-  type JwtAuthorizerDefinition,
-  type LambdaAuthorizerDefinition,
-} from "./authorizers";
-export {
   voke,
   type GatewayRuntime,
   type Middleware,
   type VokeOptions,
 } from "./app";
-export { defineConfig, type VokeConfig, type VokeConfigInput } from "./config";
+export {
+  createHandlerNameFromEntrypoint,
+  defineConfig,
+  loadVokeConfig,
+  type VokeConfig,
+  type VokeConfigInput,
+} from "./config";
 export {
   createFunctions,
   fn,
   http,
-  sqs,
+  activateFunctionRegistry,
+  InvokeError,
+  invokeRegistryFunction,
+  type AnyFunctionDefinition,
+  type EventFunctionDefinition,
+  type FunctionSynthesisConfig,
   type FunctionRegistry,
   type FunctionRegistryInput,
+  type InvokableFunctionDefinition,
+  type InvokeRequest,
+  type InvokeOptions,
+  type InvokeTransport,
+  type InvokeTransportResponse,
+  type StandardSchemaIssue,
+  type StandardSchemaResult,
+  type StandardSchemaV1,
 } from "./invoke";
+export { VokeConfigError } from "./errors";
+export { toEnvKey } from "./env-key";
+export type { VokeEnv } from "./context";
+export {
+  createInternalModel as createVokeModel,
+  type VokeModel,
+  type VokeModelHttpAuthorizer,
+  type VokeModelProviderExtensionRecord,
+  type VokeModelRecord,
+  type VokeModelResource,
+} from "./model";
+export {
+  type ProviderBuildCapability,
+  type ProviderExtensionRecord,
+  type ProviderInvokeCapability,
+  type ProviderLocalCapability,
+  type ProviderRuntimeCapability,
+  type ProviderSynthesisCapability,
+  type VokeProvider,
+  type VokeProviderCapability,
+} from "./provider";
 export { route } from "./route-builder";

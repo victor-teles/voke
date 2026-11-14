@@ -2,21 +2,12 @@ import { createResourceBindingName } from "./bindings";
 import { VokeResourceBindingError } from "./errors";
 import { readEnv } from "./runtime-env";
 
+export { parameter, secret } from "./aws-runtime-variables";
+
 export interface AwsClientConfig {
   region: string;
   endpoint?: string;
 }
-
-export {
-  dynamodbTable,
-  eventBus,
-  s3Bucket,
-  secret,
-  snsTopic,
-  sqsQueue,
-  ssmParameter,
-  type StackResourceDefinition,
-} from "./cloudformation";
 
 export interface ResourceBinding<TValue extends string = string> {
   name: string;
@@ -56,13 +47,13 @@ export const createAwsClientConfig = (
     options.endpoint ??
     readEnv("VOKE_AWS_ENDPOINT_URL") ??
     readEnv("AWS_ENDPOINT_URL");
+  const region =
+    [options.region, readEnv("AWS_REGION"), readEnv("AWS_DEFAULT_REGION")].find(
+      (value) => value !== undefined && value !== ""
+    ) ?? "us-east-1";
 
   return {
-    region:
-      options.region ??
-      readEnv("AWS_REGION") ??
-      readEnv("AWS_DEFAULT_REGION") ??
-      "us-east-1",
+    region,
     ...(endpoint === undefined || endpoint === "" ? {} : { endpoint }),
   };
 };

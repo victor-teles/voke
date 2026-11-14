@@ -70,7 +70,7 @@ export default function HomePage() {
                 <span className="voke-code-symbol">dynamodbTable</span>{" "}
                 <span className="voke-code-muted">{"}"}</span>{" "}
                 <span className="voke-code-keyword">from</span>{" "}
-                <span className="voke-code-string">"voke/aws"</span>
+                <span className="voke-code-string">"@voke/aws"</span>
                 <span className="voke-code-muted">;</span>
                 {"\n\n"}
                 <span className="voke-code-keyword">export default</span>{" "}

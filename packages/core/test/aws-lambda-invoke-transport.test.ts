@@ -1,6 +1,6 @@
 import { expect, mock, test } from "bun:test";
 
-import type { StandardSchemaV1 } from "../src/invoke";
+import type { InvokeTransport, StandardSchemaV1 } from "../src/invoke";
 
 const sdkCalls: unknown[] = [];
 let sdkResponse: unknown;
@@ -65,6 +65,27 @@ const userOutputSchema: StandardSchemaV1<
   },
 };
 
+const awsTransportOptions = async () => {
+  const specifier = "@voke/aws";
+  const { createAwsLambdaInvokeTransport } = (await import(specifier)) as {
+    createAwsLambdaInvokeTransport: (options: {
+      client: { send: (command: { input: unknown }) => Promise<unknown> };
+    }) => InvokeTransport;
+  };
+
+  return {
+    runtime: "aws" as const,
+    transport: createAwsLambdaInvokeTransport({
+      client: {
+        send: (command) => {
+          sdkCalls.push(command.input);
+          return Promise.resolve(sdkResponse);
+        },
+      },
+    }),
+  };
+};
+
 test("default AWS runtime invokes Lambda with parsed payload and trace metadata", async () => {
   sdkCalls.length = 0;
   sdkResponse = {
@@ -89,12 +110,13 @@ test("default AWS runtime invokes Lambda with parsed payload and trace metadata"
     }),
   });
 
+  const transportOptions = await awsTransportOptions();
   const result = await withInvokeTrace({ parentFunction: "api" }, () =>
     functions.invoke(
       "getUser",
       { id: "usr_1" },
       {
-        runtime: "aws",
+        ...transportOptions,
         trace: { requestId: "req_aws" },
       }
     )
@@ -140,7 +162,7 @@ test("default AWS runtime returns accepted shape for async Lambda invokes", asyn
     { id: "usr_1" },
     {
       mode: "async",
-      runtime: "aws",
+      ...(await awsTransportOptions()),
     }
   );
 
@@ -182,7 +204,7 @@ test("default AWS runtime uses registry key when no deployed name is configured"
   });
 
   await expect(
-    functions.invoke("getUser", { id: "usr_2" }, { runtime: "aws" })
+    functions.invoke("getUser", { id: "usr_2" }, await awsTransportOptions())
   ).resolves.toEqual({ id: "usr_2", name: "Ada" });
   expect(sdkCalls).toEqual([
     {
@@ -215,7 +237,7 @@ test("default AWS runtime converts SDK and Lambda failures into invoke errors", 
   sdkResponse = Promise.reject(new Error("socket closed"));
 
   await expect(
-    functions.invoke("getUser", { id: "usr_1" }, { runtime: "aws" })
+    functions.invoke("getUser", { id: "usr_1" }, await awsTransportOptions())
   ).rejects.toMatchObject({
     code: "TRANSPORT_FAILED",
     functionName: "deployed-get-user",
@@ -230,7 +252,7 @@ test("default AWS runtime converts SDK and Lambda failures into invoke errors", 
   };
 
   await expect(
-    functions.invoke("getUser", { id: "usr_1" }, { runtime: "aws" })
+    functions.invoke("getUser", { id: "usr_1" }, await awsTransportOptions())
   ).rejects.toMatchObject({
     code: "TRANSPORT_STATUS_ERROR",
     functionName: "deployed-get-user",
@@ -261,7 +283,7 @@ test("default AWS runtime converts SDK timeouts into invoke errors", async () =>
       "getUser",
       { id: "usr_1" },
       {
-        runtime: "aws",
+        ...(await awsTransportOptions()),
         timeoutMs: 1,
       }
     )

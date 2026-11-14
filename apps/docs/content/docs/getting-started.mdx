@@ -15,10 +15,11 @@ Inside a Voke project, add `voke.config.ts`:
 
 ```ts
 import { defineConfig } from "voke";
-import { dynamodbTable, sqsQueue } from "voke/aws";
+import { aws, dynamodbTable, sqsQueue } from "@voke/aws";
 
 export default defineConfig({
   name: "hello-api",
+  provider: aws(),
   stage: "local",
   region: "us-east-1",
   entrypoint: "./src/index.ts",

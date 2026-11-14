@@ -3,11 +3,9 @@ import { VokeModelError } from "./errors";
 import { createInternalModel } from "./model";
 import type {
   VokeModel,
-  VokeModelAwsResourceProvider,
   VokeModelHttpAuthorizer,
   VokeModelResource,
   VokeModelSqsEventSource,
-  VokeResourceKind,
 } from "./model";
 
 type CloudFormationValue =
@@ -49,6 +47,22 @@ export interface StackResourceDefinition {
   actions: string[];
   outputName: string;
   properties: Record<string, CloudFormationValue>;
+}
+
+type AwsResourceBindingValue = "ref" | "getAttArn" | "getAttId";
+
+type AwsResourcePolicyResource =
+  | "ref"
+  | "getAttArn"
+  | "getAttId"
+  | "parameterArn"
+  | "s3ArnWithObjects";
+
+interface AwsCloudFormationResourceProvider {
+  cloudFormationType: string;
+  bindingValue: AwsResourceBindingValue;
+  policyResource: AwsResourcePolicyResource;
+  outputName: string;
 }
 
 export type SynthesizeCloudFormationOptions = VokeConfigInput & {
@@ -185,57 +199,9 @@ const toLogicalId = (value: string): string => {
 const authorizerLogicalId = (name: string): string =>
   `${toLogicalId(name)}Authorizer`;
 
-const resourceSynthesisByKind: Record<
-  Exclude<VokeResourceKind, "awsResource">,
-  VokeModelAwsResourceProvider
-> = {
-  dynamodbTable: {
-    bindingValue: "ref",
-    cloudFormationType: "AWS::DynamoDB::Table",
-    outputName: "Name",
-    policyResource: "getAttArn",
-  },
-  eventBus: {
-    bindingValue: "ref",
-    cloudFormationType: "AWS::Events::EventBus",
-    outputName: "Name",
-    policyResource: "getAttArn",
-  },
-  s3Bucket: {
-    bindingValue: "ref",
-    cloudFormationType: "AWS::S3::Bucket",
-    outputName: "Name",
-    policyResource: "s3ArnWithObjects",
-  },
-  secret: {
-    bindingValue: "getAttId",
-    cloudFormationType: "AWS::SecretsManager::Secret",
-    outputName: "Id",
-    policyResource: "getAttArn",
-  },
-  snsTopic: {
-    bindingValue: "ref",
-    cloudFormationType: "AWS::SNS::Topic",
-    outputName: "Arn",
-    policyResource: "ref",
-  },
-  sqsQueue: {
-    bindingValue: "ref",
-    cloudFormationType: "AWS::SQS::Queue",
-    outputName: "Url",
-    policyResource: "getAttArn",
-  },
-  ssmParameter: {
-    bindingValue: "ref",
-    cloudFormationType: "AWS::SSM::Parameter",
-    outputName: "Name",
-    policyResource: "parameterArn",
-  },
-};
-
 const resourceValue = (
   logicalId: string,
-  bindingValue: VokeModelAwsResourceProvider["bindingValue"]
+  bindingValue: AwsCloudFormationResourceProvider["bindingValue"]
 ): CloudFormationValue => {
   if (bindingValue === "getAttArn") {
     return { "Fn::GetAtt": [logicalId, "Arn"] };
@@ -250,7 +216,7 @@ const resourceValue = (
 
 const resourceArn = (
   logicalId: string,
-  policyResource: VokeModelAwsResourceProvider["policyResource"]
+  policyResource: AwsCloudFormationResourceProvider["policyResource"]
 ): CloudFormationValue => {
   if (policyResource === "ref") {
     return { Ref: logicalId };
@@ -282,7 +248,7 @@ const resourceArn = (
 const toResourcePolicyStatements = (
   logicalId: string,
   resource: VokeModelResource,
-  provider: VokeModelAwsResourceProvider
+  provider: AwsCloudFormationResourceProvider
 ): CloudFormationValue[] => {
   if (resource.access.actions.length === 0) {
     return [];
@@ -325,18 +291,144 @@ const toResourcePolicyStatements = (
   return statements;
 };
 
+const secretArn = (secretId: string): CloudFormationValue => {
+  if (secretId.startsWith("arn:")) {
+    return secretId;
+  }
+
+  return {
+    "Fn::Sub": [
+      `arn:aws:secretsmanager:\${AWS::Region}:\${AWS::AccountId}:secret:${secretId}-*`,
+      {},
+    ],
+  };
+};
+
+const parameterArn = (name: string): CloudFormationValue => ({
+  "Fn::Sub": [
+    `arn:aws:ssm:\${AWS::Region}:\${AWS::AccountId}:parameter/${name.replace(/^\/+/u, "")}`,
+    {},
+  ],
+});
+
 const resourceProvider = (
   resource: VokeModelResource
-): VokeModelAwsResourceProvider => {
-  if (resource.kind === "awsResource") {
-    if (resource.provider?.aws === undefined) {
+): AwsCloudFormationResourceProvider => {
+  const extension = resource.provider?.aws;
+
+  if (extension !== undefined) {
+    if (extension.type !== "cloudformation.resource") {
       throw new Error("AWS resource provider metadata is required");
     }
 
-    return resource.provider.aws;
+    return extension.properties as unknown as AwsCloudFormationResourceProvider;
   }
 
-  return resourceSynthesisByKind[resource.kind];
+  throw new Error("AWS resource provider metadata is required");
+};
+
+const toRuntimeVariablePolicyStatements = (
+  variables: VokeModel["functions"][string]["variables"],
+  resources: VokeModel["resources"]
+): CloudFormationValue[] => {
+  const statements: CloudFormationValue[] = [];
+
+  for (const variable of Object.values(variables)) {
+    if (variable.provider !== "aws") {
+      continue;
+    }
+
+    const { source } = variable;
+
+    if (source.kind === "secretsManagerSecret") {
+      statements.push({
+        Action: ["secretsmanager:GetSecretValue"],
+        Effect: "Allow",
+        Resource: secretArn(String(source.secretId)),
+      });
+      continue;
+    }
+
+    if (source.kind === "ssmParameter") {
+      statements.push({
+        Action: ["ssm:GetParameter", "ssm:GetParameters"],
+        Effect: "Allow",
+        Resource: parameterArn(String(source.name)),
+      });
+      continue;
+    }
+
+    if (
+      source.kind !== "secretsManagerSecretResource" &&
+      source.kind !== "ssmParameterResource"
+    ) {
+      continue;
+    }
+
+    const resourceKey = String(source.resource);
+    const resource = resources[resourceKey];
+
+    if (resource === undefined) {
+      throw new Error(
+        `Missing resource model for Runtime Variable: ${resourceKey}`
+      );
+    }
+
+    statements.push(
+      ...toResourcePolicyStatements(
+        toLogicalId(resourceKey),
+        resource,
+        resourceProvider(resource)
+      )
+    );
+  }
+
+  return statements;
+};
+
+const functionRoleLogicalId = (
+  functionName: string,
+  apiFunctionName: string
+): string =>
+  functionName === apiFunctionName
+    ? "FunctionRole"
+    : `${toLogicalId(functionName)}FunctionRole`;
+
+const functionRoleResource = (
+  statements: CloudFormationValue[]
+): CloudFormationResource => {
+  const properties: Record<string, CloudFormationValue> = {
+    AssumeRolePolicyDocument: {
+      Statement: [
+        {
+          Action: "sts:AssumeRole",
+          Effect: "Allow",
+          Principal: { Service: "lambda.amazonaws.com" },
+        },
+      ],
+      Version: "2012-10-17",
+    },
+    ManagedPolicyArns: [
+      "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+    ],
+  };
+
+  if (statements.length > 0) {
+    properties.Policies = [
+      {
+        PolicyDocument: {
+          Statement: statements,
+          Version: "2012-10-17",
+        },
+        PolicyName: "VokeResourceAccess",
+      },
+    ];
+  }
+
+  return {
+    Properties: properties,
+    Type: "AWS::IAM::Role",
+  };
 };
 
 const functionLogicalId = (name: string, apiFunctionName: string): string =>
@@ -372,10 +464,12 @@ const toSqsEventSourceMappingResource = (options: {
     ]);
   }
 
-  if (resource.kind !== "sqsQueue") {
+  const provider = resourceProvider(resource);
+
+  if (provider.cloudFormationType !== "AWS::SQS::Queue") {
     throw VokeModelError.validation([
       {
-        message: `Function "${functionName}" SQS event source references resource "${eventSource.queue}", but it is a "${resource.kind}" resource instead of an "sqsQueue".`,
+        message: `Function "${functionName}" SQS event source references resource "${eventSource.queue}", but it is an ${JSON.stringify(provider.cloudFormationType)} resource instead of an "AWS::SQS::Queue".`,
         path: `functions.${functionName}.eventSources.${eventSourceIndex}.queue`,
       },
     ]);
@@ -676,38 +770,6 @@ export const synthesizeCloudFormationFromModel = (
     );
   }
 
-  const functionRoleProperties: Record<string, CloudFormationValue> = {
-    AssumeRolePolicyDocument: {
-      Statement: [
-        {
-          Action: "sts:AssumeRole",
-          Effect: "Allow",
-          Principal: { Service: "lambda.amazonaws.com" },
-        },
-      ],
-      Version: "2012-10-17",
-    },
-    ManagedPolicyArns: [
-      "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
-    ],
-  };
-
-  if (policyStatements.length > 0) {
-    functionRoleProperties.Policies = [
-      {
-        PolicyDocument: {
-          Statement: policyStatements,
-          Version: "2012-10-17",
-        },
-        PolicyName: "VokeResourceAccess",
-      },
-    ];
-  }
-
-  templateResources.FunctionRole = {
-    Properties: functionRoleProperties,
-    Type: "AWS::IAM::Role",
-  };
   for (const [name, definition] of Object.entries(model.functions).toSorted(
     ([leftName], [rightName]) => {
       if (leftName === apiFunctionName) {
@@ -722,6 +784,14 @@ export const synthesizeCloudFormationFromModel = (
     }
   )) {
     const logicalId = functionLogicalId(name, apiFunctionName);
+    const roleLogicalId = functionRoleLogicalId(name, apiFunctionName);
+    templateResources[roleLogicalId] = functionRoleResource([
+      ...policyStatements,
+      ...toRuntimeVariablePolicyStatements(
+        definition.variables,
+        model.resources
+      ),
+    ]);
     const environmentVariables: Record<string, CloudFormationValue> = {
       ...definition.environment,
     };
@@ -759,7 +829,7 @@ export const synthesizeCloudFormationFromModel = (
         },
         FunctionName: definition.deployedName,
         Handler: definition.handler,
-        Role: { "Fn::GetAtt": ["FunctionRole", "Arn"] },
+        Role: { "Fn::GetAtt": [roleLogicalId, "Arn"] },
         Runtime: definition.runtime,
       },
       Type: "AWS::Lambda::Function",

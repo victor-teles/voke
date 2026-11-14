@@ -1,12 +1,6 @@
 import { Hono } from "hono";
 import type { MiddlewareHandler } from "hono";
 
-import { createAwsLambdaHandler } from "./aws-lambda";
-import type {
-  AwsLambdaContext,
-  AwsLambdaHttpApiV2Event,
-  AwsLambdaHttpApiV2Result,
-} from "./aws-lambda";
 import { defineConfig } from "./config";
 import type { VokeConfig, VokeConfigInput } from "./config";
 import type { VokeEnv } from "./context";
@@ -21,9 +15,14 @@ import {
   mountFunctionRoutes,
 } from "./invoke";
 import type { FunctionRegistry, FunctionRegistryInput } from "./invoke";
+import type { VokeProvider } from "./provider";
 import { mountDevFunctionEndpoints } from "./remote";
 import { error as responseError } from "./response";
 import { readEnv } from "./runtime-env";
+import type {
+  RuntimeVariableOverrides,
+  RuntimeVariableProvider,
+} from "./variables";
 
 export interface ApiRouteModule<TEnv extends VokeEnv = VokeEnv> {
   basePath?: string;
@@ -41,11 +40,19 @@ export interface GatewayOptions {
   functions?: FunctionRegistry | FunctionRegistryInput;
   middleware?: MiddlewareHandler<VokeEnv>[];
   routes?: ApiRouteModule[];
+  variables?: {
+    overrides?: RuntimeVariableOverrides;
+    providers?: readonly RuntimeVariableProvider[];
+  };
 }
 
-export interface VokeOptions {
+export interface VokeOptions<
+  TProvider extends VokeProvider | undefined = VokeProvider | undefined,
+> {
   config?: VokeConfigInput;
   middleware?: MiddlewareHandler<VokeEnv>[];
+  provider?: TProvider;
+  variables?: GatewayOptions["variables"];
 }
 
 export type Middleware = MiddlewareHandler<VokeEnv>;
@@ -55,10 +62,6 @@ export interface GatewayRuntime<TFunctions extends FunctionRegistry> {
   config: VokeConfig;
   fetch: Hono<VokeEnv>["fetch"];
   functions: TFunctions;
-  handler: (
-    event: AwsLambdaHttpApiV2Event,
-    context?: AwsLambdaContext
-  ) => Promise<AwsLambdaHttpApiV2Result>;
   name: string;
   request: Hono<VokeEnv>["request"];
 }
@@ -191,7 +194,11 @@ export const createGateway = (options: GatewayOptions = {}): Hono<VokeEnv> => {
     assertRouteParamSchemas(configInput.functions);
     activateFunctionRegistry(
       configInput.functions,
-      activationKey(config ?? defineConfig(configInput))
+      activationKey(config ?? defineConfig(configInput)),
+      {
+        variableOverrides: options.variables?.overrides,
+        variableProviders: options.variables?.providers,
+      }
     );
     mountFunctionRoutes(gateway, configInput.functions);
 
@@ -235,29 +242,43 @@ const loadRuntimeConfig = (): VokeConfigInput => {
   }
 };
 
-export const voke = <const TFunctions extends FunctionRegistry>(
+type ProviderGatewayExtension<TProvider> =
+  TProvider extends VokeProvider<infer TGatewayExtension>
+    ? TGatewayExtension
+    : object;
+
+export const voke = <
+  const TFunctions extends FunctionRegistry,
+  const TProvider extends VokeProvider | undefined = undefined,
+>(
   functions: TFunctions,
-  options: VokeOptions = {}
-): GatewayRuntime<TFunctions> => {
+  options: VokeOptions<TProvider> = {}
+): GatewayRuntime<TFunctions> & ProviderGatewayExtension<TProvider> => {
   const configInput = options.config ?? loadRuntimeConfig();
   const { functions: _configuredFunctions, ...gatewayConfig } = configInput;
   const app = createGateway({
     config: gatewayConfig,
     functions,
     middleware: options.middleware,
+    variables: options.variables,
   });
   const config = defineConfig({ ...configInput, functions });
-  const handler = createAwsLambdaHandler(app);
+  const provider = options.provider ?? config.provider;
+  const providerGateway =
+    provider?.runtime?.gateway?.({
+      app,
+      config,
+    }) ?? {};
 
   return {
+    ...providerGateway,
     app,
     config,
     fetch: app.fetch.bind(app) as Hono<VokeEnv>["fetch"],
     functions,
-    handler: (event, context) => handler(event, context as AwsLambdaContext),
     name: config.name,
     request: app.request.bind(app) as Hono<VokeEnv>["request"],
-  };
+  } as GatewayRuntime<TFunctions> & ProviderGatewayExtension<TProvider>;
 };
 
 export const routeModule = <TEnv extends VokeEnv>(

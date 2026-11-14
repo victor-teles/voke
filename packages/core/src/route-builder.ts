@@ -7,17 +7,20 @@ import type {
   RouteMethod,
   StandardSchemaV1,
 } from "./invoke";
+import type { RuntimeVariableCatalog } from "./variables";
 
 type AnyStandardSchema = StandardSchemaV1<unknown, unknown>;
 
-export class Voke {
+export class Voke<
+  TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+> {
   readonly #middleware: readonly MiddlewareHandler<VokeEnv>[];
 
   constructor(middleware: readonly MiddlewareHandler<VokeEnv>[] = []) {
     this.#middleware = Object.freeze([...middleware]);
   }
 
-  use(middleware: MiddlewareHandler<VokeEnv>): Voke {
+  use(middleware: MiddlewareHandler<VokeEnv>): Voke<TVariables> {
     return new Voke([...this.#middleware, middleware]);
   }
 
@@ -39,7 +42,8 @@ export class Voke {
       TQuerySchema,
       THeadersSchema,
       TOutputSchema,
-      TResult
+      TResult,
+      TVariables
     >
   ): RouteDefinition<
     "DELETE",
@@ -49,7 +53,8 @@ export class Voke {
     TQuerySchema,
     THeadersSchema,
     TOutputSchema,
-    TResult
+    TResult,
+    TVariables
   > {
     return this.route("DELETE", path, definition);
   }
@@ -72,7 +77,8 @@ export class Voke {
       TQuerySchema,
       THeadersSchema,
       TOutputSchema,
-      TResult
+      TResult,
+      TVariables
     >
   ): RouteDefinition<
     "GET",
@@ -82,7 +88,8 @@ export class Voke {
     TQuerySchema,
     THeadersSchema,
     TOutputSchema,
-    TResult
+    TResult,
+    TVariables
   > {
     return this.route("GET", path, definition);
   }
@@ -105,7 +112,8 @@ export class Voke {
       TQuerySchema,
       THeadersSchema,
       TOutputSchema,
-      TResult
+      TResult,
+      TVariables
     >
   ): RouteDefinition<
     "HEAD",
@@ -115,7 +123,8 @@ export class Voke {
     TQuerySchema,
     THeadersSchema,
     TOutputSchema,
-    TResult
+    TResult,
+    TVariables
   > {
     return this.route("HEAD", path, definition);
   }
@@ -138,7 +147,8 @@ export class Voke {
       TQuerySchema,
       THeadersSchema,
       TOutputSchema,
-      TResult
+      TResult,
+      TVariables
     >
   ): RouteDefinition<
     "OPTIONS",
@@ -148,7 +158,8 @@ export class Voke {
     TQuerySchema,
     THeadersSchema,
     TOutputSchema,
-    TResult
+    TResult,
+    TVariables
   > {
     return this.route("OPTIONS", path, definition);
   }
@@ -171,7 +182,8 @@ export class Voke {
       TQuerySchema,
       THeadersSchema,
       TOutputSchema,
-      TResult
+      TResult,
+      TVariables
     >
   ): RouteDefinition<
     "PATCH",
@@ -181,7 +193,8 @@ export class Voke {
     TQuerySchema,
     THeadersSchema,
     TOutputSchema,
-    TResult
+    TResult,
+    TVariables
   > {
     return this.route("PATCH", path, definition);
   }
@@ -204,7 +217,8 @@ export class Voke {
       TQuerySchema,
       THeadersSchema,
       TOutputSchema,
-      TResult
+      TResult,
+      TVariables
     >
   ): RouteDefinition<
     "POST",
@@ -214,7 +228,8 @@ export class Voke {
     TQuerySchema,
     THeadersSchema,
     TOutputSchema,
-    TResult
+    TResult,
+    TVariables
   > {
     return this.route("POST", path, definition);
   }
@@ -237,7 +252,8 @@ export class Voke {
       TQuerySchema,
       THeadersSchema,
       TOutputSchema,
-      TResult
+      TResult,
+      TVariables
     >
   ): RouteDefinition<
     "PUT",
@@ -247,7 +263,8 @@ export class Voke {
     TQuerySchema,
     THeadersSchema,
     TOutputSchema,
-    TResult
+    TResult,
+    TVariables
   > {
     return this.route("PUT", path, definition);
   }
@@ -272,7 +289,8 @@ export class Voke {
       TQuerySchema,
       THeadersSchema,
       TOutputSchema,
-      TResult
+      TResult,
+      TVariables
     >
   ): RouteDefinition<
     TMethod,
@@ -282,7 +300,8 @@ export class Voke {
     TQuerySchema,
     THeadersSchema,
     TOutputSchema,
-    TResult
+    TResult,
+    TVariables
   > {
     if (
       (method === "GET" || method === "HEAD") &&

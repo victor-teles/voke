@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { createTestClient } from "voke/testing";
+import { createTestClient } from "@voke/testing";
 
 const apiUrl = Bun.env.VOKE_E2E_API_URL;
 const smoke = apiUrl === undefined ? test.skip : test;

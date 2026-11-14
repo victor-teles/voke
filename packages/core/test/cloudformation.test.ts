@@ -7,6 +7,10 @@ import {
   requestAuthorizer,
 } from "../src/authorizers";
 import {
+  parameter as runtimeParameter,
+  secret as runtimeSecret,
+} from "../src/aws";
+import {
   dynamodbTable,
   eventBus,
   s3Bucket,
@@ -14,8 +18,6 @@ import {
   snsTopic,
   sqsQueue,
   ssmParameter,
-} from "../src/aws";
-import {
   synthesizeCloudFormation,
   synthesizeCloudFormationFromModel,
 } from "../src/cloudformation";
@@ -56,6 +58,20 @@ const resourceAccessPolicyStatements = (
         };
       }[]
     | undefined;
+};
+
+const rolePolicyStatements = (
+  template: ReturnType<typeof synthesizeCloudFormation>,
+  role: string
+): unknown[] | undefined => {
+  const policies = template.Resources[role]?.Properties.Policies;
+
+  if (!Array.isArray(policies)) {
+    return undefined;
+  }
+
+  return (policies[0] as { PolicyDocument: { Statement: unknown[] } })
+    .PolicyDocument.Statement;
 };
 
 const routeResource = (
@@ -536,6 +552,92 @@ test("generates resource-specific IAM policy statements for each AWS helper", ()
       Resource: { "Fn::Sub": [uploadsBucketObjectArn, {}] },
     },
   ]);
+});
+
+test("synthesizes Runtime Variable permissions only for declaring Functions", () => {
+  const template = synthesizeCloudFormation({
+    functions: defineFunctions({
+      checkout: defineFunction({
+        handler: () => "ok",
+        output: schema<string>(),
+        variables: {
+          config: runtimeParameter("/prod/app/config"),
+          stripeKey: runtimeSecret("/prod/stripe/key"),
+        },
+      }),
+      receipt: defineFunction({
+        handler: () => "ok",
+        output: schema<string>(),
+      }),
+    }),
+    name: "runtime-policy-api",
+  });
+
+  expect(rolePolicyStatements(template, "FunctionRole")).toEqual([
+    {
+      Action: ["ssm:GetParameter", "ssm:GetParameters"],
+      Effect: "Allow",
+      Resource: {
+        "Fn::Sub": [
+          `arn:aws:ssm:\${AWS::Region}:\${AWS::AccountId}:parameter/prod/app/config`,
+          {},
+        ],
+      },
+    },
+    {
+      Action: ["secretsmanager:GetSecretValue"],
+      Effect: "Allow",
+      Resource: {
+        "Fn::Sub": [
+          `arn:aws:secretsmanager:\${AWS::Region}:\${AWS::AccountId}:secret:/prod/stripe/key-*`,
+          {},
+        ],
+      },
+    },
+  ]);
+  expect(rolePolicyStatements(template, "ReceiptFunctionRole")).toBeUndefined();
+  expect(template.Resources.Function?.Properties.Role).toEqual({
+    "Fn::GetAtt": ["FunctionRole", "Arn"],
+  });
+  expect(template.Resources.ReceiptFunction?.Properties.Role).toEqual({
+    "Fn::GetAtt": ["ReceiptFunctionRole", "Arn"],
+  });
+});
+
+test("synthesizes Runtime Variable permissions for managed resource-key declarations", () => {
+  const template = synthesizeCloudFormation({
+    functions: defineFunctions({
+      checkout: defineFunction({
+        handler: () => "ok",
+        output: schema<string>(),
+        variables: {
+          publicConfig: runtimeParameter.fromResource("publicConfig"),
+          signingSecret: runtimeSecret.fromResource("signingSecret"),
+        },
+      }),
+    }),
+    name: "runtime-resource-policy-api",
+    resources: {
+      publicConfig: ssmParameter({ value: "hello" }),
+      signingSecret: secret(),
+    },
+  });
+
+  expect(rolePolicyStatements(template, "FunctionRole")).toContainEqual({
+    Action: ["secretsmanager:GetSecretValue"],
+    Effect: "Allow",
+    Resource: { "Fn::GetAtt": ["SigningSecret", "Arn"] },
+  });
+  expect(rolePolicyStatements(template, "FunctionRole")).toContainEqual({
+    Action: ["ssm:GetParameter", "ssm:GetParameters"],
+    Effect: "Allow",
+    Resource: {
+      "Fn::Sub": [
+        `arn:aws:ssm:\${AWS::Region}:\${AWS::AccountId}:parameter/\${PublicConfig}`,
+        {},
+      ],
+    },
+  });
 });
 
 test("can synthesize directly from the internal model for advanced usage", () => {

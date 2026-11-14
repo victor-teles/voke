@@ -1,8 +1,10 @@
 import { expect, test } from "bun:test";
 
+import { Hono } from "hono";
 import type { LambdaContext, LambdaEvent } from "hono/aws-lambda";
 
 import helloApi from "../src/index";
+import { requestInfo } from "../src/middleware/request-info";
 
 const { handler } = helloApi;
 
@@ -109,6 +111,19 @@ test("responds from composed health routes with config", async () => {
       stage: "local",
     },
   });
+});
+
+test("request info middleware preserves VOKE_AWS_CONTEXT fallback", async () => {
+  const app = new Hono();
+
+  app.use("*", requestInfo);
+  app.get("/health", (c) => c.json({ ok: true }));
+
+  const response = await app.request("/health", undefined, {
+    VOKE_AWS_CONTEXT: { awsRequestId: "req_fallback" },
+  });
+
+  expect(response.headers.get("x-request-id")).toBe("req_fallback");
 });
 
 test("lists users from a route module", async () => {

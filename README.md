@@ -8,10 +8,11 @@ Create `voke.config.ts` for project, build, and CloudFormation settings:
 
 ```ts
 import { defineConfig } from "voke";
-import { dynamodbTable, sqsQueue } from "voke/aws";
+import { aws, dynamodbTable, sqsQueue } from "@voke/aws";
 
 export default defineConfig({
   name: "hello-api",
+  provider: aws(),
   stage: "local",
   region: "us-east-1",
   entrypoint: "./src/index.ts",
@@ -28,6 +29,7 @@ Then create Functions with explicit Function Contracts and mount them in a Gatew
 
 ```ts
 import { createFunctions, http, route, voke } from "voke";
+import { aws } from "@voke/aws";
 import config from "../voke.config";
 
 const functions = createFunctions({
@@ -43,7 +45,7 @@ const functions = createFunctions({
   }),
 });
 
-const gateway = voke(functions, { config });
+const gateway = voke(functions, { config, provider: aws() });
 
 export default gateway;
 ```
@@ -54,7 +56,7 @@ The Gateway exposes `handler` for AWS Lambda HTTP API v2 events, `fetch` for Web
 const response = await gateway.request("/health");
 ```
 
-Voke still uses Hono-compatible HTTP primitives under the hood, but the first-party authoring model is the Voke Function API: `createFunctions`, `fn`, `http`, `route`, `sqs`, and `voke`.
+Voke still uses Hono-compatible HTTP primitives under the hood, but the first-party core authoring model is the Voke Function API: `createFunctions`, `fn`, `http`, `route`, and `voke`. AWS-specific Function helpers such as `sqs` live in `@voke/aws`.
 
 ## Vocabulary
 
@@ -100,7 +102,7 @@ voke local bootstrap
 Runtime code can read the generated environment bindings and pass consistent config into AWS SDK clients:
 
 ```ts
-import { bindResource, createAwsClientConfig } from "voke/aws";
+import { bindResource, createAwsClientConfig } from "@voke/aws";
 
 const usersTable = bindResource("usersTable", "name");
 
@@ -110,13 +112,48 @@ const tableName = usersTable.value();
 
 Resource helpers are included for DynamoDB, SQS, SNS, EventBridge, S3, Secrets Manager, and Parameter Store.
 
+## Runtime Variables
+
+Declare provider-backed runtime values on the Function that uses them, then read them through `context.variables`. AWS Secrets Manager and SSM Parameter Store are available from `voke/aws` without importing AWS clients in application code:
+
+```ts
+import { createFunctions, fn } from "voke";
+import { parameter, secret } from "voke/aws";
+
+const functions = createFunctions({
+  checkout: fn({
+    input: checkoutInput,
+    output: checkoutOutput,
+    variables: {
+      flags: parameter("/prod/checkout/flags", { decrypt: false }),
+      stripeKey: secret("/prod/stripe/key", {
+        cache: { ttlSeconds: 60 },
+        load: "beforeHandler",
+      }),
+    },
+    handler: async (payload, context) => {
+      const stripeKey = await context.variables.stripeKey.text();
+      const flags = await context.variables.flags.json(flagsSchema);
+
+      return checkout(payload, { flags, stripeKey });
+    },
+  }),
+});
+```
+
+Use `secret.fromResource("signingSecret")` and `parameter.fromResource("publicConfig")` when the value comes from a Voke-managed CloudFormation resource. Direct calls use external AWS names or ARNs; `.fromResource(...)` uses local Voke resource keys.
+
+Runtime Variables are required by default. `{ optional: true }` returns `undefined` for absence, while invalid values and provider failures still throw `VokeRuntimeVariableError`. Local tests can pass `variables.overrides` to `voke(...)`, and Voke also checks `VOKE_VARIABLE_<FUNCTION>_<KEY>` before `VOKE_VARIABLE_<KEY>`.
+
+Runtime Variables are implementation dependencies: they are excluded from Function Contracts, generated remote clients, and the `voke dev` summary. CloudFormation synthesis grants read permissions only to the Functions that declare each Runtime Variable.
+
 ## SQS Event Sources
 
 SQS Event Source Functions use the same Function Registry model, but receive normalized message batches instead of direct `functions.invoke(...)` payloads:
 
 ```ts
-import { createFunctions, sqs } from "voke";
-import { createSqsEventHandler } from "voke/invoke";
+import { createFunctions } from "voke";
+import { createSqsEventHandler, sqs } from "@voke/aws";
 
 const processOrder = sqs({
   batchSize: 10,
@@ -148,7 +185,7 @@ Define invokable Functions with Standard Schema-compatible input/output contract
 
 ```ts
 import { createFunctions, fn } from "voke";
-import type { StandardSchemaV1 } from "voke/schema";
+import type { StandardSchemaV1 } from "voke";
 
 const userInput: StandardSchemaV1<{ id: string }, { id: string }> = {
   "~standard": {
@@ -189,14 +226,11 @@ Route-backed Functions can protect HTTP API routes with named authorizers:
 ```ts
 import {
   createAuthorizers,
-  createFunctions,
-  http,
   jwtAuthorizer,
   lambdaAuthorizer,
   requestAuthorizer,
-  route,
-  voke,
-} from "voke";
+} from "@voke/aws";
+import { createFunctions, http, route, voke } from "voke";
 
 const authorizers = createAuthorizers({
   session: lambdaAuthorizer({ function: "authorizeSession" }),
@@ -264,7 +298,7 @@ import {
   createFlociComposeConfig,
   createLocalAwsEnvironment,
   createLocalResourceBindings,
-} from "voke/local";
+} from "@voke/aws/local";
 
 const compose = createFlociComposeConfig();
 const env = createLocalAwsEnvironment();
@@ -288,7 +322,7 @@ See [docs/serverless-framework-migration.md](./docs/serverless-framework-migrati
 Voke includes helpers for first-class Function, Gateway, and AWS integration tests:
 
 ```ts
-import { createTestClient } from "voke/testing";
+import { createTestClient } from "@voke/testing";
 import service from "../src/index";
 
 const client = createTestClient(service);

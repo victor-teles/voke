@@ -1,5 +1,5 @@
+import { schema } from "@voke/schema";
 import { createFunctions, fn } from "voke";
-import { schema } from "voke/schema";
 
 const getUserInput = schema.object({
   id: schema.string().min(1),

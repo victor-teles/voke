@@ -2,7 +2,7 @@ import {
   createFlociComposeConfig,
   createLocalAwsEnvironment,
   createLocalBootstrapPlan,
-} from "voke/local";
+} from "@voke/aws/local";
 
 import config from "../voke.config";
 

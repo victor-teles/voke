@@ -1,0 +1,31 @@
+{
+  "name": "@voke/aws",
+  "version": "0.0.0",
+  "type": "module",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./cloudformation": "./src/cloudformation.ts",
+    "./local": "./src/local.ts",
+    "./testing": "./src/testing.ts"
+  },
+  "scripts": {
+    "build": "bun build ./src/index.ts --outdir ./dist --target bun",
+    "test": "bun test",
+    "typecheck": "bunx tsgo --project tsconfig.json --noEmit",
+    "clean": "rm -rf dist coverage"
+  },
+  "dependencies": {
+    "@aws-sdk/client-lambda": "^3.1050.0",
+    "@voke/http": "workspace:*",
+    "hono": "^4.0.0",
+    "voke": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@typescript/native-preview": "catalog:"
+  },
+  "peerDependencies": {
+    "hono": "^4.0.0"
+  }
+}

@@ -79,7 +79,7 @@ expect(await response.json()).toEqual({
 Use `createTestClient(app)` or `createTestClient(service)` when a test should run through Lambda HTTP API event conversion.
 
 ```ts
-import { createTestClient } from "voke/testing";
+import { createTestClient } from "@voke/testing";
 import service from "../src/index";
 
 const client = createTestClient(service);
@@ -97,9 +97,9 @@ const client = createTestClient({ baseUrl: Bun.env.VOKE_E2E_API_URL! });
 `createStackTestContext()` prepares local AWS environment variables, resource bindings, CloudFormation output helpers, and deterministic seed commands.
 
 ```ts
-import { synthesizeCloudFormation } from "voke/cloudformation";
-import { createStackTestContext } from "voke/testing";
-import { dynamodbTable } from "voke/aws";
+import { dynamodbTable } from "@voke/aws";
+import { synthesizeCloudFormation } from "@voke/aws/cloudformation";
+import { createStackTestContext } from "@voke/aws/testing";
 
 const template = synthesizeCloudFormation({
   name: "orders-api",

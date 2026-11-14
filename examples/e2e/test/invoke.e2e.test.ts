@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
+import { createInvokeTestClient } from "@voke/testing";
 import { createFunctions } from "voke";
-import { createInvokeTestClient } from "voke/testing";
 
 import { sendWelcomeEmail } from "../src/functions";
 

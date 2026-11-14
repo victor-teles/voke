@@ -5,19 +5,18 @@ import type { LambdaContext, LambdaEvent } from "hono/aws-lambda";
 
 import { api } from "../src/api";
 import { createApiApp, createGateway, routeModule } from "../src/app";
+import { bindResource, createAwsClientConfig } from "../src/aws";
+import { handleAwsLambdaRequest } from "../src/aws-lambda";
+import { createApiProject, runCli } from "../src/cli";
 import {
-  bindResource,
-  createAwsClientConfig,
   dynamodbTable,
   s3Bucket,
   secret,
   snsTopic,
   sqsQueue,
+  synthesizeCloudFormation,
   ssmParameter,
-} from "../src/aws";
-import { handleAwsLambdaRequest } from "../src/aws-lambda";
-import { createApiProject, runCli } from "../src/cli";
-import { synthesizeCloudFormation } from "../src/cloudformation";
+} from "../src/cloudformation";
 import { defineConfig, getConfig, loadVokeConfig } from "../src/config";
 import { awsContext } from "../src/context";
 import type { VokeEnv } from "../src/context";
@@ -377,6 +376,7 @@ test("creates a starter API project", async () => {
   const testFile = await Bun.file(`${directory}/test/api.test.ts`).text();
 
   expect(packageJson.name).toBe("@voke/created-api");
+  expect(packageJson.dependencies["@voke/aws"]).toBe("^0.0.0");
   expect(packageJson.dependencies.voke).toBe("^0.0.0");
   expect(packageJson.scripts.build).toBe("voke build");
   expect(packageJson.scripts.dev).toBe("voke dev");
@@ -388,6 +388,8 @@ test("creates a starter API project", async () => {
   expect(config).toContain('name: "created-api"');
   expect(config).toContain('entrypoint: "./src/index.ts"');
   expect(config).toContain('out: "./dist/cloudformation.json"');
+  expect(config).toContain('import { aws } from "@voke/aws";');
+  expect(config).toContain("provider: aws()");
   expect(index).toContain("createFunctions");
   expect(index).toContain("http");
   expect(index).toContain("voke");
@@ -405,7 +407,10 @@ test("generated starter test suite passes with local package links", async () =>
     name: "created-api-smoke",
   });
   await Bun.$`mkdir -p ${directory}/node_modules`;
+  await Bun.$`mkdir -p ${directory}/node_modules/@voke`;
   await Bun.$`ln -s ${`${import.meta.dir}/..`} ${`${directory}/node_modules/voke`}`;
+  await Bun.$`ln -s ${`${import.meta.dir}/../../aws`} ${`${directory}/node_modules/@voke/aws`}`;
+  await Bun.$`ln -s ${`${import.meta.dir}/../../testing`} ${`${directory}/node_modules/@voke/testing`}`;
   await Bun.$`ln -s ${`${import.meta.dir}/../node_modules/hono`} ${`${directory}/node_modules/hono`}`;
 
   const process = Bun.spawn(["bun", "test"], {
@@ -521,7 +526,7 @@ test("only supports nodejs22 and nodejs24 Lambda runtimes in defineConfig", () =
   );
 });
 
-test("exposes AWS resource helpers from voke/aws", () => {
+test("exposes AWS resource helpers from @voke/aws", () => {
   const template = synthesizeCloudFormation(
     defineConfig({
       cloudFormation: {
@@ -556,7 +561,7 @@ test("loads voke.config.ts default export", async () => {
   await Bun.write(
     configPath,
     `import { defineConfig } from "${import.meta.dir}/../src/index.ts";
-import { sqsQueue } from "${import.meta.dir}/../src/aws.ts";
+import { sqsQueue } from "${import.meta.dir}/../src/cloudformation.ts";
 
 export default defineConfig({
   name: "configured-api",
@@ -596,10 +601,11 @@ test("synth CLI reads voke.config.ts and writes the configured template path", a
   await Bun.write(
     configPath,
     `import { defineConfig } from "${import.meta.dir}/../src/index.ts";
-import { sqsQueue } from "${import.meta.dir}/../src/aws.ts";
+import { aws, sqsQueue } from "${import.meta.dir}/../../aws/src/index.ts";
 
 export default defineConfig({
   name: "configured-synth",
+  provider: aws(),
   stage: "qa",
   region: "sa-east-1",
   entrypoint: "./src/service.ts",
@@ -836,10 +842,27 @@ test("creates typed AWS resource bindings and client config from environment", (
 test("runs synth and experimental deploy/remove through the CLI parser", async () => {
   const directory = `/private/tmp/voke-cfn-${crypto.randomUUID()}`;
   const templatePath = `${directory}/template.json`;
+  const configPath = `${directory}/voke.config.ts`;
   const commands: string[][] = [];
+
+  await Bun.$`mkdir -p ${directory}`;
+  await Bun.write(
+    configPath,
+    `import { defineConfig } from "${import.meta.dir}/../src/index.ts";
+import { aws } from "${import.meta.dir}/../../aws/src/index.ts";
+
+export default defineConfig({
+  name: "orders-api",
+  provider: aws(),
+  stage: "prod",
+});
+`
+  );
 
   await runCli([
     "synth",
+    "--config",
+    configPath,
     "--name",
     "orders-api",
     "--stage",

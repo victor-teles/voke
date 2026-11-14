@@ -1,3 +1,5 @@
+import { aws } from "@voke/aws";
+
 import { bindResource } from "../../../src/aws";
 import { createFunctions, fn, http, route, voke } from "../../../src/index";
 import type { StandardSchemaV1 } from "../../../src/schema";
@@ -48,7 +50,10 @@ const functions = createFunctions({
   }),
 });
 
-const gateway = voke(functions, { config: { name: "node-runtime" } });
+const gateway = voke(functions, {
+  config: { name: "node-runtime" },
+  provider: aws(),
+});
 
 export const { handler } = gateway;
 
