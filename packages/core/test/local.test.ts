@@ -1,522 +1,28 @@
-import { expect, test } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 
-import { createAwsClientConfig } from "@voke/aws";
-import { dynamodbTable, s3Bucket, sqsQueue } from "@voke/aws/cloudformation";
-
-import { runCli } from "../src/cli";
-import { synthesizeCloudFormation } from "../src/cloudformation";
-import { defineConfig } from "../src/config";
 import {
-  createFlociComposeConfig,
-  createFlociLocalProvider,
   createLocalAwsEnvironment,
-  createLocalBootstrapPlan,
-  createLocalResourceBindings,
+  floci,
   LocalProviderError,
-} from "../src/local";
-import type { LocalProvider } from "../src/local";
-import { setEnv } from "./support/env";
+} from "@voke/aws/local";
+
+import { runCli, runCommand } from "../src/cli";
+import { VokeConfigError } from "../src/errors";
 import { tempPath } from "./support/temp";
 
-test("creates a Floci-ready local AWS environment", () => {
-  const env = createLocalAwsEnvironment({
-    endpoint: "http://localhost:4566",
-    region: "sa-east-1",
-  });
+const awsIndex = `${import.meta.dir}/../../aws/src/index.ts`;
+const coreIndex = `${import.meta.dir}/../src/index.ts`;
+const directories: string[] = [];
 
-  expect(env).toEqual({
-    AWS_ACCESS_KEY_ID: "test",
-    AWS_DEFAULT_REGION: "sa-east-1",
-    AWS_ENDPOINT_URL: "http://localhost:4566",
-    AWS_REGION: "sa-east-1",
-    AWS_SECRET_ACCESS_KEY: "test",
-    AWS_SESSION_TOKEN: "test",
-    VOKE_AWS_ENDPOINT_URL: "http://localhost:4566",
-    VOKE_INVOKE_RUNTIME: "local",
-    VOKE_LOCAL_PROVIDER: "floci",
-  });
+afterEach(async () => {
+  for (const directory of directories.splice(0)) {
+    await rm(directory, { force: true, recursive: true });
+  }
 });
 
-test("uses AWS_ENDPOINT_URL as the standard local AWS SDK endpoint", () => {
-  const previous = {
-    endpoint: Bun.env.AWS_ENDPOINT_URL,
-    region: Bun.env.AWS_REGION,
-    vokeEndpoint: Bun.env.VOKE_AWS_ENDPOINT_URL,
-  };
-
-  Bun.env.AWS_ENDPOINT_URL = "http://localhost:4566";
-  setEnv("VOKE_AWS_ENDPOINT_URL", undefined);
-  Bun.env.AWS_REGION = "us-west-2";
-
-  expect(createAwsClientConfig()).toEqual({
-    endpoint: "http://localhost:4566",
-    region: "us-west-2",
-  });
-
-  setEnv("AWS_ENDPOINT_URL", previous.endpoint);
-  setEnv("VOKE_AWS_ENDPOINT_URL", previous.vokeEndpoint);
-  setEnv("AWS_REGION", previous.region);
-});
-
-test("generates a Docker Compose file for Floci", () => {
-  expect(createFlociComposeConfig()).toBe(`services:
-  floci:
-    image: floci/floci:latest
-    ports:
-      - "4566:4566"
-    environment:
-      - FLOCI_DEFAULT_REGION=us-east-1
-      - FLOCI_STORAGE_MODE=persistent
-    volumes:
-      - .voke/local/data:/app/data
-`);
-
-  const compose = createFlociComposeConfig({
-    dataDirectory: ".voke/local/data",
-    hostname: "floci.local",
-    image: "ghcr.io/acme/floci:v1",
-    port: 4567,
-    region: "sa-east-1",
-    storageMode: "memory",
-  });
-
-  expect(compose).toBe(`services:
-  floci:
-    image: ghcr.io/acme/floci:v1
-    ports:
-      - "4567:4566"
-    environment:
-      - FLOCI_DEFAULT_REGION=sa-east-1
-      - FLOCI_STORAGE_MODE=memory
-      - FLOCI_HOSTNAME=floci.local
-    volumes:
-      - .voke/local/data:/app/data
-`);
-});
-
-test("exposes Floci as the default local provider contract", async () => {
-  const provider = createFlociLocalProvider({
-    accessKeyId: "local-key",
-    accountId: "123456789012",
-    dataDirectory: ".voke/local/floci",
-    endpoint: "http://localhost:4567",
-    region: "sa-east-1",
-    secretAccessKey: "local-secret",
-    sessionToken: "local-session",
-  });
-  const environment = provider.environment();
-  const plan = await provider.bootstrapPlan({
-    environment,
-    name: "orders-api",
-    region: "sa-east-1",
-    stage: "local",
-    template: synthesizeCloudFormation({ name: "orders-api" }),
-    templatePath: ".voke/local/cloudformation.json",
-  });
-
-  expect(provider.name).toBe("floci");
-  expect(provider.defaults).toEqual({
-    accountId: "123456789012",
-    endpoint: "http://localhost:4567",
-    region: "sa-east-1",
-  });
-  expect(environment).toEqual({
-    AWS_ACCESS_KEY_ID: "local-key",
-    AWS_DEFAULT_REGION: "sa-east-1",
-    AWS_ENDPOINT_URL: "http://localhost:4567",
-    AWS_REGION: "sa-east-1",
-    AWS_SECRET_ACCESS_KEY: "local-secret",
-    AWS_SESSION_TOKEN: "local-session",
-    VOKE_AWS_ENDPOINT_URL: "http://localhost:4567",
-    VOKE_INVOKE_RUNTIME: "local",
-    VOKE_LOCAL_PROVIDER: "floci",
-  });
-  expect(provider.composeConfig()).toContain(".voke/local/floci:/app/data");
-  expect(provider.startCommand({ composePath: "compose.yml" })).toEqual([
-    "docker",
-    "compose",
-    "-f",
-    "compose.yml",
-    "up",
-    "-d",
-  ]);
-  expect(provider.stopCommand({ composePath: "compose.yml" })).toEqual([
-    "docker",
-    "compose",
-    "-f",
-    "compose.yml",
-    "down",
-  ]);
-  expect(provider.resetCommand({ composePath: "compose.yml" })).toEqual([
-    "docker",
-    "compose",
-    "-f",
-    "compose.yml",
-    "down",
-    "-v",
-  ]);
-  expect(plan.commands[0]).toContain("orders-api-local");
-  expect(plan.environment.VOKE_LOCAL_PROVIDER).toBe("floci");
-});
-
-test("derives local resource bindings from a synthesized stack", () => {
-  const template = synthesizeCloudFormation({
-    name: "orders-api",
-    resources: {
-      ordersQueue: sqsQueue(),
-      ordersTable: dynamodbTable({ partitionKey: "id" }),
-      uploadsBucket: s3Bucket(),
-    },
-    stage: "local",
-  });
-
-  expect(createLocalResourceBindings(template)).toEqual({
-    VOKE_RESOURCE_ORDERS_QUEUE_URL:
-      "http://localhost:4566/000000000000/OrdersQueue",
-    VOKE_RESOURCE_ORDERS_TABLE_NAME: "OrdersTable",
-    VOKE_RESOURCE_UPLOADS_BUCKET_NAME: "UploadsBucket",
-  });
-});
-
-test("derives Floci local bindings from configured endpoint and account", () => {
-  const provider = createFlociLocalProvider({
-    accountId: "123456789012",
-    endpoint: "http://localhost:4567",
-    region: "sa-east-1",
-  });
-  const template = synthesizeCloudFormation({
-    name: "orders-api",
-    resources: {
-      ordersQueue: sqsQueue(),
-    },
-    stage: "local",
-  });
-
-  expect(
-    createLocalResourceBindings(template, {
-      accountId: provider.defaults.accountId,
-      endpoint: provider.defaults.endpoint,
-      region: provider.defaults.region,
-    })
-  ).toEqual({
-    VOKE_RESOURCE_ORDERS_QUEUE_URL:
-      "http://localhost:4567/123456789012/OrdersQueue",
-  });
-});
-
-test("creates a local bootstrap plan for CloudFormation through Floci", async () => {
-  const templatePath = tempPath(
-    `voke-local-${crypto.randomUUID()}/template.json`
-  );
-  const template = synthesizeCloudFormation({
-    name: "orders-api",
-    resources: {
-      ordersTable: dynamodbTable({ partitionKey: "id" }),
-    },
-    stage: "local",
-  });
-
-  const plan = await createLocalBootstrapPlan({
-    name: "orders-api",
-    stage: "local",
-    template,
-    templatePath,
-  });
-
-  expect(await Bun.file(templatePath).exists()).toBe(true);
-  expect(plan.environment.AWS_ENDPOINT_URL).toBe("http://localhost:4566");
-  expect(plan.commands).toEqual([
-    [
-      "aws",
-      "cloudformation",
-      "deploy",
-      "--stack-name",
-      "orders-api-local",
-      "--template-file",
-      templatePath,
-      "--capabilities",
-      "CAPABILITY_IAM",
-      "--region",
-      "us-east-1",
-    ],
-  ]);
-});
-
-test("keeps provided templates as a local bootstrap escape hatch", async () => {
-  const templatePath = tempPath(
-    `voke-local-template-escape-${crypto.randomUUID()}/template.json`
-  );
-  const template = synthesizeCloudFormation({
-    name: "escape-api",
-    stage: "sandbox",
-  });
-
-  const plan = await createLocalBootstrapPlan({
-    name: "escape-api",
-    stage: "sandbox",
-    template,
-    templatePath,
-  });
-  const writtenTemplate = await Bun.file(templatePath).json();
-
-  expect(writtenTemplate).toEqual(template);
-  expect(plan.commands).toEqual([
-    [
-      "aws",
-      "cloudformation",
-      "deploy",
-      "--stack-name",
-      "escape-api-sandbox",
-      "--template-file",
-      templatePath,
-      "--capabilities",
-      "CAPABILITY_IAM",
-      "--region",
-      "us-east-1",
-    ],
-  ]);
-});
-
-test("creates a local bootstrap plan by synthesizing from Voke config", async () => {
-  const templatePath = tempPath(
-    `voke-local-config-${crypto.randomUUID()}/template.json`
-  );
-  const config = defineConfig({
-    entrypoint: "./src/index.ts",
-    environment: {
-      LOG_LEVEL: "info",
-    },
-    name: "orders-api",
-    region: "sa-east-1",
-    resources: {
-      ordersTable: dynamodbTable({ partitionKey: "id" }),
-    },
-    stage: "local",
-  });
-
-  const plan = await createLocalBootstrapPlan({
-    config,
-    templatePath,
-  });
-  const template = await Bun.file(templatePath).json();
-
-  expect(template.Description).toBe("Voke stack for orders-api (local)");
-  // Local bootstrap provisions infrastructure only; Functions run in the local Gateway.
-  expect(template.Resources.OrdersTable.Type).toBe("AWS::DynamoDB::Table");
-  expect(template.Resources.Function).toBeUndefined();
-  expect(template.Outputs.OrdersTableName.Value).toEqual({
-    Ref: "OrdersTable",
-  });
-  expect(plan.environment.AWS_REGION).toBe("sa-east-1");
-  expect(plan.commands).toEqual([
-    [
-      "aws",
-      "cloudformation",
-      "deploy",
-      "--stack-name",
-      "orders-api-local",
-      "--template-file",
-      templatePath,
-      "--capabilities",
-      "CAPABILITY_IAM",
-      "--region",
-      "sa-east-1",
-    ],
-  ]);
-});
-
-test("delegates local environment and bootstrap to a custom provider", async () => {
-  const templatePath = tempPath(
-    `voke-custom-provider-${crypto.randomUUID()}/template.json`
-  );
-  const customProvider: LocalProvider = {
-    bootstrapPlan: (options) => ({
-      commands: [["customctl", "apply", options.name, options.templatePath]],
-      environment: options.environment,
-    }),
-    composeConfig: () => "services:\n  custom:\n    image: custom/aws\n",
-    defaults: {
-      accountId: "111111111111",
-      endpoint: "http://localhost:9999",
-      region: "us-west-2",
-    },
-    environment: (options = {}) => ({
-      AWS_ACCESS_KEY_ID: "custom",
-      AWS_DEFAULT_REGION: options.region ?? "us-west-2",
-      AWS_ENDPOINT_URL: options.endpoint ?? "http://localhost:9999",
-      AWS_REGION: options.region ?? "us-west-2",
-      AWS_SECRET_ACCESS_KEY: "custom",
-      AWS_SESSION_TOKEN: "custom",
-      VOKE_AWS_ENDPOINT_URL: options.endpoint ?? "http://localhost:9999",
-      VOKE_INVOKE_RUNTIME: "local",
-      VOKE_LOCAL_PROVIDER: "custom-local-aws",
-    }),
-    name: "custom-local-aws",
-    resetCommand: ({ composePath }) => ["customctl", "reset", composePath],
-    startCommand: ({ composePath }) => ["customctl", "start", composePath],
-    stopCommand: ({ composePath }) => ["customctl", "stop", composePath],
-  };
-  const config = defineConfig({
-    local: {
-      provider: customProvider,
-    },
-    name: "orders-api",
-    region: "us-west-2",
-    resources: {
-      ordersQueue: sqsQueue(),
-    },
-  });
-
-  const environment = createLocalAwsEnvironment({
-    provider: customProvider,
-    region: "us-west-2",
-  });
-  const plan = await createLocalBootstrapPlan({
-    config,
-    templatePath,
-  });
-  const bindings = createLocalResourceBindings(
-    await Bun.file(templatePath).json(),
-    {
-      accountId: config.local.provider.defaults.accountId,
-      endpoint: plan.environment.AWS_ENDPOINT_URL,
-      region: config.region,
-    }
-  );
-
-  expect(environment).toMatchObject({
-    AWS_ENDPOINT_URL: "http://localhost:9999",
-    VOKE_LOCAL_PROVIDER: "custom-local-aws",
-  });
-  expect(plan).toEqual({
-    commands: [["customctl", "apply", "orders-api", templatePath]],
-    environment,
-  });
-  expect(bindings.VOKE_RESOURCE_ORDERS_QUEUE_URL).toBe(
-    "http://localhost:9999/111111111111/OrdersQueue"
-  );
-});
-
-test("creates a local bootstrap plan by loading voke.config.ts", async () => {
-  const directory = tempPath(`voke-local-config-file-${crypto.randomUUID()}`);
-  const configPath = `${directory}/voke.config.ts`;
-  const templatePath = `${directory}/.voke/local/cloudformation.json`;
-
-  await Bun.$`mkdir -p ${directory}`;
-  await Bun.write(
-    configPath,
-    `import { defineConfig } from "${import.meta.dir}/../src/index.ts";
-import { sqsQueue } from "${import.meta.dir}/../../aws/src/cloudformation.ts";
-
-export default defineConfig({
-  name: "jobs-api",
-  stage: "local",
-  region: "sa-east-1",
-  resources: {
-    jobsQueue: sqsQueue(),
-  },
-});
-`
-  );
-
-  const plan = await createLocalBootstrapPlan({
-    configPath,
-    templatePath,
-  });
-  const template = await Bun.file(templatePath).json();
-
-  expect(template.Description).toBe("Voke stack for jobs-api (local)");
-  expect(template.Resources.JobsQueue.Type).toBe("AWS::SQS::Queue");
-  expect(template.Resources.Function).toBeUndefined();
-  expect(plan.commands[0]).toContain("jobs-api-local");
-});
-
-test("runs local start, stop, reset, and bootstrap through the CLI parser", async () => {
-  const directory = tempPath(`voke-local-cli-${crypto.randomUUID()}`);
-  const composePath = `${directory}/docker-compose.yml`;
-  const templatePath = `${directory}/template.json`;
-  const calls: { command: string[]; env?: Record<string, string> }[] = [];
-
-  await runCli(["local", "start", "--compose", composePath], {
-    run: (command, options) => {
-      calls.push({ command, env: options?.env });
-    },
-  });
-  await runCli(
-    [
-      "local",
-      "bootstrap",
-      "--name",
-      "orders-api",
-      "--stage",
-      "local",
-      "--template",
-      templatePath,
-    ],
-    {
-      run: (command, options) => {
-        calls.push({ command, env: options?.env });
-      },
-    }
-  );
-  await runCli(["local", "stop", "--compose", composePath], {
-    run: (command, options) => {
-      calls.push({ command, env: options?.env });
-    },
-  });
-  await runCli(["local", "reset", "--compose", composePath], {
-    run: (command, options) => {
-      calls.push({ command, env: options?.env });
-    },
-  });
-
-  expect(await Bun.file(composePath).exists()).toBe(true);
-  expect(await Bun.file(templatePath).exists()).toBe(true);
-  expect(calls).toEqual([
-    {
-      command: ["docker", "compose", "-f", composePath, "up", "-d"],
-      env: undefined,
-    },
-    {
-      command: [
-        "aws",
-        "cloudformation",
-        "deploy",
-        "--stack-name",
-        "orders-api-local",
-        "--template-file",
-        templatePath,
-        "--capabilities",
-        "CAPABILITY_IAM",
-        "--region",
-        "us-east-1",
-      ],
-      env: createLocalAwsEnvironment(),
-    },
-    {
-      command: ["docker", "compose", "-f", composePath, "down"],
-      env: undefined,
-    },
-    {
-      command: ["docker", "compose", "-f", composePath, "down", "-v"],
-      env: undefined,
-    },
-  ]);
-});
-
-test("runs CLI local commands through a configured custom provider", async () => {
-  const directory = tempPath(`voke-local-custom-cli-${crypto.randomUUID()}`);
-  const configPath = `${directory}/voke.config.ts`;
-  const composePath = `${directory}/compose.yml`;
-  const templatePath = `${directory}/template.json`;
-  const calls: { command: string[]; env?: Record<string, string> }[] = [];
-
-  await Bun.$`mkdir -p ${directory}`;
-  await Bun.write(
-    configPath,
-    `import { defineConfig } from "${import.meta.dir}/../src/index.ts";
-
-const provider = {
+const customProviderSource = `{
   name: "custom-local-aws",
   defaults: {
     accountId: "111111111111",
@@ -542,48 +48,136 @@ const provider = {
   startCommand: ({ composePath }) => ["customctl", "start", composePath],
   stopCommand: ({ composePath }) => ["customctl", "stop", composePath],
   resetCommand: ({ composePath }) => ["customctl", "reset", composePath],
-};
+}`;
+
+/** Writes a voke.config.ts whose Provider is `provider` (source text). */
+const writeProject = async (
+  name: string,
+  provider: string
+): Promise<{ configPath: string; directory: string }> => {
+  const directory = tempPath(`voke-local-${crypto.randomUUID()}`);
+  const configPath = join(directory, "voke.config.ts");
+
+  directories.push(directory);
+  await mkdir(directory, { recursive: true });
+  await writeFile(
+    configPath,
+    `import { aws } from "${awsIndex}";
+import { defineConfig } from "${coreIndex}";
 
 export default defineConfig({
-  name: "custom-api",
-  local: {
-    provider,
-  },
+  name: ${JSON.stringify(name)},
+  provider: ${provider},
 });
 `
   );
 
+  return { configPath, directory };
+};
+
+const recordingRunner = () => {
+  const calls: { command: string[]; env?: Record<string, string> }[] = [];
+
+  return {
+    calls,
+    run: (command: string[], options?: { env?: Record<string, string> }) => {
+      calls.push({ command, env: options?.env });
+    },
+  };
+};
+
+test("runs local start, stop, reset, and bootstrap through the CLI parser", async () => {
+  const { configPath, directory } = await writeProject("configured", "aws()");
+  const composePath = join(directory, "docker-compose.yml");
+  const templatePath = join(directory, "template.json");
+  const { calls, run } = recordingRunner();
+
   await runCli(
     ["local", "start", "--config", configPath, "--compose", composePath],
-    {
-      run: (command, options) => {
-        calls.push({ command, env: options?.env });
-      },
-    }
+    { run }
   );
   await runCli(
-    ["local", "bootstrap", "--config", configPath, "--template", templatePath],
-    {
-      run: (command, options) => {
-        calls.push({ command, env: options?.env });
-      },
-    }
+    [
+      "local",
+      "bootstrap",
+      "--config",
+      configPath,
+      "--name",
+      "orders-api",
+      "--stage",
+      "local",
+      "--template",
+      templatePath,
+    ],
+    { run }
   );
   await runCli(
     ["local", "stop", "--config", configPath, "--compose", composePath],
-    {
-      run: (command, options) => {
-        calls.push({ command, env: options?.env });
-      },
-    }
+    { run }
   );
   await runCli(
     ["local", "reset", "--config", configPath, "--compose", composePath],
+    { run }
+  );
+
+  expect(await Bun.file(composePath).exists()).toBe(true);
+  expect(await Bun.file(templatePath).exists()).toBe(true);
+  expect(calls).toEqual([
     {
-      run: (command, options) => {
-        calls.push({ command, env: options?.env });
-      },
-    }
+      command: ["docker", "compose", "-f", composePath, "up", "-d"],
+      env: undefined,
+    },
+    {
+      command: [
+        "aws",
+        "cloudformation",
+        "deploy",
+        "--stack-name",
+        "orders-api-local",
+        "--template-file",
+        templatePath,
+        "--capabilities",
+        "CAPABILITY_IAM",
+        "--region",
+        "us-east-1",
+      ],
+      env: createLocalAwsEnvironment({ provider: floci() }),
+    },
+    {
+      command: ["docker", "compose", "-f", composePath, "down"],
+      env: undefined,
+    },
+    {
+      command: ["docker", "compose", "-f", composePath, "down", "-v"],
+      env: undefined,
+    },
+  ]);
+});
+
+test("runs CLI local commands through a configured custom Local AWS Provider", async () => {
+  const { configPath, directory } = await writeProject(
+    "custom-api",
+    `aws({ local: ${customProviderSource} })`
+  );
+  const composePath = join(directory, "compose.yml");
+  const templatePath = join(directory, "template.json");
+  const { calls, run } = recordingRunner();
+
+  await runCli(
+    ["local", "start", "--config", configPath, "--compose", composePath],
+    { run }
+  );
+  await runCli(
+    ["local", "bootstrap", "--config", configPath, "--template", templatePath],
+    { run }
+  );
+  await runCli(
+    ["local", "stop", "--config", configPath, "--compose", composePath],
+    { run }
+  );
+  await runCli(
+    ["local", "reset", "--config", configPath, "--compose", composePath],
+    { run }
   );
 
   expect(await Bun.file(composePath).text()).toBe(
@@ -619,34 +213,31 @@ export default defineConfig({
   ]);
 });
 
+const failingRun = () => {
+  throw new Error("docker is not running");
+};
+
 test("wraps Floci local start failures with actionable Docker Compose guidance", async () => {
-  const directory = tempPath(`voke-local-floci-failure-${crypto.randomUUID()}`);
-  const composePath = `${directory}/docker-compose.yml`;
+  const { configPath, directory } = await writeProject("orders-api", "aws()");
+  const composePath = join(directory, "docker-compose.yml");
+  const start = () =>
+    runCli(
+      ["local", "start", "--config", configPath, "--compose", composePath],
+      {
+        run: failingRun,
+      }
+    );
 
-  await expect(
-    runCli(["local", "start", "--compose", composePath], {
-      run: () => {
-        throw new Error("docker is not running");
-      },
-    })
-  ).rejects.toThrow(LocalProviderError);
-
-  await expect(
-    runCli(["local", "start", "--compose", composePath], {
-      run: () => {
-        throw new Error("docker is not running");
-      },
-    })
-  ).rejects.toThrow(
+  await expect(start()).rejects.toThrow(LocalProviderError);
+  await expect(start()).rejects.toThrow(
     `Voke local start failed while running: docker compose -f ${composePath} up -d. docker is not running
-Floci is Voke's default optional local AWS provider. Make sure Docker Compose is installed and Docker is running, then retry "voke local start". You can also configure local.provider in voke.config.ts.`
+Floci is Voke's default optional local AWS provider. Make sure Docker Compose is installed and Docker is running, then retry "voke local start". You can also pass a Local AWS Provider: aws({ local: ... })`
   );
 });
 
 test("wraps Floci bootstrap failures with start guidance and preserves env", async () => {
-  const templatePath = tempPath(
-    `voke-local-bootstrap-failure-${crypto.randomUUID()}/template.json`
-  );
+  const { configPath, directory } = await writeProject("orders-api", "aws()");
+  const templatePath = join(directory, "template.json");
   let commandEnv: Record<string, string> | undefined;
 
   await expect(
@@ -654,8 +245,8 @@ test("wraps Floci bootstrap failures with start guidance and preserves env", asy
       [
         "local",
         "bootstrap",
-        "--name",
-        "orders-api",
+        "--config",
+        configPath,
         "--stage",
         "local",
         "--template",
@@ -669,60 +260,18 @@ test("wraps Floci bootstrap failures with start guidance and preserves env", asy
       }
     )
   ).rejects.toThrow(
-    `Floci is Voke's default optional local AWS provider. Make sure Floci is running with "voke local start", then retry "voke local bootstrap". You can also configure local.provider in voke.config.ts.`
+    `Floci is Voke's default optional local AWS provider. Make sure Floci is running with "voke local start", then retry "voke local bootstrap". You can also pass a Local AWS Provider: aws({ local: ... })`
   );
 
-  expect(commandEnv).toEqual(createLocalAwsEnvironment());
+  expect(commandEnv).toEqual(createLocalAwsEnvironment({ provider: floci() }));
 });
 
-test("wraps custom provider failures without Floci-specific guidance", async () => {
-  const directory = tempPath(
-    `voke-local-custom-failure-${crypto.randomUUID()}`
+test("wraps custom Local AWS Provider failures without Floci-specific guidance", async () => {
+  const { configPath, directory } = await writeProject(
+    "custom-api",
+    `aws({ local: ${customProviderSource} })`
   );
-  const configPath = `${directory}/voke.config.ts`;
-  const composePath = `${directory}/compose.yml`;
-
-  await Bun.$`mkdir -p ${directory}`;
-  await Bun.write(
-    configPath,
-    `import { defineConfig } from "${import.meta.dir}/../src/index.ts";
-
-const provider = {
-  name: "custom-local-aws",
-  defaults: {
-    accountId: "111111111111",
-    endpoint: "http://localhost:9999",
-    region: "us-west-2",
-  },
-  environment: () => ({
-    AWS_ACCESS_KEY_ID: "custom",
-    AWS_DEFAULT_REGION: "us-west-2",
-    AWS_ENDPOINT_URL: "http://localhost:9999",
-    AWS_REGION: "us-west-2",
-    AWS_SECRET_ACCESS_KEY: "custom",
-    AWS_SESSION_TOKEN: "custom",
-    VOKE_AWS_ENDPOINT_URL: "http://localhost:9999",
-    VOKE_INVOKE_RUNTIME: "local",
-    VOKE_LOCAL_PROVIDER: "custom-local-aws",
-  }),
-  composeConfig: () => "services:\\n  custom:\\n    image: custom/aws\\n",
-  bootstrapPlan: ({ environment }) => ({
-    commands: [["customctl", "apply"]],
-    environment,
-  }),
-  startCommand: ({ composePath }) => ["customctl", "start", composePath],
-  stopCommand: ({ composePath }) => ["customctl", "stop", composePath],
-  resetCommand: ({ composePath }) => ["customctl", "reset", composePath],
-};
-
-export default defineConfig({
-  name: "custom-api",
-  local: {
-    provider,
-  },
-});
-`
-  );
+  const composePath = join(directory, "compose.yml");
 
   await expect(
     runCli(
@@ -737,4 +286,54 @@ export default defineConfig({
     `Voke local start failed while running: customctl start ${composePath}. custom provider unavailable
 Local provider: custom-local-aws. Check this provider's local command configuration.`
   );
+});
+
+test("voke local needs a Provider with a local workflow", async () => {
+  const withoutProvider = await writeProject("plain", "undefined");
+  const withoutWorkflow = await writeProject("neutral", '{ name: "neutral" }');
+
+  await expect(
+    runCli(["local", "start", "--config", withoutProvider.configPath], {
+      run: () => {},
+    })
+  ).rejects.toThrow(VokeConfigError);
+  await expect(
+    runCli(["local", "start", "--config", withoutProvider.configPath], {
+      run: () => {},
+    })
+  ).rejects.toThrow("No provider configured for voke local.");
+  await expect(
+    runCli(["local", "start", "--config", withoutWorkflow.configPath], {
+      run: () => {},
+    })
+  ).rejects.toThrow('Provider "neutral" does not support voke local.');
+});
+
+test("the command runner removes unset variables from the child environment", async () => {
+  const directory = tempPath(`voke-unset-env-${crypto.randomUUID()}`);
+  const output = join(directory, "env.txt");
+  const previous = process.env.VOKE_UNSET_PROBE;
+
+  directories.push(directory);
+  await mkdir(directory, { recursive: true });
+  process.env.VOKE_UNSET_PROBE = "inherited";
+
+  try {
+    await runCommand(
+      [
+        "bun",
+        "-e",
+        `await Bun.write(${JSON.stringify(output)}, (process.env.VOKE_UNSET_PROBE ?? "absent") + "|" + process.env.VOKE_SET_PROBE)`,
+      ],
+      { env: { VOKE_SET_PROBE: "applied" }, unsetEnv: ["VOKE_UNSET_PROBE"] }
+    );
+
+    expect(await Bun.file(output).text()).toBe("absent|applied");
+  } finally {
+    if (previous === undefined) {
+      Reflect.deleteProperty(process.env, "VOKE_UNSET_PROBE");
+    } else {
+      process.env.VOKE_UNSET_PROBE = previous;
+    }
+  }
 });

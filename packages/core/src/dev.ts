@@ -2,12 +2,15 @@ import { defineConfig } from "./config";
 import type { VokeConfig, VokeConfigInput } from "./config";
 import { VokeConfigError } from "./errors";
 import { createInternalModel } from "./model";
+import type { ProviderLocalDevEnvironment } from "./provider";
 import { remoteEnvironment } from "./remote";
 
 export interface DevPlan {
   command: string[];
   entrypoint: string;
   environment: Record<string, string>;
+  /** Variables the dev process must not inherit, as the Provider asked. */
+  unsetEnvironment: readonly string[];
 }
 
 export interface DevPlanOverrides {
@@ -19,7 +22,7 @@ export interface DevPlanOverrides {
   stage?: string;
 }
 
-const createProviderLocalEnvironment = (
+const createProviderLocalEnvironment = async (
   config: VokeConfig,
   overrides: {
     endpoint?: string;
@@ -28,13 +31,13 @@ const createProviderLocalEnvironment = (
     region: string;
     stage: string;
   }
-): Record<string, string> => {
+): Promise<ProviderLocalDevEnvironment> => {
   const { provider } = config;
   const devEnvironment = provider?.local?.devEnvironment;
 
   if (devEnvironment === undefined) {
     if (!overrides.hasResources) {
-      return {};
+      return { environment: {} };
     }
 
     throw new VokeConfigError(
@@ -51,7 +54,7 @@ const createProviderLocalEnvironment = (
     stage: overrides.stage,
   });
 
-  return devEnvironment({
+  return await devEnvironment({
     config: devConfig,
     endpoint: overrides.endpoint,
     model: createInternalModel(devConfig),
@@ -107,7 +110,7 @@ export const createDevPlan = async (
   const stage = overrides.stage ?? config.stage;
   const origin = createDevOrigin(config, overrides);
   const hasResources = Object.keys(config.resources).length > 0;
-  const providerEnvironment = createProviderLocalEnvironment(config, {
+  const providerEnvironment = await createProviderLocalEnvironment(config, {
     endpoint: overrides.endpoint,
     entrypoint,
     hasResources,
@@ -119,7 +122,7 @@ export const createDevPlan = async (
     command: ["bun", "--hot", entrypoint],
     entrypoint,
     environment: {
-      ...providerEnvironment,
+      ...providerEnvironment.environment,
       ...config.environment,
       ...config.dev.environment,
       ...remoteEnvironment(config.remotes ?? {}),
@@ -128,5 +131,6 @@ export const createDevPlan = async (
       VOKE_DEV_SUMMARY: "1",
       VOKE_STAGE: stage,
     },
+    unsetEnvironment: providerEnvironment.unsetEnvironment ?? [],
   };
 };

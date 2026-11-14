@@ -120,6 +120,12 @@ const seedPlan = context.createSeedPlan({
 
 Run the returned `seedPlan.commands` with `seedPlan.environment` when a test suite needs to seed Floci before requests.
 
+The context uses Floci by default. Pass `local` to run it against another Local AWS Provider, the same one you give `aws({ local })`:
+
+```ts
+const context = createStackTestContext({ local: myLocalProvider, template });
+```
+
 ## Compatibility Helper
 
 `createInvokeTestClient()` remains available for worker-heavy suites that want a client object around a Function Registry:

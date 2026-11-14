@@ -8,7 +8,10 @@ import { awsRouteAuth } from "./lambda";
 import {
   createLocalAwsEnvironment,
   createLocalResourceBindings,
+  createLocalWorkflow,
 } from "./local";
+import { floci } from "./local-provider";
+import type { LocalProvider } from "./local-provider";
 import { createAwsRuntimeVariableProvider } from "./runtime-variables";
 
 export {
@@ -92,53 +95,60 @@ const validateAwsModel = (model: VokeModel): void => {
   }
 };
 
-export const aws = (): VokeProvider => ({
-  build: {
-    plan: createAwsBuildPlan,
-  },
-  deploy: {
-    deploy: async (input) =>
-      await deployAwsStack(input, {
-        clients: await createDeployAwsClients({
-          region: input.region ?? input.config.region,
-        }),
-      }),
-    remove: async (input) =>
-      await removeAwsStack(input, {
-        clients: await createDeployAwsClients({
-          region: input.region ?? input.config.region,
-        }),
-      }),
-  },
-  local: {
-    devEnvironment: ({ config, endpoint, model, region }) => {
-      const environment = createLocalAwsEnvironment({
-        endpoint,
-        provider: config.local.provider,
-        region,
-      });
-      const bindings = createLocalResourceBindings(
-        synthesizeCloudFormationFromModel(model),
-        {
-          accountId: config.local.provider.defaults.accountId,
-          endpoint: environment.AWS_ENDPOINT_URL,
-          region,
-        }
-      );
+export interface AwsProviderOptions {
+  /** The Local AWS Provider for `voke local` and `voke dev`. Defaults to Floci. */
+  local?: LocalProvider;
+}
 
-      return {
-        ...environment,
-        ...bindings,
-      };
+export const aws = (options: AwsProviderOptions = {}): VokeProvider => {
+  const localProvider = options.local ?? floci();
+
+  return {
+    build: {
+      plan: createAwsBuildPlan,
     },
-  },
-  name: "aws",
-  runtime: {
-    routeAuth: awsRouteAuth,
-    variables: () => [createAwsRuntimeVariableProvider()],
-  },
-  synthesis: {
-    synthesize: ({ model }) => synthesizeCloudFormationFromModel(model),
-  },
-  validate: validateAwsModel,
-});
+    deploy: {
+      deploy: async (input) =>
+        await deployAwsStack(input, {
+          clients: await createDeployAwsClients({
+            region: input.region ?? input.config.region,
+          }),
+        }),
+      remove: async (input) =>
+        await removeAwsStack(input, {
+          clients: await createDeployAwsClients({
+            region: input.region ?? input.config.region,
+          }),
+        }),
+    },
+    local: {
+      devEnvironment: ({ endpoint, model, region }) => {
+        const environment = createLocalAwsEnvironment({
+          endpoint,
+          provider: localProvider,
+          region,
+        });
+        const bindings = createLocalResourceBindings(
+          synthesizeCloudFormationFromModel(model),
+          {
+            accountId: localProvider.defaults.accountId,
+            endpoint: environment.AWS_ENDPOINT_URL,
+            region,
+          }
+        );
+
+        return { environment: { ...environment, ...bindings } };
+      },
+      workflow: createLocalWorkflow(localProvider),
+    },
+    name: "aws",
+    runtime: {
+      routeAuth: awsRouteAuth,
+      variables: () => [createAwsRuntimeVariableProvider()],
+    },
+    synthesis: {
+      synthesize: ({ model }) => synthesizeCloudFormationFromModel(model),
+    },
+    validate: validateAwsModel,
+  };
+};

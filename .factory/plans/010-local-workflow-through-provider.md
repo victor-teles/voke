@@ -443,3 +443,40 @@ should need the D5 files.
 - Reviewers: check that no AWS term entered `packages/core/src/provider.ts`, that removed names have
   no aliases, and that the error text for Floci failures is unchanged apart from the config hint.
 - Deferred: a provider `diagnostics` capability for `voke doctor` (plan 006).
+
+## Execution notes (2026-11-14)
+
+Done on branch `feature/local-workflow-through-provider` (PR #56), stacked on plan 004 (`feature/one-command-deploy`,
+PR #55, open). Gates: `bun run check` 0 errors, `bun run typecheck` 18/18, `bun run test`
+23/23 tasks (core 216, `@voke/aws` 65, `@voke/testing` 1, examples green), no Docker or network.
+
+- `ProviderLocalCapability` is typed (`devEnvironment` may be async and returns
+  `{ environment, unsetEnvironment? }`; `workflow` has `start/stop/reset/bootstrap`). `voke local`
+  dispatches to `config.provider.local.workflow`; missing provider or workflow is a `VokeConfigError`.
+  `runCommand` gained `unsetEnv`, and `voke dev` passes the plan's `unsetEnvironment`.
+- Config `local` is removed and rejected with a pointer to `aws({ local: floci() })`. `aws({ local })`
+  selects the Local AWS Provider (default `floci()`), which also drives `createStackTestContext({ local })`.
+- `createFlociLocalProvider` → `floci`; `resolveLocalProvider`, `LocalProviderInput` and
+  `createFlociComposeConfig` removed (use `floci().composeConfig`). No aliases.
+  `createLocalBootstrapPlan` options are a union: `model` or a ready `template`.
+- Deleted core `local.ts`, `local-provider.ts`, `e2e.ts`, `cloudformation.ts`, `aws-lambda.ts`
+  (`api.ts` was already gone in 008). Floci commands, compose content and env values are unchanged;
+  only the failure hint now says `aws({ local: ... })`.
+- `e2e.test.ts` now uses `@voke/testing` and `@voke/aws/testing`. Cases that only exercised the deleted
+  internal helper (`createHttpApiEvent` options, `{ app }` targets, request `context`, `invokeAsync`)
+  were dropped; Lambda adapter semantics stay covered by `api.test.ts`.
+
+Deviations outside the in-scope list:
+
+- `packages/testing/src/index.ts`: fixed a 009 regression where a `baseUrl` with a stage path
+  (`https://…/prod/`) dropped `/prod` for paths starting with `/`. Regression test in
+  `packages/testing/test/client.test.ts`.
+- `public-surface.test.ts`: the retired-name guard now matches `new Voke(` instead of `new Voke`, which
+  also matched the legitimate `new VokeConfigError(` in `cli.ts`.
+- README: `createTestClient()` described as an in-process or deployed-URL client, not "Lambda/API
+  Gateway semantics" (it has been a plain fetch client since 009).
+
+Done-criteria greps: the six files are absent; the remaining `@voke/` strings in `packages/core/src`
+are generated-code templates (scaffold, migration, remote codegen) and the config migration message,
+not imports; the `src/(api|local)…` matches in core tests are fixture entrypoint strings and
+`@voke/aws`/example paths.

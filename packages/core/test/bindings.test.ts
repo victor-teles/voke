@@ -11,10 +11,10 @@ import {
   ssmParameter,
   synthesizeCloudFormation,
 } from "@voke/aws/cloudformation";
+import { createLocalResourceBindings } from "@voke/aws/local";
 
 import { createResourceBindingName } from "../src/bindings";
 import { createFunctions, http } from "../src/invoke";
-import { createLocalResourceBindings } from "../src/local";
 import { route } from "../src/route-builder";
 
 test("uses one stable binding naming convention everywhere", () => {

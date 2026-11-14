@@ -115,12 +115,6 @@ test("builds a small serializable model from normalized config", () => {
         variables: {},
       },
     },
-    local: {
-      provider: {
-        adapter: "floci",
-        optional: true,
-      },
-    },
     outputs: {
       apiFunctionName: {
         description: "api Lambda function name",
@@ -281,10 +275,8 @@ test("keeps empty model sections explicit for minimal configs", () => {
   expect(model.apis).toEqual({});
   expect(model.outputs).toEqual({});
   expect(model.resources).toEqual({});
-  expect(model.local.provider).toEqual({
-    adapter: "floci",
-    optional: true,
-  });
+  // The Local AWS Provider is a Provider option, not part of the provider-neutral model.
+  expect("local" in model).toBe(false);
 });
 
 test("names every deployed Function <name>-<stage>-<key> and points it at the generated handler", () => {

@@ -1,27 +1,31 @@
-import { defineConfig, loadVokeConfig } from "voke";
-import type { VokeConfig, VokeConfigInput } from "voke";
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 
-import { synthesizeCloudFormation } from "./cloudformation-synthesis";
+import type {
+  ProviderLocalWorkflow,
+  ProviderLocalWorkflowContext,
+  VokeModel,
+} from "voke";
+
+import { synthesizeCloudFormationFromModel } from "./cloudformation-synthesis";
 import type {
   CloudFormationResource,
   CloudFormationTemplate,
 } from "./cloudformation-synthesis";
 import {
-  createFlociLocalProvider,
-  resolveLocalProvider,
+  LocalProviderError,
+  localProviderFailureMessage,
 } from "./local-provider";
 import type {
-  FlociComposeOptions,
   LocalAwsEnvironment,
   LocalAwsEnvironmentOptions,
   LocalBootstrapPlan,
-  LocalProviderInput,
+  LocalProvider,
 } from "./local-provider";
 import { createResourceBindingName } from "./resources";
 
 export {
-  createFlociLocalProvider,
-  resolveLocalProvider,
+  floci,
   LocalProviderError,
   type FlociComposeOptions,
   type FlociLocalProviderOptions,
@@ -33,36 +37,34 @@ export {
   type LocalProviderCommandOptions,
   type LocalProviderComposeOptions,
   type LocalProviderDefaults,
-  type LocalProviderInput,
 } from "./local-provider";
 
-export interface LocalBootstrapPlanOptions {
-  name?: string;
-  stage?: string;
-  region?: string;
+interface LocalBootstrapPlanBaseOptions {
   endpoint?: string;
-  config?: VokeConfigInput;
-  configPath?: string;
-  provider?: LocalProviderInput;
-  template?: CloudFormationTemplate;
+  name: string;
+  provider: LocalProvider;
+  region: string;
+  stage: string;
   templatePath?: string;
 }
+
+/** Provision the resources of a model, or of a ready template (an escape hatch). */
+export type LocalBootstrapPlanOptions = LocalBootstrapPlanBaseOptions &
+  (
+    | { model: VokeModel; template?: undefined }
+    | { model?: undefined; template: CloudFormationTemplate }
+  );
 
 const defaultLocalEndpoint = "http://localhost:4566";
 const defaultLocalRegion = "us-east-1";
 const defaultLocalAccountId = "000000000000";
 
-const writeTemplate = async (
-  templatePath: string,
-  template: CloudFormationTemplate
+const writeFileCreatingDirectory = async (
+  path: string,
+  contents: string
 ): Promise<void> => {
-  const directory = templatePath.split("/").slice(0, -1).join("/");
-
-  if (directory !== "") {
-    await Bun.$`mkdir -p ${directory}`;
-  }
-
-  await Bun.write(templatePath, `${JSON.stringify(template, null, 2)}\n`);
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, contents);
 };
 
 const binding = (
@@ -155,16 +157,12 @@ const resourceBindingFor = (
 };
 
 export const createLocalAwsEnvironment = (
-  options: LocalAwsEnvironmentOptions = {}
+  options: LocalAwsEnvironmentOptions & { provider: LocalProvider }
 ): LocalAwsEnvironment => {
-  const provider = resolveLocalProvider(options.provider);
+  const { provider, ...environmentOptions } = options;
 
-  return provider.environment(options);
+  return provider.environment(environmentOptions);
 };
-
-export const createFlociComposeConfig = (
-  options: FlociComposeOptions = {}
-): string => createFlociLocalProvider().composeConfig(options);
 
 export const createLocalResourceBindings = (
   template: CloudFormationTemplate,
@@ -197,49 +195,129 @@ export const createLocalResourceBindings = (
 export const createLocalBootstrapPlan = async (
   options: LocalBootstrapPlanOptions
 ): Promise<LocalBootstrapPlan> => {
-  let config: VokeConfig;
-
-  if (options.config !== undefined) {
-    config = defineConfig(options.config);
-  } else if (options.template === undefined) {
-    config = await loadVokeConfig({ path: options.configPath });
-  } else {
-    config = defineConfig({
-      name: options.name ?? "api",
-      region: options.region,
-      stage: options.stage,
-    });
-  }
-  const provider = resolveLocalProvider(
-    options.provider ?? config.local.provider
-  );
-  const name = options.name ?? config.name;
-  const stage = options.stage ?? config.stage;
-  const region = options.region ?? config.region;
   const template =
-    options.template ??
-    synthesizeCloudFormation({
-      ...config,
-      name,
-      region,
-      stage,
-    });
+    options.template === undefined
+      ? synthesizeCloudFormationFromModel(options.model)
+      : options.template;
   const templatePath =
     options.templatePath ?? ".voke/local/cloudformation.json";
   const environment = createLocalAwsEnvironment({
     endpoint: options.endpoint,
-    provider,
-    region,
+    provider: options.provider,
+    region: options.region,
   });
 
-  await writeTemplate(templatePath, template);
+  await writeFileCreatingDirectory(
+    templatePath,
+    `${JSON.stringify(template, null, 2)}\n`
+  );
 
-  return provider.bootstrapPlan({
+  return await options.provider.bootstrapPlan({
     environment,
-    name,
-    region,
-    stage,
+    name: options.name,
+    region: options.region,
+    stage: options.stage,
     template,
     templatePath,
   });
+};
+
+const defaultComposePath = ".voke/local/docker-compose.yml";
+
+const runLocalCommand = async (
+  provider: LocalProvider,
+  context: ProviderLocalWorkflowContext,
+  localCommand: string,
+  command: string[],
+  env?: Record<string, string>
+): Promise<void> => {
+  try {
+    await context.run(command, { env });
+  } catch (error) {
+    throw new LocalProviderError({
+      cause: error,
+      command,
+      message: localProviderFailureMessage({
+        cause: error,
+        command,
+        localCommand,
+        provider,
+      }),
+      provider: provider.name,
+    });
+  }
+};
+
+/**
+ * `voke local start|stop|reset|bootstrap` for a Local AWS Provider. `start` writes the compose file
+ * (`--compose`, `--data`, `--hostname`, `--image`, `--port`, `--region`) before starting it;
+ * `bootstrap` provisions the project's resources from its model (`--endpoint`, `--template`).
+ */
+export const createLocalWorkflow = (
+  provider: LocalProvider
+): ProviderLocalWorkflow => {
+  const composePath = (context: ProviderLocalWorkflowContext): string =>
+    context.options.compose ?? defaultComposePath;
+
+  return {
+    bootstrap: async (context) => {
+      const { config } = context;
+      const plan = await createLocalBootstrapPlan({
+        endpoint: context.options.endpoint,
+        model: context.model,
+        name: config.name,
+        provider,
+        region: config.region,
+        stage: config.stage,
+        templatePath:
+          context.options.template ?? ".voke/local/cloudformation.json",
+      });
+
+      for (const command of plan.commands) {
+        await runLocalCommand(
+          provider,
+          context,
+          "bootstrap",
+          command,
+          plan.environment
+        );
+      }
+    },
+    reset: async (context) => {
+      await runLocalCommand(
+        provider,
+        context,
+        "reset",
+        provider.resetCommand({ composePath: composePath(context) })
+      );
+    },
+    start: async (context) => {
+      const { options } = context;
+
+      await writeFileCreatingDirectory(
+        composePath(context),
+        provider.composeConfig({
+          dataDirectory: options.data ?? ".voke/local/data",
+          hostname: options.hostname,
+          image: options.image,
+          port: options.port === undefined ? undefined : Number(options.port),
+          region: options.region,
+        })
+      );
+      await runLocalCommand(
+        provider,
+        context,
+        "start",
+        provider.startCommand({ composePath: composePath(context) })
+      );
+    },
+    stop: async (context) => {
+      await runLocalCommand(
+        provider,
+        context,
+        "stop",
+        provider.stopCommand({ composePath: composePath(context) })
+      );
+    },
+  };
 };

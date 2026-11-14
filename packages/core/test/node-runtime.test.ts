@@ -5,8 +5,8 @@ import { dirname, join, resolve } from "node:path";
 import { aws } from "@voke/aws";
 
 import { defineConfig } from "../src/config";
-import { createHttpApiEvent } from "../src/e2e";
 import { functions } from "./fixtures/node-runtime/index";
+import { createHttpApiEvent } from "./support/http-api-event";
 
 // Built bundles must run on the AWS Lambda Node.js runtime, so this test builds the
 // fixture project through the AWS Provider's build plan, exactly as `voke build` does

@@ -18,7 +18,6 @@ export interface LocalAwsEnvironmentOptions {
   accessKeyId?: string;
   secretAccessKey?: string;
   sessionToken?: string;
-  provider?: LocalProviderInput;
 }
 
 export interface LocalProviderComposeOptions {
@@ -77,8 +76,6 @@ export interface LocalProvider {
   stopCommand: (options: LocalProviderCommandOptions) => string[];
 }
 
-export type LocalProviderInput = "floci" | LocalProvider;
-
 export class LocalProviderError extends Error {
   provider: string;
   command: string[];
@@ -103,7 +100,8 @@ const defaultLocalRegion = "us-east-1";
 const defaultLocalAccountId = "000000000000";
 const defaultLocalCredential = "test";
 
-export const createFlociLocalProvider = (
+/** The Floci Local AWS Provider (Docker Compose), Voke's default for local development. */
+export const floci = (
   defaults: FlociLocalProviderOptions = {}
 ): LocalProvider => ({
   bootstrapPlan: ({ environment, name, region, stage, templatePath }) => ({
@@ -202,12 +200,26 @@ ${hostname === undefined ? "" : `      - FLOCI_HOSTNAME=${hostname}\n`}    volum
   ],
 });
 
-export const resolveLocalProvider = (
-  provider: LocalProviderInput = "floci"
-): LocalProvider => {
-  if (provider === "floci") {
-    return createFlociLocalProvider();
+const errorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
+/** The message a failed local command reports, with guidance for the Local AWS Provider. */
+export const localProviderFailureMessage = (options: {
+  cause: unknown;
+  command: string[];
+  localCommand: string;
+  provider: LocalProvider;
+}): string => {
+  const commandText = options.command.join(" ");
+  const base = `Voke local ${options.localCommand} failed while running: ${commandText}. ${errorMessage(options.cause)}`;
+
+  if (options.provider.name !== "floci") {
+    return `${base}\nLocal provider: ${options.provider.name}. Check this provider's local command configuration.`;
   }
 
-  return provider;
+  if (options.localCommand === "bootstrap") {
+    return `${base}\nFloci is Voke's default optional local AWS provider. Make sure Floci is running with "voke local start", then retry "voke local bootstrap". You can also pass a Local AWS Provider: aws({ local: ... })`;
+  }
+
+  return `${base}\nFloci is Voke's default optional local AWS provider. Make sure Docker Compose is installed and Docker is running, then retry "voke local ${options.localCommand}". You can also pass a Local AWS Provider: aws({ local: ... })`;
 };

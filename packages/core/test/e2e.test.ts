@@ -1,34 +1,20 @@
 import { expect, test } from "bun:test";
 
 import { bindResource } from "@voke/aws";
-import { dynamodbTable, sqsQueue } from "@voke/aws/cloudformation";
+import {
+  dynamodbTable,
+  sqsQueue,
+  synthesizeCloudFormation,
+} from "@voke/aws/cloudformation";
+import { createStackTestContext } from "@voke/aws/testing";
+import { createInvokeTestClient, createTestClient } from "@voke/testing";
 import { Hono } from "hono";
 
 import { voke } from "../src/app";
-import { synthesizeCloudFormation } from "../src/cloudformation";
-import { awsContext, awsEvent, requestId } from "../src/context";
-import type { VokeEnv } from "../src/context";
-import {
-  createHttpApiEvent,
-  createInvokeTestClient,
-  createStackTestContext,
-  createTestClient,
-} from "../src/e2e";
 import { createFunctions, fn, withInvokeTrace } from "../src/invoke";
 import type { StandardSchemaV1 } from "../src/invoke";
 import { ok as json } from "../src/response";
 import { withEnv } from "./support/env";
-
-interface TestHttpApiEvent {
-  rawPath: string;
-  rawQueryString: string;
-  requestContext: {
-    http: {
-      method: string;
-      userAgent: string;
-    };
-  };
-}
 
 const schema = <TValue>(): StandardSchemaV1<TValue, TValue> => ({
   "~standard": {
@@ -48,109 +34,6 @@ const userInputSchema: StandardSchemaV1<{ id: string }, { id: string }> = {
     version: 1,
   },
 };
-
-test("creates a local API test client with API Gateway semantics", async () => {
-  const app = new Hono<VokeEnv>();
-
-  app.post("/users/:id", async (c) => {
-    const body = await c.req.json();
-    const event = awsEvent(c) as TestHttpApiEvent | undefined;
-    const context = awsContext(c);
-
-    return json({
-      body,
-      id: c.req.param("id"),
-      lambdaRequestId: requestId(c),
-      method: event?.requestContext.http.method,
-      query: c.req.query("debug"),
-      rawPath: event?.rawPath,
-      rawQueryString: event?.rawQueryString,
-      requestId: context?.awsRequestId,
-      sourceIp: c.req.header("x-forwarded-for"),
-      userAgent: event?.requestContext.http.userAgent,
-    });
-  });
-
-  const client = createTestClient(app);
-  const response = await client.post("/users/usr_1?debug=true", {
-    context: { awsRequestId: "lambda_req_1" },
-    headers: {
-      "user-agent": "voke-parity-test",
-      "x-forwarded-for": "127.0.0.1",
-      "x-request-id": "api_req_1",
-    },
-    json: { name: "Victor" },
-  });
-
-  expect(response.status).toBe(200);
-  expect(await response.json()).toEqual({
-    data: {
-      body: { name: "Victor" },
-      id: "usr_1",
-      lambdaRequestId: "lambda_req_1",
-      method: "POST",
-      query: "true",
-      rawPath: "/users/usr_1",
-      rawQueryString: "debug=true",
-      requestId: "lambda_req_1",
-      sourceIp: "127.0.0.1",
-      userAgent: "voke-parity-test",
-    },
-  });
-});
-
-test("creates explicit HTTP API events for local harness assertions", () => {
-  const event = createHttpApiEvent("PATCH", "/users/usr_1?debug=true", {
-    headers: {
-      "user-agent": "custom-agent",
-      "x-forwarded-for": "10.0.0.1",
-      "x-request-id": "req_event",
-    },
-    json: { name: "Victor" },
-  }) as TestHttpApiEvent & {
-    body: string;
-    headers: Record<string, string>;
-    requestContext: TestHttpApiEvent["requestContext"] & {
-      requestId: string;
-    };
-    routeKey: string;
-    version: string;
-  };
-
-  expect(event).toMatchObject({
-    body: '{"name":"Victor"}',
-    headers: {
-      "content-type": "application/json",
-      "user-agent": "custom-agent",
-      "x-forwarded-for": "10.0.0.1",
-      "x-forwarded-proto": "https",
-      "x-request-id": "req_event",
-    },
-    rawPath: "/users/usr_1",
-    rawQueryString: "debug=true",
-    requestContext: {
-      http: {
-        method: "PATCH",
-        userAgent: "custom-agent",
-      },
-      requestId: "req_event",
-    },
-    routeKey: "$default",
-    version: "2.0",
-  });
-});
-
-test("supports Gateway-shaped { app } targets in the local test client", async () => {
-  const app = new Hono();
-
-  app.put("/health", () => json({ ok: true }));
-
-  const client = createTestClient({ app });
-  const response = await client.put("/health");
-
-  expect(response.status).toBe(200);
-  expect(await response.json()).toEqual({ data: { ok: true } });
-});
 
 test("can run the same API test client against a deployed base URL", async () => {
   const requests: Request[] = [];
@@ -343,11 +226,6 @@ test("creates invoke test helpers for worker flows", async () => {
     name: "Victor",
     requestId: "req_1",
   });
-  await expect(client.invokeAsync("getUser", { id: "usr_1" })).resolves.toEqual(
-    {
-      accepted: true,
-    }
-  );
   await expect(client.invoke("getUser", { id: "" })).rejects.toMatchObject({
     code: "INVALID_PAYLOAD",
     functionName: "getUser",
@@ -392,11 +270,6 @@ test("creates invoke test helpers for registry functions", async () => {
   expect(ping as unknown).toEqual({
     ok: true,
     requestId: "req_ping",
-  });
-  await expect(
-    client.invokeAsync("pingWorker", { id: "ping_1" })
-  ).resolves.toEqual({
-    accepted: true,
   });
 });
 
