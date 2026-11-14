@@ -322,8 +322,8 @@ end with the list empty.
 
 ## Execution notes (2026-11-14)
 
-Done on branch `feature/docs-site-platform`, stacked on plan 011 (`feature/real-standard-schema`,
-PR #60). Uncommitted. Gates: `bun run check` 0 errors, `bun run typecheck` 19/19, `bun run test`
+Done on branch `feature/docs-site-platform` (PR #61), stacked on plan 011 (`feature/real-standard-schema`,
+PR #60). Gates: `bun run check` 0 errors, `bun run typecheck` 19/19, `bun run test`
 24/24 tasks (docs 7, core 247, `@voke/aws` 99). The root test run builds the docs site before
 testing it (`@voke/docs:build` precedes `@voke/docs:test` in the turbo log), so CI builds it with no
 workflow change.
