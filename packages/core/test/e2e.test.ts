@@ -18,7 +18,7 @@ import { withEnv } from "./support/env";
 
 const schema = <TValue>(): StandardSchemaV1<TValue, TValue> => ({
   "~standard": {
-    validate: (value) => ({ data: value, success: true }),
+    validate: (value) => ({ value }),
     vendor: "voke-test",
     version: 1,
   },
@@ -28,8 +28,8 @@ const userInputSchema: StandardSchemaV1<{ id: string }, { id: string }> = {
   "~standard": {
     validate: (value) =>
       value.id.trim() === ""
-        ? { issues: [{ message: "id is required" }], success: false }
-        : { data: value, success: true },
+        ? { issues: [{ message: "id is required" }] }
+        : { value },
     vendor: "voke-test",
     version: 1,
   },

@@ -27,8 +27,8 @@ const schema = <TValue>(
   "~standard": {
     validate: (value) =>
       check(value)
-        ? { data: value as TValue, success: true }
-        : { issues: [{ message: "invalid" }], success: false },
+        ? { value: value as TValue }
+        : { issues: [{ message: "invalid" }] },
     vendor: "voke-test",
     version: 1,
   },

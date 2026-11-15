@@ -1,27 +1,19 @@
-import { InvokeError, VokeConfigError } from "voke";
+import {
+  formatValidationIssue,
+  InvokeError,
+  readStandardResult,
+  VokeConfigError,
+} from "voke";
 import type {
   EventFunctionDefinition,
   FunctionSynthesisConfig,
   InvokeContext,
   RuntimeVariableCatalog,
-  StandardSchemaIssue,
+  StandardSchemaInput,
+  StandardSchemaOutput,
   StandardSchemaV1,
+  ValidationIssue,
 } from "voke";
-
-type StandardSchemaInput<TSchema> = TSchema extends {
-  readonly "~standard": { readonly types: { input: infer TInput } };
-}
-  ? TInput
-  : TSchema extends {
-        readonly "~standard": {
-          validate(value: infer TInput): unknown;
-        };
-      }
-    ? TInput
-    : never;
-
-type StandardSchemaOutput<TSchema> =
-  TSchema extends StandardSchemaV1<unknown, infer TOutput> ? TOutput : never;
 
 type AnyStandardSchema = StandardSchemaV1<unknown, unknown>;
 
@@ -226,16 +218,11 @@ const createSqsRecord = (
   };
 };
 
-const formatIssue = (issue: StandardSchemaIssue): string =>
-  issue.path === undefined || issue.path.length === 0
-    ? issue.message
-    : `${issue.path.map(String).join(".")}: ${issue.message}`;
-
 const invalidMessageError = (
   messageId: string,
   detail: string,
   cause?: unknown,
-  issues?: readonly StandardSchemaIssue[]
+  issues?: readonly ValidationIssue[]
 ): InvokeError =>
   new InvokeError(`Invalid SQS message body for ${messageId}: ${detail}`, {
     cause,
@@ -249,17 +236,17 @@ const parseMessageBody = async <TBodySchema extends AnyStandardSchema>(
   raw: SqsRecord
 ): Promise<StandardSchemaOutput<TBodySchema>> => {
   try {
-    const result = await schema["~standard"].validate(
-      JSON.parse(raw.body) as unknown
+    const result = readStandardResult(
+      await schema["~standard"].validate(JSON.parse(raw.body) as unknown)
     );
 
-    if (result.success) {
-      return result.data as StandardSchemaOutput<TBodySchema>;
+    if (result.ok) {
+      return result.value as StandardSchemaOutput<TBodySchema>;
     }
 
     throw invalidMessageError(
       raw.messageId,
-      result.issues.map(formatIssue).join("; "),
+      result.issues.map(formatValidationIssue).join("; "),
       undefined,
       result.issues
     );
@@ -353,7 +340,7 @@ const sqsMessageBatch = <
   source: "sqs",
   "~standard": {
     validate: async (value) => ({
-      data: await parseSqsMessageBatch(
+      value: await parseSqsMessageBatch(
         {
           body,
           invalidMessageBody: options.invalidMessageBody ?? "fail",
@@ -361,7 +348,6 @@ const sqsMessageBatch = <
         } as SqsMessageBatchSchema<TBodySchema, TInvalidMessageBody>,
         value as SqsEventInvocationInput<StandardSchemaInput<TBodySchema>>
       ),
-      success: true,
     }),
     vendor: "voke",
     version: 1,

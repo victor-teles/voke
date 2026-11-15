@@ -82,7 +82,7 @@ const lambdaEvent = (overrides: Record<string, unknown>): LambdaEvent => {
 
 const passthroughSchema = <TValue>(): StandardSchemaV1<TValue, TValue> => ({
   "~standard": {
-    validate: (value) => ({ data: value, success: true }),
+    validate: (value) => ({ value }),
     vendor: "voke-test",
     version: 1,
   },

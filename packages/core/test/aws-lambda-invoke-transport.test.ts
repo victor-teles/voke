@@ -33,10 +33,9 @@ const userInputSchema: StandardSchemaV1<unknown, { id: string }> = {
       value !== null &&
       "id" in value &&
       typeof value.id === "string"
-        ? { data: { id: value.id }, success: true }
+        ? { value: { id: value.id } }
         : {
             issues: [{ message: "id is required" }],
-            success: false,
           },
     vendor: "voke-test",
     version: 1,
@@ -55,10 +54,9 @@ const userOutputSchema: StandardSchemaV1<
       typeof value.id === "string" &&
       "name" in value &&
       typeof value.name === "string"
-        ? { data: { id: value.id, name: value.name }, success: true }
+        ? { value: { id: value.id, name: value.name } }
         : {
             issues: [{ message: "user result is invalid" }],
-            success: false,
           },
     vendor: "voke-test",
     version: 1,

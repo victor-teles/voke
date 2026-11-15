@@ -10,8 +10,8 @@ const userId: StandardSchemaV1<{ id: string }, { id: string }> = {
   "~standard": {
     validate: (value) =>
       typeof (value as { id?: unknown })?.id === "string"
-        ? { data: value as { id: string }, success: true }
-        : { issues: [{ message: "id is required" }], success: false },
+        ? { value: value as { id: string } }
+        : { issues: [{ message: "id is required" }] },
     vendor: "voke-test",
     version: 1,
   },

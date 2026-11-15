@@ -22,7 +22,7 @@ const schema = <TInput, TOutput = TInput>(
   validate: (value: TInput) => TOutput
 ): StandardSchemaV1<TInput, TOutput> => ({
   "~standard": {
-    validate: (value) => ({ data: validate(value), success: true }),
+    validate: (value) => ({ value: validate(value) }),
     vendor: "voke-test",
     version: 1,
   },
@@ -30,7 +30,7 @@ const schema = <TInput, TOutput = TInput>(
 
 const failingSchema = (message: string): StandardSchemaV1<unknown, never> => ({
   "~standard": {
-    validate: () => ({ issues: [{ message }], success: false }),
+    validate: () => ({ issues: [{ message }] }),
     vendor: "voke-test",
     version: 1,
   },

@@ -12,7 +12,7 @@ import type {
 
 const schema = <TValue>(): StandardSchemaV1<TValue, TValue> => ({
   "~standard": {
-    validate: (value) => ({ data: value, success: true }),
+    validate: (value) => ({ value }),
     vendor: "voke-test",
     version: 1,
   },

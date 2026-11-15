@@ -77,10 +77,13 @@ test("keeps the stable root runtime surface intentional", () => {
     "createVokeModel",
     "defineConfig",
     "fn",
+    // Read Standard Schema results in Provider packages such as @voke/aws (SQS bodies).
+    "formatValidationIssue",
     "functionRegistryEntries",
     "http",
     "invokeRegistryFunction",
     "loadVokeConfig",
+    "readStandardResult",
     "route",
     "runRequestAuthorizer",
     "voke",

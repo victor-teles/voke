@@ -14,8 +14,8 @@ const text: StandardSchemaV1<string, string> = {
   "~standard": {
     validate: (value) =>
       typeof value === "string"
-        ? { data: value, success: true }
-        : { issues: [{ message: "expected string" }], success: false },
+        ? { value }
+        : { issues: [{ message: "expected string" }] },
     vendor: "voke-test",
     version: 1,
   },

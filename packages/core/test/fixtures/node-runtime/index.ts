@@ -1,11 +1,11 @@
 import { aws, bindResource, sqs } from "@voke/aws";
 
 import { createFunctions, fn, http, route, voke } from "../../../src/index";
-import type { StandardSchemaV1 } from "../../../src/schema";
+import type { StandardSchemaV1 } from "../../../src/index";
 
 const greetingSchema: StandardSchemaV1<{ name: string }, { name: string }> = {
   "~standard": {
-    validate: (value) => ({ data: value as { name: string }, success: true }),
+    validate: (value) => ({ value: value as { name: string } }),
     vendor: "voke-node-runtime-fixture",
     version: 1,
   },
@@ -17,8 +17,7 @@ const messageSchema: StandardSchemaV1<
 > = {
   "~standard": {
     validate: (value) => ({
-      data: value as { message: string },
-      success: true,
+      value: value as { message: string },
     }),
     vendor: "voke-node-runtime-fixture",
     version: 1,

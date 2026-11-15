@@ -1,5 +1,7 @@
 import { toEnvKey } from "./env-key";
 import { VokeRuntimeVariableError } from "./errors";
+import { formatValidationIssue, readStandardResult } from "./standard-schema";
+import type { StandardSchemaOutput, StandardSchemaV1 } from "./standard-schema";
 
 export { VokeRuntimeVariableError };
 
@@ -45,45 +47,6 @@ export interface RuntimeVariableProviderInput {
 }
 
 export type RuntimeVariableProvider = RuntimeVariableProviderInput;
-
-export interface StandardSchemaIssue {
-  message: string;
-  path?: readonly PropertyKey[];
-}
-
-export type StandardSchemaResult<TOutput> =
-  | { data: TOutput; success: true }
-  | { issues: readonly StandardSchemaIssue[]; success: false };
-
-export interface StandardSchemaV1<TInput = unknown, TOutput = TInput> {
-  readonly "~standard": {
-    readonly vendor: string;
-    readonly version: 1;
-    validate(
-      value: TInput
-    ): StandardSchemaResult<TOutput> | Promise<StandardSchemaResult<TOutput>>;
-    readonly types?: {
-      readonly input: TInput;
-      readonly output: TOutput;
-    };
-  };
-}
-
-type StandardSchemaOutput<TSchema> = TSchema extends {
-  readonly "~standard": { readonly types: { output: infer TOutput } };
-}
-  ? TOutput
-  : TSchema extends {
-        readonly "~standard": {
-          validate(
-            value: unknown
-          ):
-            | StandardSchemaResult<infer TOutput>
-            | Promise<StandardSchemaResult<infer TOutput>>;
-        };
-      }
-    ? TOutput
-    : never;
 
 type RuntimeVariableValue<TDescriptor> = TDescriptor extends {
   readonly options: { readonly optional: true };
@@ -285,11 +248,6 @@ const parseJson = (input: string, variableKey: string, functionKey: string) => {
   }
 };
 
-const formatSchemaIssue = (issue: StandardSchemaIssue): string =>
-  issue.path === undefined || issue.path.length === 0
-    ? issue.message
-    : `${issue.path.map(String).join(".")}: ${issue.message}`;
-
 const parseWithSchema = async <TSchema extends StandardSchemaV1>(
   schema: TSchema,
   value: unknown,
@@ -297,14 +255,16 @@ const parseWithSchema = async <TSchema extends StandardSchemaV1>(
   functionKey: string
 ): Promise<StandardSchemaOutput<TSchema>> => {
   try {
-    const result = await schema["~standard"].validate(value);
+    const result = readStandardResult(
+      await schema["~standard"].validate(value)
+    );
 
-    if (result.success) {
-      return result.data as StandardSchemaOutput<TSchema>;
+    if (result.ok) {
+      return result.value as StandardSchemaOutput<TSchema>;
     }
 
     throw new VokeRuntimeVariableError(
-      `Runtime variable "${variableKey}" for Function "${functionKey}" failed schema validation: ${result.issues.map(formatSchemaIssue).join("; ")}.`,
+      `Runtime variable "${variableKey}" for Function "${functionKey}" failed schema validation: ${result.issues.map(formatValidationIssue).join("; ")}.`,
       {
         issues: result.issues.map((issue) => ({
           message: issue.message,

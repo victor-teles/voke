@@ -7,7 +7,7 @@ import { dynamodbTable, synthesizeCloudFormation } from "../src/cloudformation";
 
 const text: StandardSchemaV1<string, string> = {
   "~standard": {
-    validate: (value) => ({ data: value as string, success: true }),
+    validate: (value) => ({ value: value as string }),
     vendor: "voke-test",
     version: 1,
   },

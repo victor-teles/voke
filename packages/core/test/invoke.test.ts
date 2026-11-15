@@ -21,7 +21,7 @@ import { createVariableProvider, createVariableSource } from "../src/variables";
 
 const passthroughSchema = <TValue>(): StandardSchemaV1<TValue, TValue> => ({
   "~standard": {
-    validate: (value) => ({ data: value, success: true }),
+    validate: (value) => ({ value }),
     vendor: "voke-test",
     version: 1,
   },
@@ -43,10 +43,9 @@ const stringSchema: StandardSchemaV1<unknown, string> = {
   "~standard": {
     validate: (value) =>
       typeof value === "string"
-        ? { data: value, success: true }
+        ? { value }
         : {
             issues: [{ message: "expected string" }],
-            success: false,
           },
     vendor: "voke-test",
     version: 1,
@@ -60,10 +59,9 @@ const userInputSchema: StandardSchemaV1<unknown, { id: string }> = {
       value !== null &&
       "id" in value &&
       typeof value.id === "string"
-        ? { data: { id: value.id }, success: true }
+        ? { value: { id: value.id } }
         : {
             issues: [{ message: "id is required" }],
-            success: false,
           },
     vendor: "voke-test",
     version: 1,
@@ -82,10 +80,9 @@ const userOutputSchema: StandardSchemaV1<
       typeof value.id === "string" &&
       "name" in value &&
       typeof value.name === "string"
-        ? { data: { id: value.id, name: value.name }, success: true }
+        ? { value: { id: value.id, name: value.name } }
         : {
             issues: [{ message: "user result is invalid" }],
-            success: false,
           },
     vendor: "voke-test",
     version: 1,
@@ -405,10 +402,9 @@ test("validates function results after invoking a function", async () => {
               "id" in value &&
               typeof value.id === "string" &&
               value.id !== ""
-                ? { data: { id: value.id }, success: true }
+                ? { value: { id: value.id } }
                 : {
                     issues: [{ message: "id is required" }],
-                    success: false,
                   },
             vendor: "voke-test",
             version: 1,
@@ -526,10 +522,9 @@ test("sends SQS events to event source functions with minimal messages", async (
         value !== null &&
         "orderId" in value &&
         typeof value.orderId === "string"
-          ? { data: { orderId: value.orderId }, success: true }
+          ? { value: { orderId: value.orderId } }
           : {
               issues: [{ message: "orderId is required" }],
-              success: false,
             },
       vendor: "voke-test",
       version: 1,

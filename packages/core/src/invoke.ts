@@ -14,6 +14,13 @@ import type { VokeModelProviderExtensionRecord } from "./model";
 import type { VokeProvider } from "./provider";
 import { Voke } from "./route-builder";
 import { readEnv, sleep } from "./runtime-env";
+import { formatValidationIssue, readStandardResult } from "./standard-schema";
+import type {
+  StandardSchemaInput,
+  StandardSchemaOutput,
+  StandardSchemaV1,
+  ValidationIssue,
+} from "./standard-schema";
 import {
   createRuntimeVariableCache,
   createRuntimeVariables,
@@ -26,6 +33,16 @@ import type {
   RuntimeVariableOverrides,
   RuntimeVariableProvider,
 } from "./variables";
+
+export type {
+  StandardSchemaFailureResult,
+  StandardSchemaIssue,
+  StandardSchemaPathSegment,
+  StandardSchemaResult,
+  StandardSchemaSuccessResult,
+  StandardSchemaV1,
+  ValidationIssue,
+} from "./standard-schema";
 
 export type InvokeMode = "sync" | "async";
 export type InvokeRuntime = "local" | "aws";
@@ -45,7 +62,7 @@ export interface InvokeErrorOptions {
   cause?: unknown;
   code: InvokeErrorCode;
   functionName?: string;
-  issues?: readonly StandardSchemaIssue[];
+  issues?: readonly ValidationIssue[];
   requestId?: string;
   statusCode?: number;
 }
@@ -53,7 +70,7 @@ export interface InvokeErrorOptions {
 export class InvokeError extends Error {
   code: InvokeErrorCode;
   functionName?: string;
-  issues?: readonly StandardSchemaIssue[];
+  issues?: readonly ValidationIssue[];
   requestId?: string;
   statusCode?: number;
 
@@ -110,58 +127,7 @@ export interface FunctionSynthesisConfig {
   timeout?: number;
 }
 
-export interface StandardSchemaIssue {
-  message: string;
-  path?: readonly PropertyKey[];
-}
-
-export type StandardSchemaResult<TOutput> =
-  | { data: TOutput; success: true }
-  | { issues: readonly StandardSchemaIssue[]; success: false };
-
-export interface StandardSchemaV1<TInput = unknown, TOutput = TInput> {
-  readonly "~standard": {
-    readonly vendor: string;
-    readonly version: 1;
-    validate(
-      value: TInput
-    ): StandardSchemaResult<TOutput> | Promise<StandardSchemaResult<TOutput>>;
-    readonly types?: {
-      readonly input: TInput;
-      readonly output: TOutput;
-    };
-  };
-}
-
 type AnyStandardSchema = StandardSchemaV1<unknown, unknown>;
-
-type StandardSchemaInput<TSchema> = TSchema extends {
-  readonly "~standard": { readonly types: { input: infer TInput } };
-}
-  ? TInput
-  : TSchema extends {
-        readonly "~standard": {
-          validate(value: infer TInput): unknown;
-        };
-      }
-    ? TInput
-    : never;
-
-type StandardSchemaOutput<TSchema> = TSchema extends {
-  readonly "~standard": { readonly types: { output: infer TOutput } };
-}
-  ? TOutput
-  : TSchema extends {
-        readonly "~standard": {
-          validate(
-            value: unknown
-          ):
-            | StandardSchemaResult<infer TOutput>
-            | Promise<StandardSchemaResult<infer TOutput>>;
-        };
-      }
-    ? TOutput
-    : never;
 
 export interface SqsMessageAttribute {
   binaryListValues?: string[];
@@ -1100,32 +1066,26 @@ const createInvokeContext = <TVariables extends RuntimeVariableCatalog>(
   };
 };
 
-const formatIssue = (issue: StandardSchemaIssue): string => {
-  if (issue.path === undefined || issue.path.length === 0) {
-    return issue.message;
-  }
-
-  return `${issue.path.map(String).join(".")}: ${issue.message}`;
-};
-
 const parseWithSchema = async <TInput, TOutput>(
   schema: StandardSchemaV1<TInput, TOutput>,
   value: TInput,
   errorFactory: (
     message: string,
     cause?: unknown,
-    issues?: readonly StandardSchemaIssue[]
+    issues?: readonly ValidationIssue[]
   ) => InvokeError
 ): Promise<TOutput> => {
   try {
-    const result = await schema["~standard"].validate(value);
+    const result = readStandardResult(
+      await schema["~standard"].validate(value)
+    );
 
-    if (result.success) {
-      return result.data;
+    if (result.ok) {
+      return result.value;
     }
 
     throw errorFactory(
-      result.issues.map(formatIssue).join("; "),
+      result.issues.map(formatValidationIssue).join("; "),
       undefined,
       result.issues
     );

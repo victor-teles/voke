@@ -6,6 +6,9 @@ framework to use and deploy. Execute in the order below unless dependencies say 
 executor: read the plan fully before starting, honor its STOP conditions, and update your row
 when done.
 
+Plans 011–013 were added on 2026-11-14 at commit `95a9ec6`, after an audit of the documentation
+(the docs site in `apps/docs`, `README.md` and `docs/`). They stack on plan 007 (PR #59).
+
 ## Headline finding
 
 Voke cannot put working code on AWS today. Four independent defects each block it:
@@ -34,18 +37,21 @@ serves `GET /health` from an API Gateway v2 event.
 
 ## Execution order & status
 
-| Plan | Title                                                                                           | Priority | Effort | Depends on          | Status                        |
-| ---- | ----------------------------------------------------------------------------------------------- | -------- | ------ | ------------------- | ----------------------------- |
-| 001  | The repository runs on Bun 1.4.4 with a deterministic test suite, and every PR is checked by CI | P1       | S      | —                   | DONE                          |
-| 002  | A built Voke bundle starts and serves requests on the AWS Lambda Node.js runtime                | P1       | M      | 001                 | DONE                          |
-| 009  | `@voke/aws` owns all AWS code at parity, and core's AWS copies are deleted                      | P1       | L      | 002                 | DONE                          |
-| 003  | Every Function declared in the entrypoint is synthesized and gets a working Lambda handler      | P1       | L      | 009                 | DONE                          |
-| 008  | Every config setting and authoring API has exactly one spelling                                 | P2       | M      | 009, 003            | DONE                          |
-| 004  | `voke deploy` takes a project from source to a live URL in one command                          | P1       | L      | 009, 003 (008)      | DONE (real-AWS proof not run) |
-| 010  | `voke local` and `voke dev` run through the Provider's local workflow                           | P2       | M      | 009 (003, 008, 004) | DONE                          |
-| 005  | A freshly deployed Voke stack has production-safe Lambda and HTTP defaults                      | P2       | M      | 009, 003, 008       | DONE                          |
-| 006  | A new user goes from nothing to a deployed API with three commands and clear CLI feedback       | P2       | M      | 004, 008, 010       | DONE                          |
-| 007  | `voke local` and `voke dev` run against the official AWS Emulator with real stack outputs       | P2       | M      | 010 (004 optional)  | DONE                          |
+| Plan | Title                                                                                                | Priority | Effort | Depends on          | Status                        |
+| ---- | ---------------------------------------------------------------------------------------------------- | -------- | ------ | ------------------- | ----------------------------- |
+| 001  | The repository runs on Bun 1.4.4 with a deterministic test suite, and every PR is checked by CI      | P1       | S      | —                   | DONE                          |
+| 002  | A built Voke bundle starts and serves requests on the AWS Lambda Node.js runtime                     | P1       | M      | 001                 | DONE                          |
+| 009  | `@voke/aws` owns all AWS code at parity, and core's AWS copies are deleted                           | P1       | L      | 002                 | DONE                          |
+| 003  | Every Function declared in the entrypoint is synthesized and gets a working Lambda handler           | P1       | L      | 009                 | DONE                          |
+| 008  | Every config setting and authoring API has exactly one spelling                                      | P2       | M      | 009, 003            | DONE                          |
+| 004  | `voke deploy` takes a project from source to a live URL in one command                               | P1       | L      | 009, 003 (008)      | DONE (real-AWS proof not run) |
+| 010  | `voke local` and `voke dev` run through the Provider's local workflow                                | P2       | M      | 009 (003, 008, 004) | DONE                          |
+| 005  | A freshly deployed Voke stack has production-safe Lambda and HTTP defaults                           | P2       | M      | 009, 003, 008       | DONE                          |
+| 006  | A new user goes from nothing to a deployed API with three commands and clear CLI feedback            | P2       | M      | 004, 008, 010       | DONE                          |
+| 007  | `voke local` and `voke dev` run against the official AWS Emulator with real stack outputs            | P2       | M      | 010 (004 optional)  | DONE                          |
+| 011  | Function Contracts accept real Standard Schema validators such as Zod and Valibot                    | P1       | M      | —                   | DONE                          |
+| 012  | The docs site checks its own code samples, is readable by AI assistants, and has a real landing page | P2       | M      | (011)               | TODO                          |
+| 013  | The docs site is the single, accurate, task-oriented manual for Voke                                 | P2       | L      | 011, 012            | TODO                          |
 
 Dependencies in parentheses are ordering only (shared files), not hard prerequisites.
 
@@ -53,6 +59,9 @@ Recommended order: 001 → 002 → 009 → 003 → 008 → 004 → 010 → 005 �
 when a plan was written, not execution order. 009 and 010 were added after the package split:
 009 removes core's diverged AWS copies so every later plan edits one copy; 010 moves the local
 workflow behind the Provider before 007 adds the emulator.
+
+Documentation plans: 011 → 012 → 013. 011 is a code fix that the documentation depends on; 012
+builds the site machinery; 013 rewrites the content on top of both.
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJECTED (with one-line rationale — finding fixed independently or approach abandoned)
 
@@ -73,6 +82,13 @@ Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJE
 - 006 needs 004 (deploy), 008 (final command set) and 010 (`voke local` through the Provider).
 - 007 requires 010. It uses 004's CloudFormation client only for its SDK bootstrap path and
   has a CLI fallback. It edits `cli.ts` like 006, so the two should not run at the same time.
+- 011 has no prerequisite. It changes the schema result shape across core, `@voke/schema`,
+  `@voke/aws` and most test files, so it should land before other work touches those tests.
+- 012 does not need 011, but it runs after it so both proof pages compile against the final
+  schema contract. It adds a `test` script to `@voke/docs`, which makes the root `bun run test`
+  build the site.
+- 013 requires 011 (the schema guide shows Zod and Valibot) and 012 (checked samples, link
+  checking, registered MDX components). It must leave 012's legacy sample allowlist empty.
 
 ## Owner decisions
 
@@ -94,6 +110,15 @@ Decided on 2026-11-14 after the package split:
 | AWS-only settings live in `aws({ lambda, local })` options; core keeps `timeout`, `memory`, `api.cors`     | 005, 010, 007        |
 | Runtime Variable `secret`/`parameter` from `@voke/aws`; resource builders under `@voke/aws/cloudformation` | 009                  |
 
+Decided on 2026-11-14 after the documentation audit:
+
+| Decision                                                                                                        | Applied in |
+| --------------------------------------------------------------------------------------------------------------- | ---------- |
+| Fix the code so third-party Standard Schema validators work; adopt the specification's result shape, no alias   | 011        |
+| The docs site is the single source of truth; the README shrinks and user guides in `docs/*.md` move to the site | 013        |
+| Hosting is not decided: the site URL is one variable, CI builds the site, nothing deploys                       | 012        |
+| Include checked code samples, type hovers (Twoslash), site polish and `llms.txt`                                | 012        |
+
 Defaults the plans adopted (reversible; each plan states it): Lambda adapters exported from the
 `@voke/aws` index; deployed names `${name}-${stage}-${key}`; deployed authorizer results trusted
 through a Provider runtime hook; deploy as a Provider capability with a neutral `VokeDeployError`;
@@ -112,6 +137,9 @@ Still open:
 | Renumber the three ADRs that share 0007                                                  | 004, 007    | New ADRs take the next free number                   |
 | `cloudFormation.out` is AWS-only but stays in core config                                | 005 / later | Left as is; flagged in 008                           |
 | Copyright holder line in `LICENSE`                                                       | 006, step 7 | `Victor Mesquita` (git author identity)              |
+| Where the docs site is hosted, and its public URL                                        | 012, 013    | `NEXT_PUBLIC_SITE_URL`; README links use repo paths  |
+| A logo or brand for the docs site                                                        | 012         | Placeholder "V" icon in the theme color              |
+| `zod` as a `devDependency` of `packages/core` for the interop test                       | 011         | Yes; a specification-shaped fake if refused          |
 
 ## Product stance (ADR 0007)
 
