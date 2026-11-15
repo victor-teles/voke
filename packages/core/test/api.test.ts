@@ -429,6 +429,7 @@ test("normalizes project and CloudFormation settings through defineConfig", () =
       LOG_LEVEL: "debug",
     },
     name: "orders-api",
+    plugins: [],
     region: "sa-east-1",
     resources: {
       ordersTable: dynamodbTable({ partitionKey: "id" }),

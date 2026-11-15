@@ -14,6 +14,7 @@ import type {
   VokeModelProviderExtensionRecord,
   VokeModelRecord,
 } from "./model";
+import type { FunctionExecution, FunctionWrap } from "./plugin";
 import type {
   ProviderInvokeCapability,
   ProviderInvokeTarget,
@@ -819,6 +820,14 @@ interface FunctionRegistryActivation {
   unregisteredVariableProviders: "defer" | "error";
   variableOverrides?: RuntimeVariableOverrides;
   variableProviders: readonly RuntimeVariableProvider[];
+  /** Plugin Function Wraps, outermost first. Absent when no Plugin wraps. */
+  wraps?: readonly PluginFunctionWrap[];
+}
+
+/** A Function Wrap with the name of the Plugin that declared it. */
+export interface PluginFunctionWrap {
+  readonly plugin: string;
+  readonly wrap: FunctionWrap;
 }
 
 const activatedFunctionRegistries = new WeakMap<
@@ -868,6 +877,8 @@ export const activateFunctionRegistry = (
     invoke?: ProviderInvokeCapability;
     variableOverrides?: RuntimeVariableOverrides;
     variableProviders?: readonly RuntimeVariableProvider[];
+    /** Plugin Function Wraps around every handler call, outermost first. */
+    wraps?: readonly PluginFunctionWrap[];
   } = {}
 ): void => {
   const previousActivation = activatedFunctionRegistries.get(registry);
@@ -893,6 +904,9 @@ export const activateFunctionRegistry = (
       previousActivation?.variableCache ?? createRuntimeVariableCache(),
     variableOverrides: options.variableOverrides,
     variableProviders,
+    ...(options.wraps === undefined || options.wraps.length === 0
+      ? {}
+      : { wraps: options.wraps }),
   };
 
   activatedFunctionRegistries.set(registry, activation);
@@ -920,6 +934,44 @@ const resolveRuntime = (options: InvokeOptions): InvokeRuntime => {
 
 const deployedName = (definition: BaseFunctionDefinition): string =>
   definition.name ?? definition.key;
+
+/** The Plugin Function Wraps of an activated definition; undefined when there are none. */
+const functionWraps = (
+  definition: object
+): readonly PluginFunctionWrap[] | undefined =>
+  activatedFunctionDefinitions.get(definition as BaseFunctionDefinition)?.wraps;
+
+// Composes the wraps outermost first around `run`. Callers check `functionWraps` first, so a
+// Function without wraps calls its handler directly, with no extra closure or promise.
+const runWrapped = async (
+  wraps: readonly PluginFunctionWrap[],
+  execution: FunctionExecution,
+  run: () => unknown
+): Promise<unknown> => {
+  const dispatch = async (index: number): Promise<unknown> => {
+    const entry = wraps[index];
+
+    if (entry === undefined) {
+      return await run();
+    }
+
+    let called = false;
+
+    return await entry.wrap(execution, async () => {
+      if (called) {
+        throw new Error(
+          `Plugin "${entry.plugin}" called next() more than once for Function "${execution.functionKey}"`
+        );
+      }
+
+      called = true;
+
+      return await dispatch(index + 1);
+    });
+  };
+
+  return await dispatch(0);
+};
 
 const createInvokeContext = <TVariables extends RuntimeVariableCatalog>(
   definition: BaseFunctionDefinition<string, FunctionKind, TVariables>,
@@ -1185,10 +1237,29 @@ const runRoute = async (
     unknown,
     RuntimeVariableCatalog
   >;
-  const result = await handler(
-    request as RouteRequest<never, never, never, never>,
-    context
-  );
+  const wraps =
+    definition === undefined ? undefined : functionWraps(definition);
+  const result =
+    wraps === undefined || definition === undefined
+      ? await handler(
+          request as RouteRequest<never, never, never, never>,
+          context
+        )
+      : await runWrapped(
+          wraps,
+          {
+            context,
+            functionKey: definition.key,
+            input: request,
+            kind: "route",
+            route: `${route.method} ${route.path}`,
+          },
+          () =>
+            handler(
+              request as RouteRequest<never, never, never, never>,
+              context
+            )
+        );
 
   return await parseRouteOutput(route, result);
 };
@@ -1251,9 +1322,22 @@ export const runRequestAuthorizer = async (
     {}
   );
   await loadRuntimeVariablesBeforeHandler(runtimeContext.variables);
-  const result = await handler(request, runtimeContext);
+  const wraps = functionWraps(definition);
+  const result =
+    wraps === undefined
+      ? await handler(request, runtimeContext)
+      : ((await runWrapped(
+          wraps,
+          {
+            context: runtimeContext,
+            functionKey: definition.key,
+            input: request,
+            kind: "authorizer",
+          },
+          () => handler(request, runtimeContext)
+        )) as Awaited<ReturnType<RequestAuthorizerHandler>> | undefined);
 
-  if (typeof result.authorized !== "boolean") {
+  if (typeof result?.authorized !== "boolean") {
     throw new InvokeError("Invalid authorizer result", {
       code: "INVALID_RESULT",
     });
@@ -1499,8 +1583,20 @@ const runLocalFunction = async <
   const parsedPayload = await parsePayload(definition, payload);
   const context = createInvokeContext(definition, options);
   await loadRuntimeVariablesBeforeHandler(context.variables);
+  const wraps = functionWraps(definition);
   const result = await withTimeout(
-    definition.handler(parsedPayload, context),
+    wraps === undefined
+      ? definition.handler(parsedPayload, context)
+      : (runWrapped(
+          wraps,
+          {
+            context,
+            functionKey: definition.key,
+            input: parsedPayload,
+            kind: "invokable",
+          },
+          () => definition.handler(parsedPayload, context)
+        ) as Promise<StandardSchemaInput<TOutputSchema>>),
     options.timeoutMs,
     `invoke("${functionName}") timed out after ${options.timeoutMs}ms`,
     functionName
@@ -1798,8 +1894,17 @@ const sendEventToFunction = async (
 
   const context = createInvokeContext(definition, options);
   await loadRuntimeVariablesBeforeHandler(context.variables);
+  const wraps = functionWraps(definition);
 
-  return await definition.handler(parsedEvent, context);
+  if (wraps === undefined) {
+    return await definition.handler(parsedEvent, context);
+  }
+
+  return await runWrapped(
+    wraps,
+    { context, functionKey: definition.key, input: parsedEvent, kind: "event" },
+    () => definition.handler(parsedEvent, context)
+  );
 };
 
 export function fn<

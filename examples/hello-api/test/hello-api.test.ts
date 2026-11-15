@@ -117,6 +117,13 @@ test("responds from composed health routes with config", async () => {
   });
 });
 
+test("the request-timing Plugin reports the route handler time in a header", async () => {
+  const response = await helloApi.request("/users");
+
+  expect(response.status).toBe(200);
+  expect(response.headers.get("x-handler-ms")).toMatch(/^\d+\.\d{2}$/u);
+});
+
 test("request info middleware preserves VOKE_AWS_CONTEXT fallback", async () => {
   const app = new Hono();
 

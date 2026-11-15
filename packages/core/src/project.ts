@@ -3,12 +3,14 @@ import type { VokeConfig } from "./config";
 import { VokeConfigError } from "./errors";
 import { functionRegistryEntries } from "./invoke";
 import type { FunctionRegistry, FunctionRegistryInput } from "./invoke";
+import { projectFunctionEntries } from "./plugin";
 import { readEnv } from "./runtime-env";
 
 export interface LoadedProject {
   config: VokeConfig;
   /** The project entrypoint the registry was imported from, as an absolute path. */
   entrypoint: string;
+  /** The project's Functions, plus the Plugin-contributed ones when the config has any. */
   functions: FunctionRegistry | FunctionRegistryInput;
 }
 
@@ -107,5 +109,15 @@ export const loadProject = async (options: {
     throw new VokeConfigError(`${entrypoint}: ${missingProjectExportMessage}`);
   }
 
-  return { config: options.config, entrypoint, functions };
+  const entries = projectFunctionEntries(functions, options.config);
+
+  return {
+    config: options.config,
+    entrypoint,
+    // With Plugin Functions, a plain record of every Function, so build, deploy and synth see them.
+    functions:
+      entries.length === functionRegistryEntries(functions).length
+        ? functions
+        : Object.fromEntries(entries),
+  };
 };

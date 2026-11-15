@@ -95,6 +95,7 @@ export {
   type VokeModelProviderExtensionRecord,
   type VokeModelRecord,
   type VokeModelInput,
+  type VokeModelPlugin,
   type VokeModelResource,
 } from "./model";
 export {
@@ -125,3 +126,17 @@ export {
   type VokeProviderCapability,
 } from "./provider";
 export { route } from "./route-builder";
+export {
+  projectFunctionEntries,
+  type FunctionExecution,
+  type FunctionExecutionKind,
+  type FunctionWrap,
+  type PluginCliCapability,
+  type PluginCommand,
+  type PluginCommandInput,
+  type PluginContributions,
+  type PluginRuntimeCapability,
+  type PluginRuntimeHooks,
+  type PluginRuntimeInput,
+  type VokePlugin,
+} from "./plugin";

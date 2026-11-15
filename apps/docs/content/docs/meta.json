@@ -21,6 +21,7 @@
     "guides/runtime-variables",
     "guides/resources",
     "guides/remote-functions",
+    "guides/plugins",
     "guides/testing",
     "guides/local-aws",
     "guides/deploy",

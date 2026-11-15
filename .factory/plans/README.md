@@ -81,7 +81,7 @@ builds the site machinery; 013 rewrites the content on top of both.
 | 016  | A Function can consume a Kinesis stream or a DynamoDB table stream in typed batches                                                  | P2       | L      | 014 (015)      | DONE                                         |
 | 017  | A Function can react to objects created or deleted in an S3 bucket                                                                   | P2       | M      | 014, 015 (016) | DONE (S3 key encoding unconfirmed, ADR 0013) |
 | 018  | A Function declared with `durable(...)` runs as an AWS Lambda durable function, locally and when deployed                            | P1       | L      | (014)          | DONE (real-AWS proof not run)                |
-| 019  | A Plugin declared in `voke.config.ts` can wrap every Function, extend the Gateway, contribute to the deployment and add CLI commands | P1       | L      | (014, 018)     | TODO                                         |
+| 019  | A Plugin declared in `voke.config.ts` can wrap every Function, extend the Gateway, contribute to the deployment and add CLI commands | P1       | L      | (014, 018)     | DONE                                         |
 | 020  | `@voke/openapi` generates an OpenAPI 3.1 document from route contracts and serves it with a Scalar API reference page                | P1       | L      | 019            | TODO                                         |
 | 021  | `@voke/idempotency` makes a retried handler run once, backed by a DynamoDB table the Plugin provisions                               | P2       | M      | 019 (014, 018) | TODO                                         |
 
@@ -274,6 +274,15 @@ Ordered by how much they would add to "easy to use and deploy" once 001–006 la
   pruning of retained Lambda versions. Plan 018 defers all three.
 - **DLQ and redrive** for queues and for the new asynchronous and stream sources.
 - **Isolated emulator per test run** (`aws-emulator -p 0`) in `voke/testing`.
+- **Lazy `aws()` capabilities (bundle size).** Since plan 019 the generated Lambda entry imports
+  `voke.config.ts`, and `aws()` eagerly imports its deploy, synthesis, local and build code, so
+  every Lambda bundle carries it: `examples/sqs-events` went from 83 KB to 255 KB, and Gateway
+  projects already paid most of this. Load those capabilities with dynamic `import()` so a
+  deployed bundle holds only the runtime half.
+- **Confirm S3 key encoding** with a captured S3 → EventBridge event before the first release
+  (plan 017, ADR 0013). If AWS URL-encodes keys, switch `s3()` to decoding.
+- **Real-AWS proof for Durable Functions** (plan 018, step 8): the managed runtime's SDK commands,
+  re-execution after suspension, the synchronous invoke response, and Node 22.
 - **Lambda Function URLs and response streaming** as a cheaper, simpler alternative to API
   Gateway for single-Function APIs.
 - **Personal and preview stages, CI workflow generator** (roadmap v2 phase 7). The reserved

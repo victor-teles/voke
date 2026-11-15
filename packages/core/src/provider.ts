@@ -126,6 +126,8 @@ export interface ProviderDeployCapability {
 export interface ProviderBuildInput {
   build: VokeBuildConfig;
   config: VokeConfig;
+  /** The config file the CLI loaded; absent when the config came from flags. */
+  configPath?: string;
   /** The project entrypoint that declares the Functions. */
   entrypoint: string;
   functions: FunctionRegistry | FunctionRegistryInput;

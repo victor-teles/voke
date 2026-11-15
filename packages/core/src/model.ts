@@ -11,7 +11,6 @@ import {
   assertUniqueHandlerExportNames,
   createHandlerExportName,
 } from "./handler-names";
-import { functionRegistryEntries } from "./invoke";
 import type {
   AnyFunctionDefinition,
   FunctionRegistry,
@@ -19,6 +18,8 @@ import type {
   FunctionSynthesisConfig,
 } from "./invoke";
 import { positiveIntegerIssue } from "./numbers";
+import { projectFunctionEntries } from "./plugin";
+import type { VokePlugin } from "./plugin";
 import type { RuntimeVariableCatalog } from "./variables";
 
 export type VokeModelScalar = string | number | boolean | null;
@@ -40,6 +41,13 @@ export interface VokeModel {
   functions: Record<string, VokeModelFunction>;
   resources: Record<string, VokeModelResource>;
   outputs: Record<string, VokeModelOutput>;
+  /** Plugin Provider Extension Records, keyed by Plugin name. Absent when no Plugin has one. */
+  plugins?: Record<string, VokeModelPlugin>;
+}
+
+export interface VokeModelPlugin {
+  /** The Plugin's `contributions.provider`, copied untouched; each Provider reads its own key. */
+  provider: Record<string, VokeModelProviderExtensionRecord>;
 }
 
 export interface VokeModelService {
@@ -496,6 +504,18 @@ const validateRuntimeVariableResources = (
   }
 };
 
+const toModelPlugins = (
+  plugins: readonly VokePlugin[]
+): Record<string, VokeModelPlugin> | undefined => {
+  const entries = plugins.flatMap((plugin) =>
+    plugin.contributions?.provider === undefined
+      ? []
+      : [[plugin.name, { provider: { ...plugin.contributions.provider } }]]
+  );
+
+  return entries.length === 0 ? undefined : Object.fromEntries(entries);
+};
+
 export type VokeModelInput = (VokeConfig | VokeConfigInput) & {
   /** The Function Registry discovered from the project entrypoint. */
   readonly functions?: FunctionRegistry | FunctionRegistryInput;
@@ -527,7 +547,7 @@ export const createInternalModel = (input: VokeModelInput): VokeModel => {
       },
     ])
   );
-  const registryEntries = functionRegistryEntries(registry);
+  const registryEntries = projectFunctionEntries(registry, config);
   assertUniqueHandlerExportNames(registryEntries.map(([name]) => name));
   const generatedFunctionName = (name: string): string =>
     `${config.name}-${config.stage}-${name}`;
@@ -643,6 +663,7 @@ export const createInternalModel = (input: VokeModelInput): VokeModel => {
       }
     : {};
 
+  const plugins = toModelPlugins(config.plugins);
   const model: VokeModel = {
     apis: hasHttpApi
       ? {
@@ -665,6 +686,7 @@ export const createInternalModel = (input: VokeModelInput): VokeModel => {
       ...functionOutputs,
       ...resourceOutputs,
     },
+    ...(plugins === undefined ? {} : { plugins }),
     resources,
     schemaVersion: "1",
     service: {

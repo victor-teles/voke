@@ -44,6 +44,7 @@ const teachingSurfaceFiles = [
   "../../../apps/docs/content/docs/guides/local-aws.mdx",
   "../../../apps/docs/content/docs/guides/deploy.mdx",
   "../../../apps/docs/content/docs/guides/serverless-migration.mdx",
+  "../../../apps/docs/content/docs/guides/plugins.mdx",
   "../../../apps/docs/content/docs/guides/troubleshooting.mdx",
   "../../../apps/docs/content/docs/reference/config.mdx",
   "../../../apps/docs/content/docs/reference/cli.mdx",
@@ -62,6 +63,7 @@ const firstPartyExampleFiles = [
   "../../../examples/hello-api/src/aws.ts",
   "../../../examples/hello-api/src/local.ts",
   "../../../examples/hello-api/src/middleware/request-info.ts",
+  "../../../examples/hello-api/src/plugins/request-timing.ts",
   "../../../examples/sqs-events/src/functions.ts",
   "../../../examples/event-sources/src/functions.ts",
   "../../../examples/stream-events/src/functions.ts",
@@ -110,6 +112,8 @@ test("keeps the stable root runtime surface intentional", () => {
     "http",
     "invokeRegistryFunction",
     "loadVokeConfig",
+    // A Provider building block: the project's Functions plus the Plugin-contributed ones.
+    "projectFunctionEntries",
     "readStandardResult",
     "route",
     "runRequestAuthorizer",
@@ -125,6 +129,7 @@ test("keeps AWS authoring in @voke/aws", async () => {
   expect(Object.keys(aws).toSorted()).toEqual([
     "aws",
     "awsLambda",
+    "awsPolicy",
     "bindResource",
     "createAuthorizers",
     "createAwsClientConfig",

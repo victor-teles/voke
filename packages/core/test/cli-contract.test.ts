@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test";
 
 import { CliUsageError, createApiProject, runCli, synth } from "../src/cli";
+import { commandSpecs } from "../src/cli-spec";
 import { defineConfig } from "../src/config";
+import { reservedPluginCommandNames } from "../src/plugin";
 import { tempPath } from "./support/temp";
 
 const writeProviderConfig = async (
@@ -511,6 +513,197 @@ test("create refuses a non-empty directory unless --force, and --force keeps oth
   expect(await Bun.file(`${directory}/notes.txt`).text()).toBe("keep me");
   expect(await Bun.file(`${directory}/src/index.ts`).text()).toContain(
     "createFunctions"
+  );
+});
+
+const writePluginProject = async (directory: string): Promise<string> => {
+  const configPath = `${directory}/voke.config.ts`;
+  const coreIndex = `${import.meta.dir}/../src/index.ts`;
+
+  await Bun.write(
+    `${directory}/src/index.ts`,
+    `import { createFunctions, http, route } from "${coreIndex}";
+
+export const functions = createFunctions({
+  http: http({ routes: [route.get("/health", { handler: () => "ok" })] }),
+});
+`
+  );
+  await Bun.write(
+    configPath,
+    `import { defineConfig, http, route } from "${coreIndex}";
+
+export default defineConfig({
+  entrypoint: ${JSON.stringify(`${directory}/src/index.ts`)},
+  name: "plugin-cli",
+  plugins: [
+    {
+      name: "docs",
+      contributions: {
+        functions: {
+          page: http({ routes: [route.get("/docs", { handler: () => "docs" })] }),
+        },
+      },
+      cli: {
+        description: "API documentation.",
+        commands: {
+          export: {
+            description: "Write the API description.",
+            usage: "voke docs export [file] [--format json] [--pretty]",
+            flags: {
+              format: { description: "Output format" },
+              pretty: { boolean: true, description: "Indent the output" },
+            },
+            run: async ({ config, flags, loadFunctions, output, positional }) => {
+              const functions = await loadFunctions();
+              output(JSON.stringify({
+                flags,
+                functions: functions.map(([key]) => key),
+                name: config.name,
+                positional,
+              }));
+            },
+          },
+        },
+      },
+    },
+  ],
+});
+`
+  );
+
+  return configPath;
+};
+
+test("runs a Plugin command with its parsed flags, positionals and Functions", async () => {
+  const directory = tempPath(`voke-plugin-cli-${crypto.randomUUID()}`);
+  const configPath = await writePluginProject(directory);
+  const lines: string[] = [];
+
+  await runCli(
+    [
+      "docs",
+      "export",
+      "openapi.json",
+      "--format",
+      "yaml",
+      "--pretty",
+      `--config=${configPath}`,
+    ],
+    { output: (line) => lines.push(line) }
+  );
+
+  expect(JSON.parse(lines[0] ?? "{}")).toEqual({
+    flags: { config: configPath, format: "yaml", pretty: "true" },
+    functions: ["http", "docs-page"],
+    name: "plugin-cli",
+    positional: ["openapi.json"],
+  });
+});
+
+test("a Plugin command rejects an unknown flag with a suggestion", async () => {
+  const directory = tempPath(`voke-plugin-cli-${crypto.randomUUID()}`);
+  const configPath = await writePluginProject(directory);
+
+  await expect(
+    runCli(["docs", "export", "--formt", "json", "--config", configPath])
+  ).rejects.toThrow(
+    'Unknown flag --formt for "docs export". Did you mean --format?\nUsage: voke docs export [file] [--format json] [--pretty]'
+  );
+});
+
+test("Plugin help lists its commands, and command help lists its flags", async () => {
+  const directory = tempPath(`voke-plugin-cli-${crypto.randomUUID()}`);
+  const configPath = await writePluginProject(directory);
+  const lines: string[] = [];
+  const output = (line: string) => lines.push(line);
+
+  await runCli(["docs", "--config", configPath], { output });
+  await runCli(["docs", "--help", "--config", configPath], { output });
+  await runCli(["docs", "export", "--help", "--config", configPath], {
+    output,
+  });
+
+  const pluginHelp = [
+    "Usage: voke docs <command> [options]",
+    "",
+    "API documentation.",
+    "",
+    "Commands:",
+    "  voke docs export  Write the API description.",
+    "",
+    "Run voke docs <command> --help for its flags.",
+  ].join("\n");
+
+  expect(lines).toEqual([
+    pluginHelp,
+    pluginHelp,
+    [
+      "Usage: voke docs export [file] [--format json] [--pretty]",
+      "",
+      "Write the API description.",
+      "",
+      "Flags:",
+      "  --format <value>  Output format",
+      "  --pretty          Indent the output",
+      "  --config <value>  Config file. Default: voke.config.ts",
+    ].join("\n"),
+  ]);
+});
+
+test("voke --help lists Plugin commands when ./voke.config.ts loads", async () => {
+  const directory = tempPath(`voke-plugin-cli-${crypto.randomUUID()}`);
+  await writePluginProject(directory);
+  const lines: string[] = [];
+  const previousPwd = process.env.PWD;
+
+  try {
+    process.env.PWD = directory;
+    await runCli(["--help"], { output: (line) => lines.push(line) });
+  } finally {
+    process.env.PWD = previousPwd;
+  }
+
+  expect(lines[0]).toContain(
+    "Plugin commands:\n  voke docs export  Write the API description."
+  );
+});
+
+test("voke --help still lists built-in commands when the config fails to load", async () => {
+  const directory = tempPath(`voke-plugin-cli-${crypto.randomUUID()}`);
+  await Bun.write(
+    `${directory}/voke.config.ts`,
+    "throw new Error('broken');\n"
+  );
+  const lines: string[] = [];
+  const previousPwd = process.env.PWD;
+
+  try {
+    process.env.PWD = directory;
+    await runCli(["--help"], { output: (line) => lines.push(line) });
+  } finally {
+    process.env.PWD = previousPwd;
+  }
+
+  expect(lines[0]).toContain("voke synth");
+  expect(lines[0]).not.toContain("Plugin commands:");
+});
+
+test("an unknown command with a config but no matching Plugin keeps the usage error", async () => {
+  const directory = tempPath(`voke-plugin-cli-${crypto.randomUUID()}`);
+  const configPath = await writePluginProject(directory);
+
+  await expect(runCli(["nope", "--config", configPath])).rejects.toThrow(
+    "Unknown command: nope"
+  );
+  await expect(
+    runCli(["docs", "import", "--config", configPath])
+  ).rejects.toThrow("Unknown command: docs import");
+});
+
+test("the reserved Plugin names are the built-in command names and help", () => {
+  expect([...reservedPluginCommandNames].toSorted()).toEqual(
+    [...Object.keys(commandSpecs), "help"].toSorted()
   );
 });
 

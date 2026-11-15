@@ -11,6 +11,8 @@ import type {
   VokeModelRecord,
 } from "./model";
 import { isNonNegativeInteger, positiveIntegerIssue } from "./numbers";
+import { definePlugins, mergePluginContributions } from "./plugin";
+import type { VokePlugin } from "./plugin";
 import type { VokeProvider } from "./provider";
 import { defineRemoteConfig } from "./remote";
 import type { VokeRemoteConfig, VokeRemoteConfigInput } from "./remote";
@@ -27,6 +29,8 @@ export interface VokeConfig {
   dev: VokeDevConfig;
   /** Environment variables set on every deployed Function. */
   environment: Record<string, string>;
+  /** Plugins in declaration order; the first one is the outermost Function Wrap. Empty when none. */
+  plugins: VokePlugin[];
   provider?: VokeProvider;
   remotes?: Record<string, VokeRemoteConfig>;
   /** Infrastructure resources (queues, tables, buckets, ...) the project declares. */
@@ -103,6 +107,8 @@ export interface VokeConfigInput {
   build?: Partial<VokeBuildConfig>;
   cloudFormation?: Partial<VokeCloudFormationConfig>;
   dev?: Partial<VokeDevConfig>;
+  /** Plugins that extend the project at run time and deploy time. */
+  plugins?: readonly VokePlugin[];
   provider?: VokeProvider;
   remotes?: Record<string, VokeRemoteConfig | VokeRemoteConfigInput>;
   runtime?: Partial<VokeRuntimeConfig>;
@@ -332,6 +338,7 @@ export const defineConfig = (input: VokeConfigInput): VokeConfig => {
 
   const stage = input.stage ?? readEnv("VOKE_STAGE") ?? "local";
   const remotes = defineRemotesConfig(input, stage);
+  const plugins = definePlugins(input.plugins);
 
   return {
     api: defineApiConfig(input),
@@ -339,12 +346,17 @@ export const defineConfig = (input: VokeConfigInput): VokeConfig => {
     cloudFormation: defineCloudFormationConfig(input),
     dev: defineDevConfig(input),
     entrypoint: input.entrypoint ?? "./src/index.ts",
-    environment: { ...input.environment },
+    environment: mergePluginContributions(
+      "environment",
+      input.environment,
+      plugins
+    ),
     name: input.name,
+    plugins,
     ...(input.provider === undefined ? {} : { provider: input.provider }),
     region: input.region ?? readEnv("AWS_REGION") ?? "us-east-1",
     ...(Object.keys(remotes).length > 0 ? { remotes } : {}),
-    resources: { ...input.resources },
+    resources: mergePluginContributions("resources", input.resources, plugins),
     runtime: defineRuntimeConfig(input),
     stage,
   };

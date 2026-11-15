@@ -53,6 +53,8 @@ Invalid CLI usage: Unknown flag --stag for "synth". Did you mean --stage?
 Usage: voke synth [entrypoint] [out] [--config voke.config.ts] [--name api] [--stage local] [--region us-east-1]
 ```
 
+A [Plugin](/docs/guides/plugins) can add commands, run as `voke <plugin> <command>`. When `./voke.config.ts` loads, `voke --help` lists them under "Plugin commands:"; `voke <plugin>` lists one Plugin's commands, and `voke <plugin> <command> --help` prints a command's usage and flags. Every Plugin command accepts `--config`. Built-in commands always win, so no Plugin command can replace one.
+
 Commands that read the project accept `--config`, `--entrypoint`, `--name`, `--region` and `--stage`. When `voke.config.ts` does not exist and you do not pass `--config`, Voke builds a config from these flags; the name falls back to the `package.json` name, then `api`. The commands that need a Provider (`synth`, `build`, `deploy`, `remove`, `local`) fail with an example `provider: aws()` line when the config has none. See [Config](/docs/reference/config) for every setting.
 
 ## build

@@ -37,7 +37,7 @@ The roadmap below should extend this core without turning Voke into YAML Serverl
 - Keep `voke.config.ts` as project metadata and infrastructure config, not the place where handlers are composed.
 - Make local tests exercise the same normalization, validation, auth, and adapter paths as deployed runtime.
 - Keep AWS-specific power in domain subpaths when it would bloat the root package.
-- Favor built-in boring defaults over plugin ecosystems for critical runtime behavior.
+- Favor built-in boring defaults for critical runtime behavior; integrations extend Voke through the typed Plugin contract (ADR 0015) instead of a plugin ecosystem.
 - Treat docs, examples, and migration guidance as part of the feature.
 
 ## Phase 1: Stage-Aware Config, Parameters, and Secrets
@@ -124,7 +124,7 @@ Deliverables:
 - Add a typed error response convention that maps known Voke errors, validation errors, and user-thrown HTTP errors to stable responses.
 - Add a request/response interceptor API scoped to HTTP Functions, with explicit ordering and typed context.
 - Add route-level and Function-level defaults for response serialization.
-- Add OpenAPI export from route contracts after request/response shape metadata is complete.
+- Add OpenAPI export from route contracts after request/response shape metadata is complete, as the first Plugin (`.factory/plans/020-openapi-and-scalar-plugin.md`).
 
 Acceptance tests:
 
@@ -351,7 +351,7 @@ Follow-ups:
 
 ## Explicit Non-Goals
 
-- Do not introduce a broad plugin API before first-party runtime behavior is stable.
+- Plugins extend Voke through the typed Plugin contract (ADR 0015); critical runtime behavior stays first-party.
 - Do not move Function composition into `voke.config.ts`.
 - Do not make Pulumi, Terraform, CDK, or Serverless Framework a required runtime dependency.
 - Do not expose every AWS knob on the root package.

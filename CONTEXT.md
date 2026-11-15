@@ -224,6 +224,22 @@ _Avoid_: Resource declaration, CloudFormation secret, environment variable bindi
 The app-facing name a **Function** uses to read a **Runtime Variable** from runtime context.
 _Avoid_: AWS secret name, parameter path, resource key
 
+**Plugin**:
+A named unit declared in `voke.config.ts` that extends a **Voke Project** at run time and at deploy time without being a **Provider**.
+_Avoid_: Middleware, extension, Provider plugin
+
+**Function Wrap**:
+A **Plugin** hook that runs around every handler call of an activated **Function Registry**: invokable, route, Event Source and **Request Authorizer Function** handlers alike.
+_Avoid_: Middleware, interceptor, decorator
+
+**Plugin Contribution**:
+Static deploy-time data a **Plugin** adds to the project: resources, environment variables, **Provider Extension Records** and **Plugin Functions**.
+_Avoid_: Plugin config, raw template patch
+
+**Plugin Function**:
+A route-backed **Function** contributed by a **Plugin**, keyed `<plugin name>-<function name>` and deployed like the project's own.
+_Avoid_: Plugin route, internal endpoint
+
 ## Relationships
 
 - A **Voke Project** has exactly one `voke.config.ts` as its project source of truth.
@@ -348,8 +364,8 @@ _Avoid_: AWS secret name, parameter path, resource key
 - Every deployable **Function** kind can declare **Runtime Variables**.
 - **Runtime Variables** are provider implementation dependencies, not part of a **Function Contract** or **Function Contract Artifact**.
 - Voke owns provider fetching for **Runtime Variables** in the common authoring path.
-- **Runtime Variables** can be supplied by provider plugins, with AWS Secrets Manager and SSM Parameter Store as first-party providers.
-- **Runtime Variable** provider plugins are registered at the runtime or test boundary.
+- **Runtime Variables** can be supplied by Runtime Variable providers, with AWS Secrets Manager and SSM Parameter Store as first-party providers.
+- Runtime Variable providers are registered at the runtime or test boundary.
 - Advanced **Runtime Variable** loader overrides are configured at the runtime or test boundary, not on individual **Runtime Variable** declarations.
 - The **Dev Function Summary** does not list **Runtime Variables**.
 - An **HTTP API** can have an **Authorizer Registry**.
@@ -404,6 +420,12 @@ _Avoid_: AWS secret name, parameter path, resource key
 - Deployed invocations of a **Durable Function** always go through the **Provider**, which starts a **Durable Execution**; local invocations run it in-process.
 - A caller can name a **Durable Execution** with `executionName`, which makes starting it idempotent.
 - Durable Functions are the supported orchestration model; Step Functions state machines are raw CloudFormation resources.
+- A **Plugin** is declared only in `voke.config.ts`, never on a **Gateway**.
+- **Function Wraps** nest in `plugins` order: the first **Plugin** is the outermost.
+- A **Function Wrap** applies only to **Functions** of a **Function Registry** activated with a config that declares the **Plugin**.
+- **Plugin Functions** are route-backed and sit outside the typed **Function Registry**; a **Gateway** serves them and the **Provider** deploys them.
+- A **Plugin** cannot change a **Function Contract** or the input a handler receives.
+- A **Plugin**'s provider-specific contributions are **Provider Extension Records** that the configured **Provider** validates and interprets.
 
 ## Flagged ambiguities
 

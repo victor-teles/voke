@@ -58,8 +58,9 @@ The core package: Functions, the Gateway, the config, and the error classes. It 
 | `VokeError`, `VokeConfigError`, `VokeModelError`, `VokeDeployError`, `VokeResourceBindingError`, `VokeRuntimeVariableError`, `InvokeError` | Error classes. See [Errors](/docs/reference/errors).                                                                              |
 | `createVariableSource`, `createVariableProvider`                                                                                           | Build provider-neutral Runtime Variable sources and providers.                                                                    |
 | `StandardSchemaV1`, `VokeConfig`, `VokeConfigInput`, `VokeProvider` (types)                                                                | Types for schemas, config and Providers.                                                                                          |
+| `VokePlugin`, `FunctionWrap`, `FunctionExecution`, `PluginContributions`, `PluginCommand` and the other `Plugin*` types                    | Write a [Plugin](/docs/guides/plugins).                                                                                           |
 
-`voke` also exports building blocks for Provider packages, such as `functionRegistryEntries`, `createHandlerExportName`, `runRequestAuthorizer`, `readStandardResult` and `formatValidationIssue`. Application code does not need them.
+`voke` also exports building blocks for Provider packages, such as `functionRegistryEntries`, `projectFunctionEntries`, `createHandlerExportName`, `runRequestAuthorizer`, `readStandardResult` and `formatValidationIssue`. Application code does not need them.
 
 Learn it in [Functions](/docs/guides/functions), [HTTP routes](/docs/guides/http-routes) and [Concepts](/docs/concepts).
 
@@ -80,6 +81,7 @@ The AWS Provider and the AWS-specific authoring helpers.
 | `createAuthorizers`, `jwtAuthorizer`, `lambdaAuthorizer`, `requestAuthorizer`    | API Gateway authorizers.                                                                              |
 | `bindResource`, `createAwsClientConfig`, `createResourceBindingName`, `toEnvKey` | Read resource bindings and configure AWS SDK clients at runtime.                                      |
 | `createLambdaHandlers`, `createAwsLambdaInvokeTransport`                         | Lambda handlers for the generated entry, and the Lambda Invoke transport for `functions.invoke(...)`. |
+| `awsPolicy`                                                                      | IAM statements a [Plugin](/docs/guides/plugins) adds to every Function role.                          |
 
 Learn it in [Deploy](/docs/guides/deploy), [SQS events](/docs/guides/sqs-events), [SNS events](/docs/guides/sns-events), [EventBridge events](/docs/guides/eventbridge-events), [S3 events](/docs/guides/s3-events), [Scheduled Functions](/docs/guides/scheduled-functions), [Durable Functions](/docs/guides/durable-functions), [Runtime Variables](/docs/guides/runtime-variables) and [Authorizers](/docs/guides/authorizers). See [Config](/docs/reference/config#aws-provider-options) for the `aws()` options.
 

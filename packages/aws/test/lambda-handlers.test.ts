@@ -3,6 +3,7 @@ import { expect, mock, test } from "bun:test";
 import {
   createFunctions,
   createVariableSource,
+  defineConfig,
   fn,
   http,
   InvokeError,
@@ -10,8 +11,9 @@ import {
   voke,
   VokeConfigError,
 } from "voke";
-import type { StandardSchemaV1 } from "voke";
+import type { StandardSchemaV1, VokePlugin } from "voke";
 
+import { sqsQueue } from "../src/cloudformation";
 import {
   aws,
   createAuthorizers,
@@ -282,6 +284,115 @@ test("requires a Gateway export for route-backed Functions", () => {
   expect(() => createLambdaHandlers({ functions })).toThrow(VokeConfigError);
   expect(() => createLambdaHandlers({ functions })).toThrow(
     'Function "http" serves HTTP routes, so the project entrypoint must export a Gateway'
+  );
+});
+
+const timingPlugin = (calls: string[]): VokePlugin => ({
+  contributions: {
+    functions: {
+      ping: http({
+        routes: [
+          route.get("/plugin-ping", { handler: () => ({ pong: true }) }),
+        ],
+      }),
+    },
+  },
+  name: "timing",
+  runtime: {
+    setup: () => ({
+      wrap: async (execution, next) => {
+        calls.push(`${execution.kind}:${execution.functionKey}`);
+
+        return await next();
+      },
+    }),
+  },
+});
+
+const createRegistryOnlyProject = () =>
+  createFunctions({
+    "process-order": sqs({
+      handler: (batch) => batch.ok(),
+      message: schema<{ id: string }>(),
+      queue: "ordersQueue",
+    }),
+  });
+
+test("a registry-only project with a config runs Plugin wraps and serves Plugin routes", async () => {
+  const calls: string[] = [];
+  const handlers = createLambdaHandlers(
+    { functions: createRegistryOnlyProject() },
+    {
+      config: {
+        name: "registry-plugins",
+        plugins: [timingPlugin(calls)],
+        provider: aws(),
+        resources: { ordersQueue: sqsQueue() },
+      },
+    }
+  );
+
+  expect(Object.keys(handlers).toSorted()).toEqual([
+    "processOrder",
+    "timingPing",
+  ]);
+  await expect(
+    handlers.processOrder?.({ Records: [sqsRecord("ok", '{"id":"ord_1"}')] })
+  ).resolves.toEqual({ batchItemFailures: [] });
+
+  const response = (await handlers.timingPing?.(
+    httpEvent("GET", "/plugin-ping")
+  )) as { body: string; statusCode: number };
+
+  expect(response.statusCode).toBe(200);
+  expect(JSON.parse(response.body)).toEqual({ data: { pong: true } });
+  expect(calls).toEqual(["event:process-order", "route:timing-ping"]);
+});
+
+test("a Gateway project serves Plugin routes from its own Gateway", async () => {
+  const calls: string[] = [];
+  const config = defineConfig({
+    name: "gateway-plugins",
+    plugins: [timingPlugin(calls)],
+    provider: aws(),
+  });
+  const gateway = voke(
+    createFunctions({
+      http: http({ routes: [route.get("/", { handler: () => "home" })] }),
+    }),
+    { config }
+  );
+  const handlers = createLambdaHandlers({ default: gateway }, { config });
+
+  const response = (await handlers.timingPing?.(
+    httpEvent("GET", "/plugin-ping")
+  )) as { statusCode: number };
+
+  expect(response.statusCode).toBe(200);
+  expect(calls).toEqual(["route:timing-ping"]);
+});
+
+test("a Gateway whose Plugins differ from the passed config is rejected", () => {
+  const gateway = voke(
+    createFunctions({
+      http: http({ routes: [route.get("/", { handler: () => "home" })] }),
+    }),
+    { config: { name: "stale-gateway", provider: aws() } }
+  );
+
+  expect(() =>
+    createLambdaHandlers(
+      { default: gateway },
+      {
+        config: {
+          name: "stale-gateway",
+          plugins: [timingPlugin([])],
+          provider: aws(),
+        },
+      }
+    )
+  ).toThrow(
+    "The Gateway was created with a different config than voke.config.ts; pass it: voke(functions, { config })"
   );
 });
 

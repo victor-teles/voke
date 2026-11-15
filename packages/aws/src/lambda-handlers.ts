@@ -1,14 +1,20 @@
 import {
   activateFunctionRegistry,
   createHandlerExportName,
+  defineConfig,
   functionRegistryEntries,
+  projectFunctionEntries,
   runRequestAuthorizer,
+  voke,
   VokeConfigError,
 } from "voke";
 import type {
   AnyFunctionDefinition,
   FunctionRegistry,
   RequestAuthorizerFunctionDefinition,
+  VokeConfig,
+  VokeConfigInput,
+  VokePlugin,
 } from "voke";
 
 import { createDurableLambdaHandler, isDurableFunction } from "./durable";
@@ -30,6 +36,15 @@ export interface LambdaProjectModule {
   functions?: unknown;
 }
 
+export interface LambdaHandlersOptions {
+  /**
+   * The project config, as `voke build` imports it from `voke.config.ts`. A Function Registry
+   * export is then composed into a Gateway with it, so its Plugins apply; a Gateway export must
+   * have been created with the same Plugins.
+   */
+  config?: VokeConfig | VokeConfigInput;
+}
+
 export type LambdaHandler = (
   event: unknown,
   context?: unknown
@@ -49,8 +64,15 @@ interface HttpApiAuthorizerEvent {
 
 interface GatewayLike {
   app: HonoLikeApp;
-  config: unknown;
+  config: { readonly plugins?: readonly VokePlugin[] };
   functions: FunctionRegistry;
+}
+
+interface ResolvedProject {
+  /** Every Function to export a handler for: the project's, then the Plugin-contributed ones. */
+  entries: [string, AnyFunctionDefinition][];
+  functions: FunctionRegistry;
+  http?: LambdaHandler;
 }
 
 const missingExportMessage =
@@ -119,20 +141,40 @@ const createAuthorizerHandler =
     }
   };
 
-const resolveProject = (
-  project: LambdaProjectModule
-): { functions: FunctionRegistry; http?: LambdaHandler } => {
-  if (isGateway(project.default)) {
-    const handle = createAwsLambdaHandler(project.default.app);
+const pluginNames = (config: {
+  readonly plugins?: readonly VokePlugin[];
+}): string => JSON.stringify((config.plugins ?? []).map(({ name }) => name));
 
-    return {
-      functions: project.default.functions,
-      http: async (event, context) =>
-        await handle(
-          event as AwsLambdaHttpApiV2Event,
-          context as AwsLambdaContext
-        ),
-    };
+const resolveGateway = (gateway: GatewayLike): ResolvedProject => {
+  const handle = createAwsLambdaHandler(gateway.app);
+
+  return {
+    entries: projectFunctionEntries(gateway.functions, gateway.config),
+    functions: gateway.functions,
+    http: async (event, context) =>
+      await handle(
+        event as AwsLambdaHttpApiV2Event,
+        context as AwsLambdaContext
+      ),
+  };
+};
+
+const resolveProject = (
+  project: LambdaProjectModule,
+  options: LambdaHandlersOptions
+): ResolvedProject => {
+  if (isGateway(project.default)) {
+    if (
+      options.config !== undefined &&
+      pluginNames(project.default.config) !==
+        pluginNames(defineConfig(options.config))
+    ) {
+      throw new VokeConfigError(
+        "The Gateway was created with a different config than voke.config.ts; pass it: voke(functions, { config })"
+      );
+    }
+
+    return resolveGateway(project.default);
   }
 
   if (
@@ -141,13 +183,18 @@ const resolveProject = (
   ) {
     const functions = project.functions as FunctionRegistry;
 
+    if (options.config !== undefined) {
+      // One path for Plugins, Runtime Variable providers and every other config-driven behaviour.
+      return resolveGateway(voke(functions, { config: options.config }));
+    }
+
     // A registry without a Gateway is activated here so Runtime Variables load from AWS.
     activateFunctionRegistry(functions, "aws-lambda-handlers", {
       invoke: createAwsInvokeCapability(),
       variableProviders: [createAwsRuntimeVariableProvider()],
     });
 
-    return { functions };
+    return { entries: functionRegistryEntries(functions), functions };
   }
 
   throw new VokeConfigError(missingExportMessage);
@@ -240,12 +287,13 @@ const handlerFor = (
  * calls this; the deployed handler string is `index.<exportName>`.
  */
 export const createLambdaHandlers = (
-  project: LambdaProjectModule
+  project: LambdaProjectModule,
+  options: LambdaHandlersOptions = {}
 ): Record<string, LambdaHandler> => {
-  const { functions, http } = resolveProject(project);
+  const { entries, functions, http } = resolveProject(project, options);
 
   return Object.fromEntries(
-    functionRegistryEntries(functions).map(([key, definition]) => [
+    entries.map(([key, definition]) => [
       createHandlerExportName(key),
       handlerFor(key, definition, functions, http),
     ])

@@ -12,6 +12,7 @@ Use the root package for the common Function-first Gateway authoring path:
 - Function Contract helpers: `StandardSchemaV1`-compatible schemas accepted by `fn(...)`, `http(...)`, and the Route Builder
 - Route Builder support: `route.get(...)`, `.post(...)`, `.put(...)`, `.patch(...)`, `.delete(...)`, `.head(...)`, `.options(...)`, and `.route(...)`
 - Config: root exports `defineConfig`
+- Plugins ([ADR 0015](./adr/0015-plugin-contract.md)): the `VokePlugin` contract types (`PluginRuntimeCapability`, `PluginRuntimeInput`, `PluginRuntimeHooks`, `PluginContributions`, `PluginCliCapability`, `PluginCommand`, `PluginCommandInput`, `FunctionExecution`, `FunctionExecutionKind`, `FunctionWrap`) and the Provider building block `projectFunctionEntries`
 - Runtime Variable primitives (provider-neutral): `createVariableSource`, `createVariableProvider`
 - Error classes: `VokeConfigError`, `VokeModelError`, `VokeResourceBindingError`, `VokeRuntimeVariableError`, `InvokeError`
 - Provider building blocks: `functionRegistryEntries`, `createHandlerExportName`, `runRequestAuthorizer`, `readStandardResult` and `formatValidationIssue` (read a Standard Schema result), the `BuildPlan`, `ProviderBuildInput` and `RouteAuthContext` types, and the open Event Source types `EventSourceDefinition`, `EventFunctionHandler` and `VokeModelEventSource` that Provider packages build Event Source Functions with
@@ -43,6 +44,7 @@ Use `@voke/aws` for AWS-specific authoring and runtime binding helpers:
 - Generated Lambda handlers: `createLambdaHandlers` (used by the entry module `voke build` generates)
 - API Gateway authorizer helpers: `createAuthorizers`, `jwtAuthorizer`, `lambdaAuthorizer`, `requestAuthorizer`
 - Runtime binding helpers: `bindResource`, `createAwsClientConfig`
+- Plugin Provider Extension Record: `awsPolicy` (IAM statements a Plugin adds to every Function role)
 - Provider: `aws`
 
 CloudFormation resource builders live in `@voke/aws/cloudformation`, so runtime value loading and

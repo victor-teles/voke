@@ -37,6 +37,7 @@ import {
   resolveFunctionLambdaSettings,
 } from "./lambda-settings";
 import type { AwsLambdaSettings } from "./lambda-settings";
+import { pluginPolicyStatements } from "./plugin-records";
 import { createResourceBindingName } from "./resources";
 
 export type {
@@ -995,6 +996,8 @@ export const synthesizeCloudFormationFromModel = (
   }
 
   const durableAccess = durableInvokeAccess(model);
+  // Plugin awsPolicy() statements reach every Function role, like resource statements.
+  policyStatements.push(...pluginPolicyStatements(model));
 
   for (const [name, definition] of Object.entries(model.functions).toSorted(
     ([leftName], [rightName]) => {

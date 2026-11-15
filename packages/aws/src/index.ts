@@ -26,6 +26,7 @@ import {
 } from "./local";
 import { awsEmulator } from "./local-aws-emulator";
 import type { LocalProvider } from "./local-provider";
+import { pluginRecordIssues } from "./plugin-records";
 import { createAwsRuntimeVariableProvider } from "./runtime-variables";
 
 export {
@@ -65,6 +66,7 @@ export {
   type AwsLogRetentionDays,
 } from "./lambda-settings";
 export { parameter, secret } from "./runtime-variables";
+export { awsPolicy, type AwsPolicyStatement } from "./plugin-records";
 export type {
   AwsLambdaContext,
   AwsLambdaHttpApiV2Event,
@@ -73,6 +75,7 @@ export type {
 export {
   createLambdaHandlers,
   type LambdaHandler,
+  type LambdaHandlersOptions,
   type LambdaProjectModule,
 } from "./lambda-handlers";
 export {
@@ -215,6 +218,8 @@ const validateAwsModel = (model: VokeModel): void => {
       );
     }
   }
+
+  issues.push(...pluginRecordIssues(model));
 
   if (issues.length > 0) {
     throw VokeModelError.validation(issues);

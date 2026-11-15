@@ -244,6 +244,10 @@ const response = await gateway.request("/users", {
 
 See [Testing](/docs/guides/testing) for test setups.
 
+## Middleware
+
+`voke(functions, { middleware: [...] })` adds Hono middleware to every route of the Gateway, and `route.use(...)` adds it to the routes of one Route Builder. Middleware reaches HTTP requests only. To run code around every Function, including invokable and Event Source Functions, or to add a deployed route from a package, write a [Plugin](/docs/guides/plugins).
+
 ## Timeout limit on AWS
 
 API Gateway HTTP APIs wait at most 30 seconds for a Lambda integration. A Function with routes therefore cannot have a timeout above 30 seconds: the AWS Provider rejects a larger `synthesis.timeout` or `runtime.timeout` when it synthesizes the stack. Move longer work to an [SQS Function](/docs/guides/sqs-events) or an invokable Function called with `mode: "async"`.

@@ -12,10 +12,18 @@ import {
   assertRouteParamSchemas,
   assertUniqueFunctionRoutes,
   formatDevFunctionSummary,
+  functionRegistryEntries,
   InvokeError,
   mountFunctionRoutes,
 } from "./invoke";
-import type { FunctionRegistry, FunctionRegistryInput } from "./invoke";
+import type {
+  AnyFunctionDefinition,
+  FunctionRegistry,
+  FunctionRegistryInput,
+  PluginFunctionWrap,
+} from "./invoke";
+import { projectFunctionEntries } from "./plugin";
+import type { PluginRuntimeHooks } from "./plugin";
 import { mountDevFunctionEndpoints } from "./remote";
 import { error as responseError } from "./response";
 import { readEnv } from "./runtime-env";
@@ -156,12 +164,45 @@ const gatewayVariableProviders = (
   ...(variables?.providers ?? []),
 ];
 
+interface PluginSetup {
+  hooks: PluginRuntimeHooks;
+  plugin: string;
+}
+
+// Each Plugin's `runtime.setup` runs once per Gateway, with every Function the Gateway serves.
+const setupPlugins = (
+  config: VokeConfig,
+  functions: readonly (readonly [string, AnyFunctionDefinition])[]
+): PluginSetup[] => {
+  const dev = readEnv("VOKE_DEV_SUMMARY") === "1";
+  const setups: PluginSetup[] = [];
+
+  for (const plugin of config.plugins) {
+    const hooks = plugin.runtime?.setup({ config, dev, functions });
+
+    if (hooks !== undefined) {
+      setups.push({ hooks, plugin: plugin.name });
+    }
+  }
+
+  return setups;
+};
+
+const pluginWraps = (setups: readonly PluginSetup[]): PluginFunctionWrap[] =>
+  setups.flatMap(({ hooks, plugin }) =>
+    hooks.wrap === undefined ? [] : [{ plugin, wrap: hooks.wrap }]
+  );
+
 const createGatewayApp = (
   config: VokeConfig,
   functions: FunctionRegistry | FunctionRegistryInput,
   options: VokeOptions
 ): Hono<VokeEnv> => {
   const app = new Hono<VokeEnv>();
+  // The project's Functions, then the Plugin-contributed ones; `functions` itself is not changed.
+  const entries = projectFunctionEntries(functions, config);
+  const gatewayFunctions: FunctionRegistryInput = Object.fromEntries(entries);
+  const plugins = setupPlugins(config, entries);
 
   app.use("*", async (c, next) => {
     const env = (c.env ??= {});
@@ -173,6 +214,12 @@ const createGatewayApp = (
     app.use("*", corsMiddleware(config.api.cors));
   }
 
+  for (const { hooks } of plugins) {
+    for (const middleware of hooks.middleware ?? []) {
+      app.use("*", middleware);
+    }
+  }
+
   for (const middleware of options.middleware ?? []) {
     app.use("*", middleware);
   }
@@ -182,18 +229,34 @@ const createGatewayApp = (
   );
   app.onError(handleRouteError);
 
-  assertUniqueFunctionRoutes(functions);
-  assertRouteParamSchemas(functions);
-  activateFunctionRegistry(functions, activationKey(config), {
+  assertUniqueFunctionRoutes(gatewayFunctions);
+  assertRouteParamSchemas(gatewayFunctions);
+  const activation = {
     invoke: config.provider?.invoke,
     variableOverrides: options.variables?.overrides,
     variableProviders: gatewayVariableProviders(config, options.variables),
-  });
-  mountFunctionRoutes(app, functions, config.provider);
+    wraps: pluginWraps(plugins),
+  };
+  activateFunctionRegistry(functions, activationKey(config), activation);
+
+  const pluginFunctions = entries.slice(
+    functionRegistryEntries(functions).length
+  );
+
+  if (pluginFunctions.length > 0) {
+    // Plugin Functions are activated like the project's, from a record of their own.
+    activateFunctionRegistry(
+      Object.fromEntries(pluginFunctions),
+      activationKey(config),
+      activation
+    );
+  }
+
+  mountFunctionRoutes(app, gatewayFunctions, config.provider);
 
   if (readEnv("VOKE_DEV_SUMMARY") === "1") {
     mountDevFunctionEndpoints(app, { functions, project: config.name });
-    console.info(formatDevFunctionSummary(functions));
+    console.info(formatDevFunctionSummary(gatewayFunctions));
   }
 
   return app;

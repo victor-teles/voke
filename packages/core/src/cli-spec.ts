@@ -1,5 +1,6 @@
 import packageJson from "../package.json";
 import { VokeError } from "./errors";
+import type { CliFlagSpec, PluginCommand, VokePlugin } from "./plugin";
 
 export class CliUsageError extends VokeError {
   constructor(message: string) {
@@ -15,11 +16,7 @@ export const missingProviderMessage = (name: string): string =>
   import { aws } from "@voke/aws";
   export default defineConfig({ name: ${JSON.stringify(name)}, provider: aws() });`;
 
-export interface CliFlagSpec {
-  description: string;
-  /** Takes no value: `--yes` means true. */
-  boolean?: boolean;
-}
+export type { CliFlagSpec } from "./plugin";
 
 export interface CliCommandSpec {
   usage: string;
@@ -151,7 +148,33 @@ const helpFlags = new Set(["--help", "-h"]);
 export const isHelpRequest = (args: readonly string[]): boolean =>
   args.some((arg) => helpFlags.has(arg));
 
-export const formatHelp = (): string => {
+type CommandSpecs = Readonly<Record<string, CliCommandSpec>>;
+
+/** `voke <plugin> <command>` lines for every command of every Plugin that declares `cli`. */
+const pluginCommandLines = (plugins: readonly VokePlugin[]): string[] => {
+  const commands = plugins.flatMap((plugin) =>
+    Object.entries(plugin.cli?.commands ?? {}).map(
+      ([command, spec]) =>
+        [`${plugin.name} ${command}`, spec.description] as const
+    )
+  );
+
+  if (commands.length === 0) {
+    return [];
+  }
+
+  const width = Math.max(...commands.map(([name]) => name.length));
+
+  return [
+    "",
+    "Plugin commands:",
+    ...commands.map(
+      ([name, description]) => `  voke ${name.padEnd(width)}  ${description}`
+    ),
+  ];
+};
+
+export const formatHelp = (plugins: readonly VokePlugin[] = []): string => {
   const names = Object.keys(commandSpecs).toSorted();
   const width = Math.max(...names.map((name) => name.length));
 
@@ -165,13 +188,50 @@ export const formatHelp = (): string => {
       (name) =>
         `  voke ${name.padEnd(width)}  ${commandSpecs[name]?.description ?? ""}`
     ),
+    ...pluginCommandLines(plugins),
     "",
     "Run voke <command> --help for its flags. voke --version prints the version.",
   ].join("\n");
 };
 
-export const formatCommandHelp = (name: string): string => {
-  const spec = commandSpecs[name];
+/** `voke <plugin>` help: the Plugin's description and its commands. */
+export const formatPluginHelp = (plugin: VokePlugin): string => {
+  const commands = Object.entries(plugin.cli?.commands ?? {});
+  const width = Math.max(0, ...commands.map(([name]) => name.length));
+
+  return [
+    `Usage: voke ${plugin.name} <command> [options]`,
+    "",
+    plugin.cli?.description ?? "",
+    "",
+    "Commands:",
+    ...commands.map(
+      ([name, command]) =>
+        `  voke ${plugin.name} ${name.padEnd(width)}  ${command.description}`
+    ),
+    "",
+    `Run voke ${plugin.name} <command> --help for its flags.`,
+  ].join("\n");
+};
+
+/** The spec of `voke <plugin> <command>`, keyed `<plugin> <command>`; it always reads `--config`. */
+export const pluginCommandSpecs = (
+  plugin: VokePlugin,
+  command: string,
+  spec: PluginCommand
+): CommandSpecs => ({
+  [`${plugin.name} ${command}`]: {
+    description: spec.description,
+    flags: { ...spec.flags, config: configFlag },
+    usage: spec.usage,
+  },
+});
+
+export const formatCommandHelp = (
+  name: string,
+  specs: CommandSpecs = commandSpecs
+): string => {
+  const spec = specs[name];
 
   if (spec === undefined) {
     throw new CliUsageError(`Unknown command: ${name}`);
@@ -199,18 +259,23 @@ export const formatCommandHelp = (name: string): string => {
   ].join("\n");
 };
 
-export const cliUsageMessage = (message: string, command: string): string => {
-  const spec = commandSpecs[command];
+export const cliUsageMessage = (
+  message: string,
+  command: string,
+  specs: CommandSpecs = commandSpecs
+): string => {
+  const spec = specs[command];
 
   return spec === undefined
     ? `Invalid CLI usage: ${message}\nRun \`voke --help\` to see available commands.`
     : `Invalid CLI usage: ${message}\nUsage: ${spec.usage}`;
 };
 
-const isBooleanFlag = (command: string, flag: string): boolean =>
-  commandSpecs[command]?.flags[flag]?.boolean === true;
-
-export const parseFlags = (command: string, args: string[]): ParsedFlags => {
+export const parseFlags = (
+  command: string,
+  args: string[],
+  specs: CommandSpecs = commandSpecs
+): ParsedFlags => {
   const values: Record<string, string> = {};
   const positional: string[] = [];
 
@@ -238,13 +303,13 @@ export const parseFlags = (command: string, args: string[]): ParsedFlags => {
       continue;
     }
 
-    if (isBooleanFlag(command, key)) {
+    if (specs[command]?.flags[key]?.boolean === true) {
       values[key] = "true";
       continue;
     }
 
     const value = args[index + 1];
-    const isKnown = commandSpecs[command]?.flags[key] !== undefined;
+    const isKnown = specs[command]?.flags[key] !== undefined;
 
     if (value === undefined || value.startsWith("--")) {
       if (!isKnown) {
@@ -311,9 +376,10 @@ const closestFlag = (
 export const assertKnownFlags = (
   command: string,
   flags: ParsedFlags,
-  extra: readonly string[] = []
+  extra: readonly string[] = [],
+  specs: CommandSpecs = commandSpecs
 ): void => {
-  const known = [...Object.keys(commandSpecs[command]?.flags ?? {}), ...extra];
+  const known = [...Object.keys(specs[command]?.flags ?? {}), ...extra];
 
   for (const flag of Object.keys(flags.values)) {
     if (known.includes(flag)) {
