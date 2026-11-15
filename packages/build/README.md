@@ -8,4 +8,9 @@ Part of [Voke](https://github.com/victor-teles/voke). Every Voke package is rele
 bun add voke @voke/build
 ```
 
-See the [Voke README](https://github.com/victor-teles/voke#readme) for usage. Licensed under MIT.
+Documentation:
+
+- [Concepts](https://github.com/victor-teles/voke/blob/main/apps/docs/content/docs/concepts.mdx)
+- [Packages](https://github.com/victor-teles/voke/blob/main/apps/docs/content/docs/reference/packages.mdx)
+
+Licensed under MIT.

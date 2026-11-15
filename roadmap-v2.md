@@ -321,7 +321,7 @@ Acceptance tests:
 
 Docs and examples:
 
-- Update `docs/serverless-framework-migration.md`.
+- Update the migration guide (`apps/docs/content/docs/guides/serverless-migration.mdx`).
 - Add a migration playbook from Serverless Offline to Voke local dev.
 
 ## Phase 10: Workflow and Orchestration Integrations

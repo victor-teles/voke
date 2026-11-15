@@ -8,4 +8,9 @@ Part of [Voke](https://github.com/victor-teles/voke). Every Voke package is rele
 bun add voke @voke/testing
 ```
 
-See the [Voke README](https://github.com/victor-teles/voke#readme) for usage. Licensed under MIT.
+Documentation:
+
+- [Testing](https://github.com/victor-teles/voke/blob/main/apps/docs/content/docs/guides/testing.mdx)
+- [Packages reference](https://github.com/victor-teles/voke/blob/main/apps/docs/content/docs/reference/packages.mdx)
+
+Licensed under MIT.

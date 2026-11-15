@@ -1,43 +1,181 @@
 ---
-title: Config Reference
-description: The core fields in voke.config.ts and how they shape build, runtime, and CloudFormation output.
+title: Config
+description: Look up every setting in voke.config.ts, its type, its default, and the settings that were removed.
 ---
 
-`voke.config.ts` is the source-controlled configuration file that drives Voke project workflows.
+This page lists every setting you can put in `voke.config.ts`, the options of the AWS Provider, and the per-Function overrides. Use it to look up a type or a default.
 
-```ts
+The smallest config that can synthesize, build and deploy names the project and sets the **Provider**:
+
+```ts twoslash
+// voke.config.ts
+import { aws } from "@voke/aws";
 import { defineConfig } from "voke";
 
 export default defineConfig({
   name: "hello-api",
-  stage: "local",
-  region: "us-east-1",
-  entrypoint: "./src/index.ts",
+  provider: aws(),
 });
 ```
 
-## Core fields
+The file must use a default export. `defineConfig()` validates the input, applies the defaults below, and throws a `VokeConfigError` for an invalid or removed setting (see [Errors](/docs/reference/errors)). Each setting has exactly one spelling.
 
-Each setting has exactly one spelling.
+## Project
 
-| Field                | Purpose                                                                          |
-| -------------------- | -------------------------------------------------------------------------------- |
-| `name`               | Service name used for generated resource names and deployment commands.          |
-| `stage`              | Deployment stage, such as `local`, `dev`, or `prod`. Falls back to `VOKE_STAGE`. |
-| `region`             | AWS region for synthesized and deployed resources.                               |
-| `entrypoint`         | Project entrypoint; synth and build import it to discover the Functions.         |
-| `provider`           | The Provider, such as `aws()` from `@voke/aws`. Required for synth and build.    |
-| `resources`          | Infrastructure resources, such as `sqsQueue()` from `@voke/aws/cloudformation`.  |
-| `environment`        | Environment variables set on every deployed Function.                            |
-| `build`              | Bundle `entrypoints`, `outdir`, and `external` modules (AWS SDK by default).     |
-| `cloudFormation.out` | Where `voke synth` writes the template.                                          |
-| `runtime`            | `timeout` (seconds) and `memory` (MB) for every Function.                        |
-| `remotes`            | Remote Function Registry targets for local cross-project invocation.             |
-| `api.name`           | Name of the HTTP API. Defaults to `name`.                                        |
-| `api.cors`           | Browser cross-origin access: `true` or `{ origins, methods, headers, ... }`.     |
-| `dev`                | `voke dev` entrypoint and environment overrides.                                 |
+| Setting       | Type                     | Default                          | Description                                                                                                                  |
+| ------------- | ------------------------ | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `name`        | `string`                 | Required                         | Service name. Voke uses it for generated resource names; the deployed stack is `<name>-<stage>`.                             |
+| `stage`       | `string`                 | `VOKE_STAGE`, then `"local"`     | Stage, such as `local`, `dev` or `prod`. See the note on `local` below the table.                                            |
+| `region`      | `string`                 | `AWS_REGION`, then `"us-east-1"` | AWS region for synthesized and deployed resources.                                                                           |
+| `entrypoint`  | `string`                 | `"./src/index.ts"`               | Project entrypoint. `voke synth`, `voke build` and `voke deploy` import it to discover the Functions.                        |
+| `provider`    | `VokeProvider`           | None                             | The Provider, such as `aws()` from `@voke/aws`. Required by `voke synth`, `build`, `deploy`, `remove` and `local`.           |
+| `environment` | `Record<string, string>` | `{}`                             | Environment variables set on every Function, deployed and under `voke dev`.                                                  |
+| `resources`   | `Record<string, ...>`    | `{}`                             | Infrastructure resources, built with `sqsQueue()`, `dynamodbTable()` and the other builders from `@voke/aws/cloudformation`. |
+| `remotes`     | `Record<string, ...>`    | None                             | Remote Function Registry targets, read by `voke remote generate` and `voke dev`. See [Remotes](#remotes).                    |
 
-The config file must use a default export: `export default defineConfig({ ... })`.
+The stage `local` is reserved for local development: `voke deploy` refuses it unless `AWS_ENDPOINT_URL` or `VOKE_AWS_ENDPOINT_URL` points at a local endpoint. On the command line, `voke deploy` and `voke remove` pick the stage from `--stage`, then `VOKE_STAGE`, then `stage` in the config.
+
+## API
+
+| Setting                  | Type                | Default | Description                                                                                     |
+| ------------------------ | ------------------- | ------- | ----------------------------------------------------------------------------------------------- |
+| `api.name`               | `string`            | `name`  | Name of the HTTP API.                                                                           |
+| `api.cors`               | `boolean \| object` | Off     | Browser cross-origin access. `true` uses every default below; `false` or no value turns it off. |
+| `api.cors.origins`       | `string[]`          | `["*"]` | Allowed origins. Must not be empty.                                                             |
+| `api.cors.methods`       | `string[]`          | `["*"]` | Allowed methods.                                                                                |
+| `api.cors.headers`       | `string[]`          | `["*"]` | Allowed request headers.                                                                        |
+| `api.cors.credentials`   | `boolean`           | `false` | Allow credentials. With `true`, list explicit `origins`; `"*"` is an error.                     |
+| `api.cors.maxAgeSeconds` | `number`            | Not set | How long browsers cache a preflight answer, in seconds. A non-negative integer.                 |
+
+The same CORS value configures the local Gateway (`voke dev`, `gateway.request(...)`) and the deployed HTTP API.
+
+## Build
+
+| Setting             | Type       | Default          | Description                                                                                                                        |
+| ------------------- | ---------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `build.entrypoints` | `string[]` | `[entrypoint]`   | Bundle entrypoints recorded in the model. The AWS Provider does not read it: it bundles one generated module from `entrypoint`.    |
+| `build.outdir`      | `string`   | `"./dist"`       | Output directory of `voke build`.                                                                                                  |
+| `build.external`    | `string[]` | `["@aws-sdk/*"]` | Module patterns left out of the bundle. The default uses the AWS SDK that the Lambda runtime ships. Set `[]` to bundle everything. |
+
+Voke always builds an ESM bundle for the Lambda Node.js runtime and writes a `package.json` with `"type": "module"` next to it. With `aws()`, the bundle is `<outdir>/index.js`, with one Lambda handler per Function, and `<outdir>/voke-manifest.json` maps each Function to its handler.
+
+## CloudFormation
+
+| Setting              | Type     | Default                        | Description                             |
+| -------------------- | -------- | ------------------------------ | --------------------------------------- |
+| `cloudFormation.out` | `string` | `"./dist/cloudformation.json"` | Where `voke synth` writes the template. |
+
+## Dev
+
+| Setting           | Type                     | Default      | Description                                                                   |
+| ----------------- | ------------------------ | ------------ | ----------------------------------------------------------------------------- |
+| `dev.entrypoint`  | `string`                 | `entrypoint` | File that `voke dev` runs with `bun --hot`.                                   |
+| `dev.environment` | `Record<string, string>` | `{}`         | Extra environment variables for `voke dev` only. They override `environment`. |
+
+## Runtime
+
+| Setting           | Type     | Default | Description                                                          |
+| ----------------- | -------- | ------- | -------------------------------------------------------------------- |
+| `runtime.memory`  | `number` | `1024`  | Memory for every Function, in MB. A positive integer.                |
+| `runtime.timeout` | `number` | `15`    | Maximum run time for every Function, in seconds. A positive integer. |
+
+## Remotes
+
+Each key of `remotes` names one remote Voke Project. Voke selects the target for the current stage, and falls back to the `local` target.
+
+| Setting                                   | Type                                              | Default                        | Description                                                                                                                |
+| ----------------------------------------- | ------------------------------------------------- | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `remotes.<name>.targets`                  | `Record<string, string \| { origin, contract? }>` | Required                       | Origin per stage, such as `{ local: "http://localhost:3001" }`. No target for the stage and no `local` target is an error. |
+| `remotes.<name>.targets.<stage>.contract` | `string`                                          | `<origin>/_voke/contract`      | Contract metadata URL for that target.                                                                                     |
+| `remotes.<name>.contract`                 | `string`                                          | The target's `contract`        | Contract metadata URL for every target.                                                                                    |
+| `remotes.<name>.out`                      | `string`                                          | `"src/voke/remotes/<name>.ts"` | Module that `voke remote generate` writes.                                                                                 |
+
+```ts twoslash
+import { aws } from "@voke/aws";
+import { defineConfig } from "voke";
+
+export default defineConfig({
+  name: "wallet",
+  provider: aws(),
+  remotes: {
+    users: {
+      out: "./src/generated/users.remote.ts",
+      targets: {
+        dev: "https://users.example.com",
+        local: "http://localhost:3001",
+      },
+    },
+  },
+});
+```
+
+See [Remote Functions](/docs/guides/remote-functions) for the full workflow.
+
+## AWS Provider options
+
+`aws()` from `@voke/aws` takes two options, `lambda` and `local`:
+
+| Option                    | Type                           | Default         | Description                                                                                                  |
+| ------------------------- | ------------------------------ | --------------- | ------------------------------------------------------------------------------------------------------------ |
+| `lambda.runtime`          | `"nodejs22.x" \| "nodejs24.x"` | `"nodejs22.x"`  | Lambda Node.js runtime for every Function.                                                                   |
+| `lambda.architecture`     | `"arm64" \| "x86_64"`          | `"arm64"`       | Lambda architecture for every Function.                                                                      |
+| `lambda.logRetentionDays` | `number`                       | `14`            | How long each Function's log group keeps logs. One of the CloudWatch Logs values listed below.               |
+| `local`                   | `LocalProvider`                | `awsEmulator()` | The Local AWS Provider for `voke local` and `voke dev`: `awsEmulator()` or `floci()` from `@voke/aws/local`. |
+
+`logRetentionDays` accepts only these values: 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653. Another value is a `VokeConfigError` that suggests the nearest allowed values.
+
+```ts twoslash
+// voke.config.ts
+import { aws } from "@voke/aws";
+import { floci } from "@voke/aws/local";
+import { defineConfig } from "voke";
+
+export default defineConfig({
+  name: "orders",
+  provider: aws({
+    lambda: {
+      architecture: "arm64",
+      logRetentionDays: 30,
+      runtime: "nodejs24.x",
+    },
+    local: floci(),
+  }),
+});
+```
+
+See [Local AWS](/docs/guides/local-aws) for the AWS Emulator and Floci.
+
+## Per-Function settings
+
+`synthesis` on a Function overrides the project settings for that Function only. You set it where the Function is declared, in the project entrypoint.
+
+| Setting                 | Type                     | Default           | Description                                                                                               |
+| ----------------------- | ------------------------ | ----------------- | --------------------------------------------------------------------------------------------------------- |
+| `synthesis.timeout`     | `number`                 | `runtime.timeout` | Maximum run time for this Function, in seconds.                                                           |
+| `synthesis.memory`      | `number`                 | `runtime.memory`  | Memory for this Function, in MB.                                                                          |
+| `synthesis.environment` | `Record<string, string>` | None              | Environment variables for this Function. They override `environment`.                                     |
+| `synthesis.provider`    | `Record<string, ...>`    | None              | Provider-specific settings. For AWS, use `awsLambda({ runtime, architecture })` from `@voke/aws`.         |
+| `synthesis.entrypoint`  | `string`                 | `entrypoint`      | Bundle this Function from its own file.                                                                   |
+| `synthesis.handler`     | `string`                 | Generated         | Lambda handler string. Voke generates one handler per Function; set this only with a custom `entrypoint`. |
+
+```ts twoslash
+// src/index.ts
+import { awsLambda } from "@voke/aws";
+import { schema } from "@voke/schema";
+import { fn } from "voke";
+
+export const report = fn({
+  output: schema.object({ ok: schema.boolean() }),
+  synthesis: {
+    memory: 2048,
+    provider: awsLambda({ architecture: "x86_64" }),
+    timeout: 120,
+  },
+  handler: () => ({ ok: true }),
+});
+```
+
+The AWS Provider checks the Lambda limits when it builds the model: memory 128–10240 MB, timeout 1–900 seconds, and at most 30 seconds for a Function with HTTP routes (the API Gateway HTTP API integration limit). A value outside these limits is a `VokeModelError`.
 
 ## Defaults
 
@@ -53,7 +191,9 @@ A freshly deployed stack needs no tuning. These defaults apply unless you set th
 | Log retention          | 14 days                                   | `aws({ lambda: { logRetentionDays } })`                         |
 | SQS visibility timeout | 6 × the consumer's timeout + batch window | `sqsQueue({ visibilityTimeoutSeconds })`                        |
 
-```ts
+An explicit queue visibility timeout lower than a consumer's timeout is an error.
+
+```ts twoslash
 // voke.config.ts
 import { aws } from "@voke/aws";
 import { sqsQueue } from "@voke/aws/cloudformation";
@@ -61,79 +201,40 @@ import { defineConfig } from "voke";
 
 export default defineConfig({
   name: "orders",
-  provider: aws({ lambda: { runtime: "nodejs24.x", logRetentionDays: 30 } }),
-  runtime: { timeout: 20, memory: 512 },
-  api: { cors: { origins: ["https://app.example"], credentials: true } },
+  provider: aws({ lambda: { logRetentionDays: 30, runtime: "nodejs24.x" } }),
+  runtime: { memory: 512, timeout: 20 },
+  api: { cors: { credentials: true, origins: ["https://app.example"] } },
   resources: { jobsQueue: sqsQueue({ visibilityTimeoutSeconds: 180 }) },
 });
 ```
 
-Override one Function where it is declared, in the project entrypoint:
+## Removed settings
 
-```ts
-import { awsLambda } from "@voke/aws";
-import { fn } from "voke";
+These settings were removed. Voke does not ignore them: `defineConfig()` throws a `VokeConfigError` that names the replacement, because a silently ignored setting would change what gets deployed.
 
-export const report = fn({
-  synthesis: { timeout: 120, provider: awsLambda({ architecture: "x86_64" }) },
-  handler: () => ({ ok: true }),
-});
+| Setting                      | Message                                                                                                                                                                                                       |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `functions`                  | Functions are declared in the project entrypoint, not in voke.config.ts. Export them from the entrypoint: `export default voke(functions, { config })` or `export const functions = createFunctions({ ... })` |
+| `handler`                    | "handler" was removed; Voke generates one Lambda handler per Function from the project entrypoint                                                                                                             |
+| `cloudFormation.resources`   | "cloudFormation.resources" was removed; declare resources at the top level: `resources: { ... }`                                                                                                              |
+| `cloudFormation.environment` | "cloudFormation.environment" was removed; declare environment at the top level: `environment: { ... }`                                                                                                        |
+| `cloudFormation.handler`     | "cloudFormation.handler" was removed; Voke generates one Lambda handler per Function from the project entrypoint                                                                                              |
+| `api.function`               | "api.function" was removed; HTTP routes come from the route-backed Functions in the project entrypoint                                                                                                        |
+| `api.routes`                 | "api.routes" was removed; HTTP routes come from the route-backed Functions in the project entrypoint                                                                                                          |
+| `api.protocol`               | "api.protocol" was removed; HTTP routes come from the route-backed Functions in the project entrypoint                                                                                                        |
+| `local`                      | local AWS settings moved to the provider: `aws({ local: floci() })` from "@voke/aws" and "@voke/aws/local"                                                                                                    |
+| `runtime.lambda`             | "runtime.lambda" moved to the AWS provider; use `aws({ lambda: { runtime } })`                                                                                                                                |
+| `build.target`               | "build.target" was removed; Voke always builds an ESM bundle for the Lambda Node.js runtime                                                                                                                   |
+
+Voke reports every removed setting in one error, for example:
+
+```txt
+Invalid Voke config at functions: Functions are declared in the project entrypoint, not in voke.config.ts. Export them from the entrypoint: export default voke(functions, { config }) or export const functions = createFunctions({ ... }); local: local AWS settings moved to the provider: aws({ local: floci() }) from "@voke/aws" and "@voke/aws/local"
 ```
 
-Voke checks the AWS limits when it builds the model: memory 128–10240 MB, timeout 1–900 seconds,
-and at most 30 seconds for a Function with HTTP routes (the API Gateway HTTP API integration
-limit). An explicit queue visibility timeout lower than a consumer's timeout is an error.
+## Next steps
 
-`api.cors: true` allows any origin, method and header without credentials. With
-`credentials: true`, list explicit `origins`. The same value configures the local Gateway
-(`voke dev`, `gateway.request(...)`) and the deployed HTTP API.
-
-## Resource bindings
-
-CloudFormation resources can be bound into runtime code:
-
-```ts
-import { bindResource, createAwsClientConfig } from "@voke/aws";
-
-const usersTable = bindResource("usersTable", "name");
-const dynamoConfig = createAwsClientConfig();
-const tableName = usersTable.value();
-```
-
-## Remotes
-
-Use `remotes` in the consuming Voke Project to centralize runtime targets for generated Remote Function Registries:
-
-```ts
-import { defineConfig } from "voke";
-
-export default defineConfig({
-  name: "wallet",
-  remotes: {
-    users: {
-      targets: {
-        local: "http://localhost:3001",
-      },
-    },
-  },
-});
-```
-
-The selected target defaults contract metadata discovery to `<target>/_voke/contract`. Set `contract` only when metadata is published somewhere else:
-
-```ts
-export default defineConfig({
-  name: "wallet",
-  remotes: {
-    users: {
-      out: "./src/generated/users.remote.ts",
-      targets: {
-        local: {
-          origin: "http://localhost:3001",
-          contract: "http://localhost:3001/_voke/contract",
-        },
-      },
-    },
-  },
-});
-```
+- [CLI](/docs/reference/cli): the commands that read this file.
+- [Deploy](/docs/guides/deploy): deploy a stage and remove it.
+- [Resources](/docs/guides/resources): declare queues, tables and buckets.
+- [Errors](/docs/reference/errors): what a `VokeConfigError` contains.

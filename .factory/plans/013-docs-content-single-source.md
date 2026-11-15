@@ -373,3 +373,101 @@ Each page covers at least the listed points.
 - Reviewers should read Getting Started as a newcomer, check that no page hand-writes a schema,
   and spot-check three claims per page against the code.
 - Deferred: an API reference generated from types, a cookbook of recipes, and a changelog page.
+
+## Execution notes (2026-11-14)
+
+Done on branch `feature/docs-content-single-source` (PR #62), stacked on plan 012
+(`feature/docs-site-platform`, PR #61). Gates:
+
+- `bun run check`: 0 errors.
+- `bun run typecheck`: 19/19.
+- `bun run test`: 24/24 tasks. This builds the docs site, so every sample compiles in the real build;
+  docs tests 7 pass, with the sample policy at an empty legacy list, no broken links or anchors, and
+  `llms.txt` listing every page.
+- `bun run check:samples`: 68 samples, 0 failed.
+
+- **Structure:** `meta.json` matches Step 1, with 20 pages in three groups (Start, Guides, Reference).
+  `guides/gateway-testing` is removed and replaced by `guides/testing`; this Fumadocs version has no
+  redirects, so the old URL returns 404. New pages: `concepts`, `http-routes`, `schemas`,
+  `authorizers`, `sqs-events`, `runtime-variables`, `resources`, `remote-functions`, `testing`,
+  `troubleshooting`, `reference/errors`, `reference/packages`. The other pages were rewritten.
+- **How the pages were written:** five writers worked in parallel on disjoint pages from one brief.
+  Every claim had to be checked against the source, and every sample had to compile. Each writer
+  reported what it could not verify. The coordinator then:
+  - replaced their workarounds: Bun types for all samples instead of hidden `declare` lines; real
+    `zod`, `@aws-sdk/client-sqs` and `@aws-sdk/client-dynamodb` imports instead of stubs (docs
+    `devDependencies` only);
+  - fixed two pages the formatter broke;
+  - checked the pages in the browser at 1440 px and 390 px.
+- **Single source:**
+  - `README.md` is 96 lines: pitch, quickstart, what you get, documentation links by repository path,
+    "Try it", repository layout, contributor commands, license.
+  - `docs/e2e-testing.md` and `docs/serverless-framework-migration.md` are deleted after their
+    content moved. `roadmap-v2.md`'s reference is updated.
+  - `docs/error-conventions.md` keeps the contributor rules and points to `reference/errors`. Its
+    Runtime Variable example did not match the real message, so it is dropped.
+  - Each `packages/*/README.md` links to its guides.
+  - `public-surface.test.ts` now checks the vocabulary in the teaching pages, and checks for removed
+    names across every docs page.
+
+Tooling added (outside the listed scope, small):
+
+- `apps/docs/scripts/check-samples.ts` and the `check:samples` script compile `twoslash` samples
+  without a build (about 2 s), using the same Twoslash setup, so parallel writers did not collide in
+  `.next`.
+- `twoslash` is a docs `devDependency`.
+- Twoslash loads Bun types (`types: ["bun"]`) in both `source.config.ts` and the checker.
+
+Accuracy fixes the coordinator made after review:
+
+- "Try it from the repository" (Getting Started and README): `voke dev` in `examples/hello-api`
+  fails on a fresh clone with `AWS Emulator is not running`, because the example declares a table and
+  a queue and `aws()` defaults to the emulator. The pages now say `bun test` needs nothing, and
+  `voke dev` needs `voke local start` and `voke local bootstrap` first (Docker and the AWS CLI).
+- `reference/cli.mdx`: `voke dev --port 4000` does not move the server. The example now uses
+  `PORT=4000 voke dev` and explains `--port`/`--hostname`.
+
+Deviation:
+
+- `guides/serverless-migration.mdx` shows the migrator's real generated Function in a `txt` block.
+  That output hand-writes a `"~standard"` schema, so the grep criterion matches there as well as in
+  `guides/schemas.mdx`.
+
+Not run:
+
+- Commands that need AWS credentials or Docker (`voke deploy`, `voke remove`, `voke local`), as
+  described in the pages.
+- `bun run dev` servers were not left running.
+
+Product bugs found while documenting (not fixed here; the pages state the real behavior):
+
+1. Query and headers schemas fail through the Gateway: the schema receives `URLSearchParams` or
+   `Headers`, not a plain object, so `gateway.request` returns 400. They work through
+   `functions.route`. Without a schema, `request.query` is typed as a record but is a
+   `URLSearchParams` at runtime (`createRouteRequest`/`mountRoute` in `packages/core/src/invoke.ts`).
+   The pages avoid query and headers schemas.
+2. `voke dev --port` and `--hostname` only change `VOKE_DEV_ORIGIN`; the server listens on `PORT`.
+   The `--help` text "Port. Default: 3000" is misleading (`packages/core/src/dev.ts`).
+3. Generated Remote Function Registry clients are untyped for `@voke/schema` and Zod schemas.
+   Contract metadata reads JSON Schema only from a `jsonSchema` property, so the client's `invoke`
+   accepts any payload and returns `unknown` (`packages/core/src/remote.ts`).
+4. `functions.route` types `body` as `undefined` with `@voke/schema` builders, because their input
+   type is `unknown`.
+5. Every Function's IAM role gets access to every declared resource, and every Function gets every
+   `VOKE_RESOURCE_*` variable. Runtime Variable permissions are per Function. No `kms:Decrypt` is
+   granted.
+6. `dynamodbTable({ billingMode: "PROVISIONED" })` sets no `ProvisionedThroughput`, so the template is
+   probably invalid on deploy (not tested on AWS).
+7. `build.entrypoints` has no effect with `aws()`: the AWS build bundles one generated module from
+   `entrypoint`.
+8. Runtime Variable load errors name the source kind (`aws secretsManagerSecret
+"secretsManagerSecret"`), not the secret id, because the AWS sources set no `id`.
+9. `CliUsageError` is not exported from `voke`.
+10. The Serverless migrator drops an unsupported runtime (for example `nodejs20.x`) without a report
+    line, and its generated project has no `deploy` script.
+11. Locally, JWT authorizers are not evaluated at all: the route runs with an empty auth context. An
+    unknown authorizer name is only rejected by `voke synth`/`deploy`.
+12. `voke local stop` leaves `.voke/local/aws-emulator/<port>/`, so the AWS Emulator's "is it
+    running" check passes after a stop.
+13. The `defaultDevPort` comment in `packages/core/src/dev.ts` says `--port` changes the listening
+    port; it does not (see 2).

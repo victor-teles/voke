@@ -10,7 +10,8 @@
     "typecheck": "bun run generate && tsgo --project tsconfig.json --noEmit",
     "clean": "rm -rf .next .source",
     "test": "fumadocs-mdx && bun test",
-    "lint:links": "fumadocs-mdx && bun --preload ./scripts/mdx-preload.ts scripts/lint-links.ts"
+    "lint:links": "fumadocs-mdx && bun --preload ./scripts/mdx-preload.ts scripts/lint-links.ts",
+    "check:samples": "bun scripts/check-samples.ts"
   },
   "dependencies": {
     "@types/mdx": "^2.0.13",
@@ -23,6 +24,8 @@
     "react-dom": "^19.2.6"
   },
   "devDependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1053.0",
+    "@aws-sdk/client-sqs": "^3.1053.0",
     "@tailwindcss/postcss": "^4.3.0",
     "@types/node": "^25.9.1",
     "@types/react": "^19.2.15",
@@ -37,7 +40,9 @@
     "next-validate-link": "^1.6.7",
     "postcss": "^8.5.15",
     "tailwindcss": "^4.3.0",
+    "twoslash": "^0.3.9",
     "typescript": "^6.0.3",
-    "voke": "workspace:*"
+    "voke": "workspace:*",
+    "zod": "^4.4.3"
   }
 }

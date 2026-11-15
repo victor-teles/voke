@@ -1,0 +1,256 @@
+---
+title: HTTP routes
+description: Declare HTTP routes with http() and the Route Builder, validate request parts, shape responses, and call routes from tests.
+---
+
+After reading this page you can serve HTTP routes from a Function, validate what each request carries, return the response you want, and call the routes from tests.
+
+## Declare routes
+
+`http()` declares a Function that serves HTTP routes. You build each route with the **Route Builder**, `route`, from `voke`:
+
+```ts twoslash
+// @filename: voke.config.ts
+import { aws } from "@voke/aws";
+import { defineConfig } from "voke";
+
+export default defineConfig({ name: "users-api", provider: aws() });
+// @filename: src/index.ts
+// ---cut---
+import { schema } from "@voke/schema";
+import { createFunctions, http, route, voke } from "voke";
+import config from "../voke.config";
+
+const functions = createFunctions({
+  users: http({
+    routes: [
+      route.get("/users/:id", {
+        params: schema.object({ id: schema.string() }),
+        handler: (request) => ({ id: request.params.id, name: "Ada" }),
+      }),
+      route.post("/users", {
+        body: schema.object({ name: schema.string().min(1) }),
+        handler: (request) => ({ id: "usr_2", name: request.body.name }),
+      }),
+    ],
+  }),
+});
+
+export const gateway = voke(functions, { config });
+
+const response = await gateway.request("/users/usr_1");
+console.log(response.status, await response.json());
+// 200 { data: { id: "usr_1", name: "Ada" } }
+```
+
+`voke dev` serves these routes on `http://localhost:3000`. When you deploy, the AWS Provider creates an API Gateway HTTP API with one route per declaration, and every route of the `users` Function runs in the same Lambda.
+
+The Route Builder has one method per HTTP verb: `route.get`, `route.post`, `route.put`, `route.patch`, `route.delete`, `route.head` and `route.options`. `route.route(method, path, definition)` takes the verb as an argument. A `GET` or `HEAD` route cannot declare a `body` schema; the Route Builder throws when it does.
+
+Path parameters use the `:name` syntax. A method and path pair must be unique across all Functions in the registry, or `voke(...)` throws a `VokeConfigError`.
+
+## Read the request
+
+The handler receives a request object and the invoke context (see [Functions](/docs/guides/functions#the-handler-context)):
+
+| Field     | Content                                                                                   |
+| --------- | ----------------------------------------------------------------------------------------- |
+| `params`  | Path parameters. The output of the `params` schema when you declare one.                  |
+| `body`    | The output of the `body` schema. `undefined` when the route has no `body` schema.         |
+| `headers` | The request headers, as a `Headers` object.                                               |
+| `raw`     | The original `Request`. `request` is the same object.                                     |
+| `auth`    | The Route Auth Context set by an authorizer. See [Authorizers](/docs/guides/authorizers). |
+
+Voke reads the body only when the route declares a `body` schema. It parses the body as JSON when the `content-type` header contains `application/json`, and passes it as text otherwise. The schema then validates that value.
+
+When a `params` schema is a `@voke/schema` object, its keys must match the parameters in the path. `voke(...)` throws a `VokeConfigError` at startup when they differ.
+
+Read query string values and headers from the raw request:
+
+```ts twoslash
+import { createFunctions, http, route } from "voke";
+
+const functions = createFunctions({
+  search: http({
+    routes: [
+      route.get("/search", {
+        handler: (request) => {
+          const query = new URL(request.raw.url).searchParams;
+
+          return {
+            page: Number(query.get("page") ?? "1"),
+            requestId: request.headers.get("x-request-id"),
+            term: query.get("q") ?? "",
+          };
+        },
+      }),
+    ],
+  }),
+});
+```
+
+An `output` schema on a route validates the handler's return value before Voke serializes it. It does not apply when the handler returns a `Response`.
+
+## Return a response
+
+Voke turns the handler's return value into the HTTP response:
+
+| Handler returns | Response                                       |
+| --------------- | ---------------------------------------------- |
+| A value         | `200` with the JSON body `{ "data": <value> }` |
+| `undefined`     | `204` with no body                             |
+| A `Response`    | That response, unchanged                       |
+
+To set another status or an error body, return a response built with `@voke/http`:
+
+```ts twoslash
+import { created, error, noContent, ok } from "@voke/http";
+import { schema } from "@voke/schema";
+import { createFunctions, http, route } from "voke";
+
+const functions = createFunctions({
+  orders: http({
+    routes: [
+      route.post("/orders", {
+        body: schema.object({ sku: schema.string() }),
+        handler: (request) => created({ id: "ord_1", sku: request.body.sku }),
+      }),
+      route.get("/orders/:id", {
+        handler: (request) =>
+          request.params.id === "ord_1"
+            ? ok({ id: "ord_1" }, { headers: { "cache-control": "no-store" } })
+            : error("Order not found", {
+                code: "ORDER_NOT_FOUND",
+                status: 404,
+              }),
+      }),
+      route.delete("/orders/:id", {
+        handler: () => noContent(),
+      }),
+    ],
+  }),
+});
+```
+
+| Helper                     | Status                    | Body                                                      |
+| -------------------------- | ------------------------- | --------------------------------------------------------- |
+| `ok(data, init?)`          | `200`                     | `{ "data": data }`                                        |
+| `created(data, init?)`     | `201`                     | `{ "data": data }`                                        |
+| `noContent(init?)`         | `204`                     | none                                                      |
+| `error(message, options?)` | `options.status` or `400` | `{ "error": { "code", "details", "issues", "message" } }` |
+
+`init` is a standard `ResponseInit`, so you can set `status` and `headers`. `error` accepts `code`, `details` and `issues` in its options and leaves out the fields you do not set. The same helpers are available as `response.ok`, `response.created`, `response.noContent` and `response.error`.
+
+## Errors
+
+Voke answers some requests without running your handler, or after it fails:
+
+| Situation                                  | Status | Body                                                                                   |
+| ------------------------------------------ | ------ | -------------------------------------------------------------------------------------- |
+| No route matches the method and path       | `404`  | `{ "error": { "code": "NOT_FOUND", "message": "Route not found" } }`                   |
+| `params` or `body` fails its schema        | `400`  | `{ "error": { "message": "Invalid body", "issues": [...] } }`                          |
+| The return value fails the `output` schema | `500`  | `{ "error": { "message": "Invalid result", "issues": [...] } }`                        |
+| The handler throws                         | `500`  | `{ "error": { "code": "INTERNAL_SERVER_ERROR", "message": "Internal server error" } }` |
+
+Each issue has a `message` and a `path`. The path starts with the request part, for example `["body", "name"]`:
+
+```txt
+{
+  "error": {
+    "message": "Invalid body",
+    "issues": [
+      { "message": "Expected string length to be at least 1", "path": ["body", "name"] }
+    ]
+  }
+}
+```
+
+When a handler throws, Voke logs one JSON line with the error's name, message and stack, and the client gets the generic body above. The original message never reaches the client in a deployed stage. Under `voke dev` only, the body also carries it in `error.details.message`, so you can see it while you develop.
+
+## Allow browser requests with CORS
+
+Set `api.cors` in `voke.config.ts` to let browsers on other origins call the API:
+
+```ts twoslash
+// @filename: voke.config.ts
+// ---cut---
+import { aws } from "@voke/aws";
+import { defineConfig } from "voke";
+
+export default defineConfig({
+  name: "users-api",
+  provider: aws(),
+  api: {
+    cors: {
+      origins: ["https://app.example.com"],
+      methods: ["GET", "POST"],
+      headers: ["content-type", "authorization"],
+      credentials: true,
+      maxAgeSeconds: 600,
+    },
+  },
+});
+```
+
+`cors: true` allows every origin, method and header, without credentials. In the object form, fields you leave out default to `["*"]` for `origins`, `methods` and `headers`, and to `false` for `credentials`. With `credentials: true` you must list explicit origins. The same settings drive the local Gateway and the deployed HTTP API's CORS configuration, so a preflight request gets the same answer locally and on AWS. CORS is off by default.
+
+## Call routes from tests
+
+You can call a route in two ways.
+
+`functions.route(method, path, input)` calls the handler directly. The method and path must match a declared route. `input` accepts `params`, `body`, `query`, `headers` and `auth`, and the route's schemas validate them. It returns the handler's return value (after the `output` schema), not an HTTP response. It does not run authorizers or middleware.
+
+`gateway.request(path, init)` sends a real `Request` through the Gateway: routing, CORS, authorizers, validation, serialization and error handling all run. It returns a `Response`.
+
+```ts twoslash
+// @filename: voke.config.ts
+import { aws } from "@voke/aws";
+import { defineConfig } from "voke";
+
+export default defineConfig({ name: "users-api", provider: aws() });
+// @filename: src/index.ts
+// ---cut---
+import { schema } from "@voke/schema";
+import { createFunctions, http, route, voke } from "voke";
+import config from "../voke.config";
+
+const functions = createFunctions({
+  users: http({
+    routes: [
+      route.get("/users/:id", {
+        params: schema.object({ id: schema.string() }),
+        handler: (request) => ({ id: request.params.id, name: "Ada" }),
+      }),
+      route.post("/users", {
+        body: schema.object({ name: schema.string() }),
+        handler: (request) => ({ id: "usr_2", name: request.body.name }),
+      }),
+    ],
+  }),
+});
+
+const gateway = voke(functions, { config });
+
+const user = await functions.route("GET", "/users/:id", {
+  params: { id: "usr_1" },
+});
+
+const response = await gateway.request("/users", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ name: "Ada" }),
+});
+```
+
+See [Testing](/docs/guides/testing) for test setups.
+
+## Timeout limit on AWS
+
+API Gateway HTTP APIs wait at most 30 seconds for a Lambda integration. A Function with routes therefore cannot have a timeout above 30 seconds: the AWS Provider rejects a larger `synthesis.timeout` or `runtime.timeout` when it synthesizes the stack. Move longer work to an [SQS Function](/docs/guides/sqs-events) or an invokable Function called with `mode: "async"`.
+
+## Next steps
+
+- [Schemas and validation](/docs/guides/schemas)
+- [Authorizers](/docs/guides/authorizers)
+- [Testing](/docs/guides/testing)
+- [Configuration reference](/docs/reference/config)

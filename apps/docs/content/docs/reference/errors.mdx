@@ -1,0 +1,180 @@
+---
+title: Errors
+description: Identify a Voke error by its class and code, read its message, and know what HTTP clients receive when a route fails.
+---
+
+This page lists the errors Voke throws, when each one is thrown, and the error body the Gateway sends to HTTP clients. Use it to catch an error by class or `code`, and to read its message.
+
+```ts twoslash
+import { schema } from "@voke/schema";
+import { createFunctions, fn, InvokeError, voke } from "voke";
+
+const functions = createFunctions({
+  getUser: fn({
+    input: schema.object({ id: schema.string().min(1) }),
+    output: schema.object({ id: schema.string() }),
+    handler: (input) => ({ id: input.id }),
+  }),
+});
+
+voke(functions, { config: { name: "users" } });
+
+try {
+  await functions.invoke("getUser", { id: "" });
+} catch (error) {
+  if (error instanceof InvokeError && error.code === "INVALID_PAYLOAD") {
+    for (const issue of error.issues ?? []) {
+      console.log(issue.path, issue.message);
+      // ["id"] "Expected string length to be at least 1"
+    }
+  }
+}
+```
+
+## Framework errors
+
+Every framework error extends `VokeError`, which extends `Error`. A `VokeError` has:
+
+- `code`: a fixed string per class (below).
+- `issues`: a list of `{ path, message }` for validation errors; empty otherwise.
+- `cause`: the underlying error, when there is one.
+- `name`: the class name, such as `"VokeConfigError"`.
+
+All classes below are exported by `voke`:
+
+| Class                      | `code`                   | Thrown when                                                                                                                                                                                       |
+| -------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `VokeConfigError`          | `CONFIG_ERROR`           | `voke.config.ts` is missing, has no default export, has an invalid or removed setting, or the `aws()` options are invalid. Also for a missing `voke dev` entrypoint and a missing remote target.  |
+| `VokeModelError`           | `MODEL_ERROR`            | The project model is inconsistent (for example, a Function references a resource that is not declared), or a Function breaks a Provider limit (Lambda memory, timeout, the 30-second HTTP limit). |
+| `VokeDeployError`          | `DEPLOY_ERROR`           | A deploy or removal fails in the Provider: no valid AWS credentials, a failed stack or change set, or a bundle that cannot be packaged.                                                           |
+| `VokeResourceBindingError` | `RESOURCE_BINDING_ERROR` | A resource binding is read at runtime, but its environment variable is missing, for example `Missing AWS resource binding: VOKE_RESOURCE_USERS_TABLE_NAME`.                                       |
+| `VokeRuntimeVariableError` | `RUNTIME_VARIABLE_ERROR` | A Runtime Variable cannot be loaded or resolved, is not valid JSON, fails its schema, has no registered provider, or a provider returns a non-string value.                                       |
+| `VokeError`                | Any code                 | The base class. Voke throws it directly when `voke doctor` finds a failing check (`CONFIG_ERROR`) and when `voke create` cannot run `bun install` (`CREATE_ERROR`).                               |
+
+Catch the base class to handle every framework error, or a subclass to handle one kind:
+
+```ts twoslash
+import { defineConfig, VokeConfigError, VokeError } from "voke";
+
+try {
+  defineConfig({ name: "orders", runtime: { timeout: 0 } });
+} catch (error) {
+  if (error instanceof VokeConfigError) {
+    console.log(error.code); // "CONFIG_ERROR"
+    console.log(error.issues); // [{ path: "runtime.timeout", message: "expected a positive integer ..." }]
+  } else if (error instanceof VokeError) {
+    console.log(error.code);
+  }
+}
+```
+
+### Validation messages
+
+Config and model validation errors name the setting that failed and what Voke expected. When several settings fail, Voke lists all of them in one message, separated by `; `:
+
+```txt
+Invalid Voke config at <path>: <expectation>; received <value>
+Invalid Voke model at <path>: <expectation>
+```
+
+For example:
+
+```txt
+Invalid Voke config at runtime.timeout: expected a positive integer number of seconds; received 0
+```
+
+The same entries are in `error.issues`, one per failed setting.
+
+Runtime Variable errors name the Function and the Runtime Variable, and never include a loaded value:
+
+```txt
+Runtime variable "stripeKey" for Function "checkout" is not valid JSON.
+```
+
+## CLI errors
+
+`CliUsageError` extends `VokeError` with the code `CLI_USAGE_ERROR`. The CLI throws it for an unknown command, an unknown flag, a missing flag value, a missing Provider, a refused `voke deploy --stage local`, and a cancelled `voke remove`. It is not exported by `voke`; you see it as CLI output. The message gives the problem and the command's usage:
+
+```txt
+Invalid CLI usage: Missing value for --stage
+Usage: voke synth [entrypoint] [out] [--config voke.config.ts] [--name api] [--stage local] [--region us-east-1]
+```
+
+The CLI prints the message of any error to stderr and exits with code 1. See [CLI](/docs/reference/cli).
+
+`voke migrate serverless` does not throw for a Serverless feature it cannot convert. It lists the feature in the migration report with the manual step, for example:
+
+```txt
+Unsupported Serverless event kafka on function worker: kafka is not an automatic Voke migration target. Recreate the trigger, permissions, batching, and failure behavior manually before cutting over.
+```
+
+## Invoke errors
+
+`InvokeError` is exported by `voke`. `functions.invoke(...)`, `functions.route(...)` and Remote Function Registries throw it. It extends `Error` (not `VokeError`) and has:
+
+- `code`: one of the codes below.
+- `functionName`: the Function, or the route as `METHOD /path`, when known.
+- `issues`: Standard Schema issues (`{ message, path? }`) for `INVALID_PAYLOAD` and `INVALID_RESULT`.
+- `statusCode` and `requestId`: from the transport, for `TRANSPORT_STATUS_ERROR`.
+- `cause`: the underlying error, when there is one.
+
+| `code`                   | Thrown when                                                                                                       |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `INVALID_PAYLOAD`        | The input does not match the Function's input schema, or a route's `body`, `params`, `query` or `headers` schema. |
+| `INVALID_RESULT`         | The handler's result does not match the output schema, or an authorizer returns an invalid result or context.     |
+| `TIMEOUT`                | The call takes longer than the `timeoutMs` invoke option.                                                         |
+| `MISSING_FUNCTION`       | The Function does not exist in the registry, or the remote project answers 404.                                   |
+| `MISSING_TRANSPORT`      | A deployed Function invokes another one and no `InvokeTransport` is set.                                          |
+| `TRANSPORT_FAILED`       | The transport (Lambda Invoke or HTTP to a remote) throws or answers with an error status.                         |
+| `TRANSPORT_STATUS_ERROR` | The invoked Lambda returns a function error or a status of 400 or more.                                           |
+| `LOCAL_FUNCTION_FAILED`  | An async local invocation (`mode: "async"`) fails. Voke passes it to `onAsyncError`, or logs it.                  |
+
+The message names the Function and the failure, for example `Invalid payload for getUser: id: Expected string length to be at least 1`.
+
+## HTTP error responses
+
+When a route fails, the Gateway answers with this JSON body, locally and on AWS:
+
+```ts twoslash
+interface ErrorBody {
+  error: {
+    code?: string;
+    message: string;
+    issues?: { message: string; path?: PropertyKey[] }[];
+    details?: unknown;
+  };
+}
+```
+
+There are three cases:
+
+| Case                                                         | Status | Body                                                                                                |
+| ------------------------------------------------------------ | ------ | --------------------------------------------------------------------------------------------------- |
+| Invalid input (`InvokeError` with `INVALID_PAYLOAD`)         | 400    | `message` is `Invalid body`, `Invalid params`, `Invalid query` or `Invalid headers`, with `issues`. |
+| Invalid handler output (`InvokeError` with `INVALID_RESULT`) | 500    | `message` is `Invalid result`, with `issues`.                                                       |
+| Any other thrown error                                       | 500    | `code` is `INTERNAL_SERVER_ERROR` and `message` is `Internal server error`.                         |
+
+Each issue path starts with the part that failed:
+
+```txt
+400 {"error":{"issues":[{"message":"Required","path":["body","name"]}],"message":"Invalid body"}}
+500 {"error":{"issues":[{"message":"Expected string","path":["result","id"]}],"message":"Invalid result"}}
+500 {"error":{"code":"INTERNAL_SERVER_ERROR","message":"Internal server error"}}
+```
+
+<Callout type="warn">
+  For any other thrown error, the original message never reaches the client.
+  Voke logs the error once to `console.error` as one JSON line with `level`,
+  `message`, `name`, `stack`, and `code` when the error has one. Under `voke
+  dev` only, the response also carries `details.message`, so you can see the
+  cause locally. The stage does not turn this on.
+</Callout>
+
+For a failure the client should see, handle it in the handler and return the response you want with `error()` from `@voke/http`. Do not rely on a thrown message. See [HTTP routes](/docs/guides/http-routes).
+
+## Next steps
+
+- [Schemas](/docs/guides/schemas): the schemas that produce `issues`.
+- [HTTP routes](/docs/guides/http-routes): return your own error responses.
+- [Troubleshooting](/docs/guides/troubleshooting): fix common errors.
+- [Config](/docs/reference/config): the settings that `VokeConfigError` checks.

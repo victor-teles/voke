@@ -1,10 +1,12 @@
 # voke
 
-Voke is a TypeScript-first AWS Lambda framework. You describe work as Functions, collect them in a Function Registry, expose route-backed Functions through a Gateway, and use the Route Builder when a Function should also be an HTTP route.
+Voke is a TypeScript framework for AWS Lambda. You declare typed Functions in one entrypoint, run them locally as an API, test them without a server, and deploy them with one command.
+
+> Voke is not published yet, and the package names (`voke`, `@voke/*`) are not final. Until then, try it from this repository (see [Try it](#try-it)).
 
 ## Quickstart
 
-Three commands from nothing to a deployed API:
+Once Voke is published, three commands take you from nothing to a deployed API:
 
 ```bash
 voke create my-api      # writes the project and runs bun install
@@ -12,391 +14,83 @@ cd my-api
 bun run deploy          # deploys the dev stage to AWS and prints the API URL
 ```
 
-In between, `bun run dev` serves the API locally and `bun test` runs its test. `voke doctor` explains what is missing (Bun, config, project, AWS credentials). The packages are not published yet, and the published names (`voke`, `@voke/*`) are not final.
-
-### Manual setup
-
-Create `voke.config.ts` for project, build, and CloudFormation settings:
+A Voke project is a config file and an entrypoint:
 
 ```ts
-import { defineConfig } from "voke";
+// voke.config.ts
 import { aws } from "@voke/aws";
-import { dynamodbTable, sqsQueue } from "@voke/aws/cloudformation";
+import { defineConfig } from "voke";
 
-export default defineConfig({
-  name: "hello-api",
-  provider: aws(),
-  stage: "local",
-  region: "us-east-1",
-  entrypoint: "./src/index.ts",
-  resources: {
-    usersTable: dynamodbTable({ partitionKey: "id" }),
-    eventsQueue: sqsQueue(),
-  },
-});
+export default defineConfig({ name: "hello-api", provider: aws() });
 ```
 
-Then create Functions with explicit Function Contracts and mount them in a Gateway:
-
 ```ts
+// src/index.ts
+import { schema } from "@voke/schema";
 import { createFunctions, http, route, voke } from "voke";
+
 import config from "../voke.config";
 
 const functions = createFunctions({
   http: http({
     routes: [
-      route.get("/", {
-        handler: () => ({ message: "Hello from Voke" }),
-      }),
-      route.get("/health", {
-        handler: () => ({ ok: true, service: config.name }),
+      route.post("/users", {
+        body: schema.object({ name: schema.string() }),
+        handler: (request) => ({ greeting: `Hello, ${request.body.name}` }),
       }),
     ],
   }),
 });
 
-const gateway = voke(functions, { config });
-
-export default gateway;
+export default voke(functions, { config });
 ```
 
-The Provider comes from `voke.config.ts` (`provider: aws()`). The Gateway exposes `fetch` for Web-standard servers such as `Bun.serve` and `request` for tests. You never write Lambda handlers: `voke build` imports this entrypoint, finds every Function, and generates one Lambda handler per Function (`index.http` here). For local tests, call the Gateway directly:
+## What you get
 
-```ts
-const response = await gateway.request("/health");
+- **Typed Functions.** A Function has a Function Contract (input and output schemas). Call it with `functions.invoke(...)`, route HTTP to it with the Route Builder, and the types follow. `@voke/schema`, Zod and other Standard Schema validators work.
+- **A local Gateway.** `voke dev` runs your API with hot reload. Tests call `gateway.request(...)` or `functions.route(...)` without starting a server.
+- **Local AWS.** `voke local` runs your resources on the official AWS Emulator (or Floci) while your code runs in the local Gateway.
+- **One-command deploy.** `voke deploy` builds, uploads and deploys a stage through CloudFormation and prints the API URL. Defaults are production-safe.
+- **Clear feedback.** Every command says what it did; `voke doctor` explains what is missing.
+
+## Documentation
+
+The documentation lives in `apps/docs` (run it with `bun run --filter @voke/docs dev`):
+
+- Start: [Introduction](apps/docs/content/docs/index.mdx), [Getting Started](apps/docs/content/docs/getting-started.mdx), [Concepts](apps/docs/content/docs/concepts.mdx)
+- Guides: [Functions](apps/docs/content/docs/guides/functions.mdx), [HTTP routes](apps/docs/content/docs/guides/http-routes.mdx), [Schemas](apps/docs/content/docs/guides/schemas.mdx), [Authorizers](apps/docs/content/docs/guides/authorizers.mdx), [SQS events](apps/docs/content/docs/guides/sqs-events.mdx), [Runtime Variables](apps/docs/content/docs/guides/runtime-variables.mdx), [Resources](apps/docs/content/docs/guides/resources.mdx), [Calling other projects](apps/docs/content/docs/guides/remote-functions.mdx), [Testing](apps/docs/content/docs/guides/testing.mdx), [Local AWS](apps/docs/content/docs/guides/local-aws.mdx), [Deploy](apps/docs/content/docs/guides/deploy.mdx), [Migrate from Serverless Framework](apps/docs/content/docs/guides/serverless-migration.mdx), [Troubleshooting](apps/docs/content/docs/guides/troubleshooting.mdx)
+- Reference: [Config](apps/docs/content/docs/reference/config.mdx), [CLI](apps/docs/content/docs/reference/cli.mdx), [Errors](apps/docs/content/docs/reference/errors.mdx), [Packages](apps/docs/content/docs/reference/packages.mdx)
+
+## Try it
+
+```bash
+git clone https://github.com/victor-teles/voke.git
+cd voke
+bun install
+cd examples/hello-api
+bun test               # runs in process: no server, Docker or AWS account
 ```
 
-Voke still uses Hono-compatible HTTP primitives under the hood, but the first-party core authoring model is the Voke Function API: `createFunctions`, `fn`, `http`, `route`, and `voke`. AWS-specific Function helpers such as `sqs` live in `@voke/aws`.
+The example declares a table and a queue, so `bun run dev` needs them running locally first: `bunx voke local start && bunx voke local bootstrap` (Docker and the AWS CLI). See [Local AWS](apps/docs/content/docs/guides/local-aws.mdx).
 
-## Vocabulary
-
-- **Function**: a unit of Lambda work. It can be invokable, route-backed, or both.
-- **Function Contract**: Standard Schema-compatible input, output, params, query, headers, and body types that validate Function boundaries.
-- **Function Registry**: the `createFunctions({ ... })` collection that gives Functions stable typed names.
-- **Route Builder**: the `route.get(...)`, `.post(...)`, and `.route(...)` API for declaring typed HTTP routes.
-- **Gateway**: the `voke(functions)` runtime that activates local Function invocation and mounts route-backed Functions.
-
-## Monorepo
+## Repository
 
 This repository uses Bun workspaces and Turborepo.
 
-- `packages/core` contains the framework package.
-- `examples/hello-api` contains a small TypeScript-first Gateway example.
-- `examples/e2e` contains local API, Function invoke, Gateway request, and deployed smoke examples.
-
-## CLI
-
-`voke --help` lists the commands; `voke <command> --help` prints a command's flags, and an unknown flag is an error that suggests the closest one.
-
-```bash
-voke create <name> [directory]
-voke dev [entrypoint]
-voke build [entrypoint] [outdir]
-voke synth [entrypoint] [out] --config voke.config.ts
-voke deploy --stage dev
-voke remove --stage dev
-voke doctor
-voke local <start|stop|reset|bootstrap>
-voke remote generate [name]
-voke migrate serverless [serverless.yml] --out ./voke-migration
-```
-
-`voke deploy --stage dev` builds, packages, uploads, and deploys the project through the Provider in `voke.config.ts`, then prints the API URL; add `--dry-run` to preview the changes. `voke remove --stage dev` deletes the stage after you confirm it (or with `--yes`). See the deploy guide for what gets created and the permissions needed.
-
-`voke build` writes one ESM bundle per entrypoint for the AWS Lambda Node.js runtime, plus a `package.json` with `"type": "module"` so Lambda loads it as an ES module. The AWS SDK (`@aws-sdk/*`) stays external because the Lambda runtime provides it; set `build.external: []` in `voke.config.ts` to bundle a pinned SDK version instead.
-
-## AWS and CloudFormation
-
-Voke synthesizes a direct CloudFormation template for a Gateway-backed Lambda API, API Gateway HTTP API, Lambda IAM role, environment variables, outputs, Function Registry entries, and common AWS resources from the same normalized config:
-
-```bash
-voke synth
-voke local bootstrap
-```
-
-Runtime code can read the generated environment bindings and pass consistent config into AWS SDK clients:
-
-```ts
-import { bindResource, createAwsClientConfig } from "@voke/aws";
-
-const usersTable = bindResource("usersTable", "name");
-
-const dynamoConfig = createAwsClientConfig();
-const tableName = usersTable.value();
-```
-
-Resource helpers are included for DynamoDB, SQS, SNS, EventBridge, S3, Secrets Manager, and Parameter Store.
-
-### Defaults
-
-A deployed stack is production-safe without tuning: each Function gets 15 seconds, 1024 MB, `arm64`, `nodejs22.x`, and its own log group that keeps logs for 14 days. An SQS queue's visibility timeout follows the Functions that consume it. Unhandled errors return `Internal server error` and are logged, never sent to the client. Change a default with `runtime.timeout`/`runtime.memory`, `aws({ lambda: { runtime, architecture, logRetentionDays } })`, or per Function with `synthesis` (see the config reference).
-
-Turn on CORS for browser clients. The same setting applies to `voke dev` and the deployed HTTP API:
-
-```ts
-export default defineConfig({
-  name: "hello-api",
-  provider: aws(),
-  api: { cors: { origins: ["https://app.example"], credentials: true } },
-});
-```
-
-## Runtime Variables
-
-Declare provider-backed runtime values on the Function that uses them, then read them through `context.variables`. AWS Secrets Manager and SSM Parameter Store are available from `voke/aws` without importing AWS clients in application code:
-
-```ts
-import { createFunctions, fn } from "voke";
-import { parameter, secret } from "@voke/aws";
-
-const functions = createFunctions({
-  checkout: fn({
-    input: checkoutInput,
-    output: checkoutOutput,
-    variables: {
-      flags: parameter("/prod/checkout/flags", { decrypt: false }),
-      stripeKey: secret("/prod/stripe/key", {
-        cache: { ttlSeconds: 60 },
-        load: "beforeHandler",
-      }),
-    },
-    handler: async (payload, context) => {
-      const stripeKey = await context.variables.stripeKey.text();
-      const flags = await context.variables.flags.json(flagsSchema);
-
-      return checkout(payload, { flags, stripeKey });
-    },
-  }),
-});
-```
-
-Use `secret.fromResource("signingSecret")` and `parameter.fromResource("publicConfig")` when the value comes from a Voke-managed CloudFormation resource. Direct calls use external AWS names or ARNs; `.fromResource(...)` uses local Voke resource keys.
-
-Runtime Variables are required by default. `{ optional: true }` returns `undefined` for absence, while invalid values and provider failures still throw `VokeRuntimeVariableError`. Local tests can pass `variables.overrides` to `voke(...)`, and Voke also checks `VOKE_VARIABLE_<FUNCTION>_<KEY>` before `VOKE_VARIABLE_<KEY>`.
-
-Runtime Variables are implementation dependencies: they are excluded from Function Contracts, generated remote clients, and the `voke dev` summary. CloudFormation synthesis grants read permissions only to the Functions that declare each Runtime Variable.
-
-## SQS Event Sources
-
-SQS Event Source Functions use the same Function Registry model, but receive normalized message batches instead of direct `functions.invoke(...)` payloads:
-
-```ts
-import { createFunctions } from "voke";
-import { sqs } from "@voke/aws";
-
-const processOrder = sqs({
-  batchSize: 10,
-  handler: async (batch) => {
-    for (const message of batch.messages) {
-      await processOrderMessage(message.body);
-    }
-
-    return batch.ok();
-  },
-  message: orderMessageSchema,
-  queue: "ordersQueue",
-});
-
-export const functions = createFunctions({ processOrder });
-```
-
-Exporting `functions` from the project entrypoint is enough: `voke build` generates the Lambda handler (`index.processOrder`) and `voke synth` wires the queue to it. `createSqsEventHandler` from `@voke/aws` remains available when you wire a Lambda yourself.
-
-Use `functions.sendEvent("processOrder", { messages: [...] })` in local tests. Voke parses each JSON message body with the Standard Schema-compatible message schema, reports invalid messages as partial batch failures by default, and synthesizes Lambda event source mappings with `ReportBatchItemFailures` enabled.
-
-`sqsQueue()` defines the AWS queue resource; `sqs({ queue: "ordersQueue" })` attaches that queue to a Function. Local tests may pass minimal `{ body }` messages and optionally `source: "sqs"`. SQS Event Source Functions cannot mix with HTTP routes or invokable output contracts in v1, and queue DLQ/redrive settings stay with future queue resource lifecycle work.
-
-## Function Invocation
-
-Define invokable Functions with Standard Schema-compatible input/output contracts, group them in a Function Registry, and call them through `functions.invoke(...)`:
-
-```ts
-import { createFunctions, fn } from "voke";
-import type { StandardSchemaV1 } from "voke";
-
-const userInput: StandardSchemaV1<{ id: string }, { id: string }> = {
-  "~standard": {
-    validate: (value) => ({ value }),
-    vendor: "example",
-    version: 1,
-  },
-};
-
-const getUser = fn({
-  input: userInput,
-  output: userInput,
-  handler: async (payload) => ({ id: payload.id, name: "Victor" }),
-});
-
-const functions = createFunctions({ getUser });
-
-const user = await functions.invoke("getUser", { id: "usr_1" });
-```
-
-`functions.invoke(...)` supports local and AWS runtimes, sync and async modes, Function Contract parsing, tracing metadata, retries, and timeouts. The optional `fn({ name })` value is a deployed Lambda name override; the registry key remains the stable type-safe Function identity.
-
-## Gateway Routes
-
-Route-backed Functions can be called through the typed Route Builder path or as real HTTP requests:
-
-```ts
-const routeResult = await functions.route("GET", "/health");
-const response = await gateway.request("/health");
-```
-
-Use `functions.route(...)` for direct typed route calls and `gateway.request(...)` when a test should exercise HTTP method, path, headers, query strings, and response serialization.
-
-## HTTP API Authorizers
-
-Route-backed Functions can protect HTTP API routes with named authorizers:
-
-```ts
-import {
-  createAuthorizers,
-  jwtAuthorizer,
-  lambdaAuthorizer,
-  requestAuthorizer,
-} from "@voke/aws";
-import { createFunctions, http, route, voke } from "voke";
-
-const authorizers = createAuthorizers({
-  session: lambdaAuthorizer({ function: "authorizeSession" }),
-  userJwt: jwtAuthorizer({
-    audience: "users-api",
-    issuer: "https://auth.example.com",
-  }),
-});
-
-const functions = createFunctions({
-  authorizeSession: requestAuthorizer({
-    handler: async (request) => ({
-      authorized: request.headers.get("authorization") === "Bearer dev",
-      context: { userId: "usr_1" },
-    }),
-  }),
-  users: http({
-    authorizer: "userJwt",
-    authorizers,
-    routes: [
-      route.get("/me", {
-        authorizer: "session",
-        handler: (request) => ({ userId: request.auth.context.userId }),
-      }),
-      route.get("/health", {
-        authorizer: "none",
-        handler: () => ({ ok: true }),
-      }),
-    ],
-  }),
-});
-
-export default voke(functions);
-```
-
-An omitted route authorizer inherits the `http(...)` default. Use `authorizer: "none"` for an intentionally public route. JWT and Lambda Authorizers default to the `Authorization` header and accept explicit identity source overrides. Local `gateway.request(...)` runs local Request Authorizer Functions; JWT Authorizers are not fully cryptographically validated locally by default, so tests can use `functions.route(...)` with injected Route Auth Context for handler-focused checks.
-
-Lambda Authorizers can also target an external deployed Lambda by name or ARN:
-
-```ts
-lambdaAuthorizer({
-  function: {
-    arn: "arn:aws:lambda:us-east-1:123456789012:function:shared-auth",
-  },
-});
-```
-
-ARN targets are preferred because they make account and region ownership explicit. External Lambda Authorizer targets are bring-your-own-permission in v1; Voke only synthesizes API Gateway invoke permission for local Request Authorizer Functions owned by the same stack.
-
-## Local AWS
-
-`voke local` runs through the configured Provider's Local AWS Provider. With `aws()`, that is the official **AWS Emulator**, run in Docker: your resources run in the emulator and your Functions run in the local Gateway.
-
-```bash
-voke local start       # builds the emulator image once (about 1.2 GB), then starts it on https://127.0.0.1:9297
-voke local bootstrap   # creates the declared resources and writes their names to .voke/local/outputs.json
-voke dev               # binds VOKE_RESOURCE_* from that file
-voke local stop        # state is in memory, so stop and reset discard it
-```
-
-Voke passes the emulator's generated credentials by file path, never prints them, and removes your real AWS credentials and profile from local commands and from `voke dev`. Telemetry is off unless you pass `awsEmulator({ telemetry: true })`. Build every AWS SDK client with `createAwsClientConfig()`: locally it sets an explicit endpoint, without which SQS calls would follow queue URLs to real AWS. See the Local AWS guide.
-
-**Floci** is the other Local AWS Provider. It keeps state between restarts and uses a smaller image:
-
-```ts
-import { aws } from "@voke/aws";
-import { floci } from "@voke/aws/local";
-
-export default defineConfig({
-  name: "hello-api",
-  provider: aws({ local: floci({ endpoint: "http://localhost:4567" }) }),
-});
-```
-
-The local helpers are also available directly:
-
-```ts
-import {
-  awsEmulator,
-  createLocalAwsEnvironment,
-  floci,
-  readLocalStackOutputs,
-} from "@voke/aws/local";
-
-const env = createLocalAwsEnvironment({ provider: floci() });
-const compose = floci().composeConfig();
-const bindings = await readLocalStackOutputs({
-  endpoint: awsEmulator().defaults.endpoint,
-  provider: "aws-emulator",
-  stack: "hello-api-local",
-});
-```
-
-## Serverless Framework Migration
-
-Generate a Voke migration skeleton from an existing `serverless.yml`:
-
-```bash
-voke migrate serverless ./serverless.yml --out ./voke-migration
-```
-
-The migrator detects service/provider settings, Functions, HTTP API and REST API routes, resolvable SQS Event Sources, EventBridge workers, safe native CloudFormation resources, environment variables, IAM statements, package patterns, and plugins. It writes Function-first route and worker skeletons, config-first resource declarations, and stable migration reports with confidence levels and risk-grouped manual work.
-
-See [docs/serverless-framework-migration.md](./docs/serverless-framework-migration.md) for common migration shapes.
-
-## E2E Testing
-
-Voke includes helpers for first-class Function, Gateway, and AWS integration tests:
-
-```ts
-import { createTestClient } from "@voke/testing";
-import service from "../src/index";
-
-const client = createTestClient(service);
-const response = await client.get("/health");
-```
-
-Use `functions.invoke(...)` for invokable Functions, `functions.route(...)` for typed Route Builder calls, `gateway.request(...)` for Gateway HTTP requests, `createTestClient()` for in-process app requests or deployed stack smoke tests, `createStackTestContext()` for CloudFormation outputs and Floci seed plans, and `createInvokeTestClient()` for worker flows.
-
-See [docs/e2e-testing.md](./docs/e2e-testing.md) and [examples/e2e](./examples/e2e).
-
-## Common Commands
+- `packages/core`: the `voke` package (Functions, Gateway, config, CLI).
+- `packages/aws`: the AWS Provider (`@voke/aws`), plus `@voke/schema`, `@voke/http`, `@voke/testing`, `@voke/remote` and `@voke/build` next to it.
+- `apps/docs`: the documentation site.
+- `examples/*`: example projects (`hello-api`, `e2e`, `cross-function`, `sqs-events`, `serverless-migration`).
+- `docs/adr`: architecture decision records.
+
+Contributor commands:
 
 ```bash
 bun install
-bun test
+bun run check          # lint and format
 bun run typecheck
-bun run release:check
-bun run build
-bun run --filter @voke/hello-api dev
+bun run test           # all packages, and builds the docs site
 ```
-
-Then open:
-
-```bash
-curl http://localhost:3000
-```
-
-Bun starts the example from its default exported Gateway because `voke(functions)` exposes a `fetch` handler.
 
 ## License
 

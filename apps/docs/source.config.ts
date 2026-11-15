@@ -21,7 +21,11 @@ export default defineConfig({
         ...(rehypeCodeDefaultOptions.transformers ?? []),
         // Blocks marked `twoslash` are compiled against the workspace packages. A type error
         // fails the build, so a sample cannot drift from the API it documents.
-        transformerTwoslash({ typesCache: createFileSystemTypesCache() }),
+        transformerTwoslash({
+          // Bun's types (which include Node's) let samples use process.env, Bun.env and bun:test.
+          twoslashOptions: { compilerOptions: { types: ["bun"] } },
+          typesCache: createFileSystemTypesCache(),
+        }),
       ],
     },
   },

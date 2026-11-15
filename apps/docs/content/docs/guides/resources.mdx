@@ -1,0 +1,189 @@
+---
+title: Resources and bindings
+description: Declare AWS resources such as tables, queues and buckets in voke.config.ts, and read their names and URLs from Function code.
+---
+
+After reading this page you can declare the AWS resources your project needs, find their deployed
+names and URLs from a Function, create AWS SDK clients that work both locally and on AWS, and know
+which access each Function gets.
+
+## Declare resources
+
+Declare resources in `resources` in `voke.config.ts`, with the builders from
+`@voke/aws/cloudformation`. The key of each entry (`usersTable` below) is the **resource key**: you
+use it to bind the resource in code, and Voke derives the CloudFormation logical id from it.
+
+```ts twoslash
+import { aws } from "@voke/aws";
+import { dynamodbTable, s3Bucket, sqsQueue } from "@voke/aws/cloudformation";
+import { defineConfig } from "voke";
+
+export default defineConfig({
+  name: "users",
+  provider: aws(),
+  resources: {
+    usersTable: dynamodbTable({ partitionKey: "id" }),
+    uploadsBucket: s3Bucket(),
+    jobsQueue: sqsQueue(),
+  },
+});
+```
+
+`voke synth` and `voke deploy` add each resource to the stack, and `voke local bootstrap` creates them
+in the Local AWS Provider. See [Local AWS](/docs/guides/local-aws).
+
+## Builders
+
+| Builder                          | AWS resource                  | Options                                                                                                           | Binding attribute |
+| -------------------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------- | ----------------- |
+| `dynamodbTable(options?)`        | `AWS::DynamoDB::Table`        | `partitionKey` (default `"id"`), `sortKey`. Both are string (`S`) keys. Billing is on demand (`PAY_PER_REQUEST`). | `name`            |
+| `sqsQueue(options?)`             | `AWS::SQS::Queue`             | `visibilityTimeoutSeconds`. See [SQS events](/docs/guides/sqs-events#queue-visibility-timeout).                   | `url`             |
+| `snsTopic()`                     | `AWS::SNS::Topic`             | None.                                                                                                             | `arn`             |
+| `eventBus()`                     | `AWS::Events::EventBus`       | None.                                                                                                             | `name`            |
+| `s3Bucket()`                     | `AWS::S3::Bucket`             | None.                                                                                                             | `name`            |
+| `secret()`                       | `AWS::SecretsManager::Secret` | None. AWS generates the secret value.                                                                             | `id`              |
+| `ssmParameter({ value, type? })` | `AWS::SSM::Parameter`         | `value` (required), `type`: `"String"` (default) or `"StringList"`.                                               | `name`            |
+
+AWS generates the physical names. Your code never hard-codes a table name or a queue URL: it reads
+them from bindings.
+
+`secret` from `@voke/aws/cloudformation` declares a Secrets Manager resource. `secret` from
+`@voke/aws` is a different function that reads a secret at run time. To read the value of a declared
+`secret()` or `ssmParameter()`, use a [Runtime Variable](/docs/guides/runtime-variables) with
+`.fromResource(key)`.
+
+## Read a resource from a Function
+
+Every Function gets one environment variable per declared resource:
+`VOKE_RESOURCE_<KEY>_<ATTRIBUTE>`, with the resource key and the binding attribute in upper snake
+case. `usersTable` gets `VOKE_RESOURCE_USERS_TABLE_NAME`, and `jobsQueue` gets
+`VOKE_RESOURCE_JOBS_QUEUE_URL`.
+
+Use `bindResource(key, attribute)` from `@voke/aws` instead of reading `process.env` yourself:
+
+```ts twoslash
+import { bindResource } from "@voke/aws";
+
+// ---cut---
+const usersTable = bindResource("usersTable", "name");
+
+usersTable.envName; // "VOKE_RESOURCE_USERS_TABLE_NAME"
+const tableName = usersTable.value();
+```
+
+`value()` reads the environment variable each time you call it. If the variable is missing or empty,
+it throws `VokeResourceBindingError` (code `RESOURCE_BINDING_ERROR`) with the variable name in the
+message. The attribute must be the builder's binding attribute from the table above: there is no
+`VOKE_RESOURCE_USERS_TABLE_ARN`, for example.
+
+Where the values come from:
+
+- **Deployed**, CloudFormation sets them on every Lambda from the stack's resources.
+- **In `voke dev`**, Voke sets them from the resources in the Local AWS Provider. With the AWS
+  Emulator, run `voke local bootstrap` first: Voke reads the names it recorded. See
+  [Local AWS](/docs/guides/local-aws).
+- **In tests**, set them yourself, for example in the environment of `bun test`.
+
+## Create AWS SDK clients with `createAwsClientConfig()`
+
+Pass `createAwsClientConfig()` from `@voke/aws` to every AWS SDK client you create, for example
+`new DynamoDBClient(createAwsClientConfig())`. It returns `{ region, endpoint? }`:
+
+- `region` is the first value set among the `region` option, `AWS_REGION` and `AWS_DEFAULT_REGION`.
+  The default is `us-east-1`.
+- `endpoint` is the `endpoint` option, then `VOKE_AWS_ENDPOINT_URL`, then `AWS_ENDPOINT_URL`. `voke dev`
+  and local commands set these to the Local AWS Provider. A deployed Lambda has neither, so
+  `endpoint` is left out and the SDK uses its default AWS endpoint.
+
+<Callout type="warn">
+  Do not skip `createAwsClientConfig()` for SQS. SQS queue URLs carry the real AWS host
+  (`https://sqs.<region>.amazonaws.com/...`). An SQS client without an explicit endpoint sends a
+  call for that queue URL to that host, which is real AWS, even while you run locally.
+</Callout>
+
+You can pass overrides: `createAwsClientConfig({ region: "eu-west-1" })`.
+
+## Example: a DynamoDB table read by a route
+
+The table is declared in `voke.config.ts`, and a route reads its name and the client config:
+
+```ts twoslash
+// @filename: voke.config.ts
+import { aws } from "@voke/aws";
+import { dynamodbTable } from "@voke/aws/cloudformation";
+import { defineConfig } from "voke";
+
+export default defineConfig({
+  name: "users",
+  provider: aws(),
+  resources: {
+    usersTable: dynamodbTable({ partitionKey: "id" }),
+  },
+});
+
+// @filename: src/index.ts
+import { DynamoDBClient, GetItemCommand } from "@aws-sdk/client-dynamodb";
+import { bindResource, createAwsClientConfig } from "@voke/aws";
+import { schema } from "@voke/schema";
+import { createFunctions, http, route, voke } from "voke";
+
+import config from "../voke.config";
+
+const usersTable = bindResource("usersTable", "name");
+
+const functions = createFunctions({
+  http: http({
+    routes: [
+      route.get("/users/:id", {
+        params: schema.object({ id: schema.string() }),
+        handler: async (request) => {
+          const client = new DynamoDBClient(createAwsClientConfig());
+          const { Item } = await client.send(
+            new GetItemCommand({
+              Key: { id: { S: request.params.id } },
+              TableName: usersTable.value(),
+            })
+          );
+
+          return { found: Item !== undefined, id: request.params.id };
+        },
+      }),
+    ],
+  }),
+});
+
+export default voke(functions, { config });
+```
+
+Install the AWS SDK clients you use (`bun add @aws-sdk/client-dynamodb`). `voke build` leaves
+`@aws-sdk/*` out of the bundle by default, because the Lambda Node.js runtime provides it.
+
+## Access each Function gets
+
+Voke synthesizes one IAM role per Function. Each role gets the AWS managed policy
+`AWSLambdaBasicExecutionRole` (logs), plus one policy, `VokeResourceAccess`, with these statements for
+**every** declared resource:
+
+| Builder           | Actions                                                                                   | Resource                              |
+| ----------------- | ----------------------------------------------------------------------------------------- | ------------------------------------- |
+| `dynamodbTable()` | `dynamodb:GetItem`, `PutItem`, `UpdateItem`, `DeleteItem`, `Query`, `Scan`                | The table ARN.                        |
+| `sqsQueue()`      | `sqs:SendMessage`, `ReceiveMessage`, `DeleteMessage`, `GetQueueAttributes`                | The queue ARN.                        |
+| `snsTopic()`      | `sns:Publish`                                                                             | The topic ARN.                        |
+| `eventBus()`      | `events:PutEvents`                                                                        | The event bus ARN.                    |
+| `s3Bucket()`      | `s3:ListBucket` on the bucket; `s3:GetObject`, `PutObject`, `DeleteObject` on its objects | The bucket ARN, and `<bucket ARN>/*`. |
+| `secret()`        | `secretsmanager:GetSecretValue`                                                           | The secret ARN.                       |
+| `ssmParameter()`  | `ssm:GetParameter`, `ssm:GetParameters`                                                   | The parameter ARN.                    |
+
+Access is scoped to each resource's ARN, never to `*`. But it is not scoped per Function: every
+Function in the project gets every statement and every `VOKE_RESOURCE_*` binding, whether or not it
+uses the resource. Voke has no way yet to bind a resource to some Functions only.
+
+[Runtime Variables](/docs/guides/runtime-variables#iam-permissions) are different: only the Function
+that declares one gets its permission.
+
+## Next steps
+
+- [SQS events](/docs/guides/sqs-events): consume a declared queue with a Function.
+- [Runtime Variables](/docs/guides/runtime-variables): read a declared secret or parameter.
+- [Local AWS](/docs/guides/local-aws): create the resources locally.
+- [Config reference](/docs/reference/config): every `voke.config.ts` setting.

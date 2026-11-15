@@ -1,9 +1,13 @@
 ---
-title: CLI Reference
-description: Common Voke CLI commands for development, build, synth, deploy, local AWS, and migration workflows.
+title: CLI
+description: Look up every voke command, its flags, and what it does.
 ---
 
-## Help and version
+This page lists every `voke` command with its exact `--help` output, an example, and the guide that teaches it. Run commands from the project directory, where `voke.config.ts` lives.
+
+```bash
+voke --help
+```
 
 ```txt
 Voke v0.0.0
@@ -25,89 +29,277 @@ Commands:
 Run voke <command> --help for its flags. voke --version prints the version.
 ```
 
-`voke <command> --help` (or `voke help <command>`) prints a command's usage and flags. `voke --version` prints the version. An unknown flag is an error that suggests the closest flag:
+## Help, version and usage errors
+
+`voke <command> --help` (or `-h`) and `voke help <command>` print the same usage and flags for one command. `voke --version` (or `-v`) prints the version:
+
+```bash
+voke help synth
+voke --version
+```
 
 ```txt
-$ voke synth --stag prod
+voke 0.0.0
+```
+
+Flags take a value as `--stage dev` or `--stage=dev`. An unknown flag, a flag without its value, or an unknown command is an error. The CLI prints the problem and the command's usage, then exits with code 1. For an unknown flag, it suggests the closest known flag:
+
+```bash
+voke synth --stag prod
+```
+
+```txt
 Invalid CLI usage: Unknown flag --stag for "synth". Did you mean --stage?
 Usage: voke synth [entrypoint] [out] [--config voke.config.ts] [--name api] [--stage local] [--region us-east-1]
 ```
 
-## Development
+Commands that read the project accept `--config`, `--entrypoint`, `--name`, `--region` and `--stage`. When `voke.config.ts` does not exist and you do not pass `--config`, Voke builds a config from these flags; the name falls back to the `package.json` name, then `api`. The commands that need a Provider (`synth`, `build`, `deploy`, `remove`, `local`) fail with an example `provider: aws()` line when the config has none. See [Config](/docs/reference/config) for every setting.
 
-```bash
-voke dev [entrypoint]
+## build
+
+```txt
+Usage: voke build [entrypoint] [outdir]
+
+Bundle the project's Functions through the Provider.
+
+Flags:
+  --config <value>      Config file. Default: voke.config.ts
+  --entrypoint <value>  Project entrypoint. Default: ./src/index.ts
+  --name <value>        Project name when there is no config file
+  --region <value>      Region. Default: the config
+  --stage <value>       Stage. Default: VOKE_STAGE, then the config
+  --outdir <value>      Output directory. Default: ./dist
 ```
 
-Starts the local development workflow for the configured entrypoint.
-
-## Build
-
 ```bash
-voke build [entrypoint] [outdir]
+voke build
+voke build ./src/index.ts ./dist
 ```
 
-Builds an ESM bundle of the entrypoint for the AWS Lambda Node.js runtime and writes a `package.json` with `"type": "module"` next to it. Modules matching `build.external` stay out of the bundle; the default, `["@aws-sdk/*"]`, uses the AWS SDK that ships with the Lambda runtime. Set `build.external: []` to bundle everything.
+`voke build` bundles the entrypoint into one ESM bundle for the AWS Lambda Node.js runtime, with one generated handler per Function, and writes a `package.json` with `"type": "module"` next to it. Modules that match `build.external` stay out of the bundle; the default, `["@aws-sdk/*"]`, uses the AWS SDK that ships with the Lambda runtime. It prints `Built <outdir>`. `voke deploy` runs the build for you. See [Deploy](/docs/guides/deploy).
 
-## Project starter
+## create
 
-```bash
-voke create <name> [directory] [--no-install] [--force]
+```txt
+Usage: voke create <name> [directory]
+
+Create a new API project and install its dependencies.
+
+Flags:
+  --force       Write into a non-empty directory, overwriting the starter files
+  --no-install  Skip bun install
 ```
 
-Creates an API project in `./<name>` (or `directory`), runs `bun install`, and prints the next steps. The `package.json` name is exactly `<name>`, scope included. A non-empty directory is refused unless `--force`, which overwrites the starter files and keeps every other file.
-
-## Doctor
-
 ```bash
-voke doctor [--config voke.config.ts]
+voke create hello-api
+voke create @acme/orders ./orders-api --no-install
 ```
 
-Prints one `ok`, `warn` or `fail` row per check: the Bun version, the config, the entrypoint, the discovered Functions and routes, the Provider, and the Provider's own checks (for `aws()`: credentials with the account id and region, and the local container tool). Exits non-zero when any row fails. Credentials are never printed.
+`voke create` writes an API project to `./<name>` (without the scope), or to `directory`, runs `bun install`, and prints the next steps. The `package.json` name is exactly `<name>`, scope included. A non-empty directory is refused unless you pass `--force`, which overwrites the starter files and keeps every other file. See [Getting started](/docs/getting-started).
 
-## CloudFormation
+## deploy
 
-```bash
-voke synth [entrypoint] [out] --config voke.config.ts
+```txt
+Usage: voke deploy [--stage dev] [--region us-east-1] [--config voke.config.ts] [--dry-run]
+
+Build and deploy a stage through the Provider.
+
+Flags:
+  --config <value>      Config file. Default: voke.config.ts
+  --entrypoint <value>  Project entrypoint. Default: ./src/index.ts
+  --name <value>        Project name when there is no config file
+  --region <value>      Region. Default: the config
+  --stage <value>       Stage. Default: VOKE_STAGE, then the config
+  --dry-run             Preview the changes without applying them
 ```
 
-Synthesizes the CloudFormation template for the configured project.
-
-## Deploy and remove
-
 ```bash
-voke deploy [--stage dev] [--region us-east-1] [--config voke.config.ts] [--dry-run]
-voke remove [--stage dev] [--region us-east-1] [--config voke.config.ts] [--yes]
+voke deploy --stage dev
+voke deploy --stage prod --dry-run
 ```
 
-`voke deploy` builds the project, uploads it, and deploys the stage through the configured Provider, then prints the outputs (API URL first) and writes `.voke/outputs/<stage>.json`. `--dry-run` previews the changes without applying them. The stage `local` is reserved for the local emulator.
+`voke deploy` builds the project, uploads the bundle, and deploys the stage through the Provider. It then prints the stack outputs (the API URL first) and writes them to `.voke/outputs/<stage>.json`. `--dry-run` previews the changes without applying them and writes no outputs file. The stage comes from `--stage`, then `VOKE_STAGE`, then the config. The stage `local` is refused unless `AWS_ENDPOINT_URL` or `VOKE_AWS_ENDPOINT_URL` is set. See [Deploy](/docs/guides/deploy).
 
-`voke remove` deletes the stage after you type its stack name to confirm; `--yes` skips the prompt and is required outside a terminal.
+## dev
 
-## Local AWS
+```txt
+Usage: voke dev [entrypoint] [--hostname localhost] [--port 3000]
+
+Run the API locally with hot reload.
+
+Flags:
+  --config <value>      Config file. Default: voke.config.ts
+  --entrypoint <value>  Project entrypoint. Default: ./src/index.ts
+  --name <value>        Project name when there is no config file
+  --region <value>      Region. Default: the config
+  --stage <value>       Stage. Default: VOKE_STAGE, then the config
+  --endpoint <value>    Local cloud endpoint for resource bindings
+  --hostname <value>    Hostname. Default: localhost
+  --port <value>        Port. Default: 3000
+```
+
+```bash
+voke dev
+PORT=4000 voke dev
+```
+
+`voke dev` runs `dev.entrypoint` with `bun --hot`, so the Gateway reloads when you save a file. The server listens on `PORT` (default 3000). `--hostname` and `--port` only change the address Voke reports for the dev server (`VOKE_DEV_ORIGIN`, used by remote projects); they do not move the server, so set `PORT` to change the port. It sets `environment`, `dev.environment`, the remote targets and the Local AWS Provider's environment. It runs without a Provider, and prints a note that one is missing. See [Getting started](/docs/getting-started) and [Local AWS](/docs/guides/local-aws).
+
+## doctor
+
+```txt
+Usage: voke doctor [--config voke.config.ts]
+
+Check the toolchain, the project and the Provider.
+
+Flags:
+  --config <value>  Config file. Default: voke.config.ts
+```
+
+```bash
+voke doctor
+```
+
+`voke doctor` prints one `ok`, `warn` or `fail` row per check: the Bun version, the config, the entrypoint, the discovered Functions and routes, the Provider, and the Provider's own checks. For `aws()`, these are the credentials (with the account id and region) and the local container tool. It never prints credentials. It exits with code 1 when any row fails. See [Troubleshooting](/docs/guides/troubleshooting).
+
+## local
+
+```txt
+Usage: voke local <start|stop|reset|bootstrap>
+
+Run the Provider's local environment. The Provider may accept more flags.
+
+Flags:
+  --config <value>      Config file. Default: voke.config.ts
+  --entrypoint <value>  Project entrypoint. Default: ./src/index.ts
+  --name <value>        Project name when there is no config file
+  --region <value>      Region. Default: the config
+  --stage <value>       Stage. Default: VOKE_STAGE, then the config
+```
 
 ```bash
 voke local start
-voke local bootstrap --name hello-api --stage local
-voke local stop
-voke local reset
+voke local bootstrap
 ```
 
-Runs the local workflow of the configured Provider. With `aws()`, this is the AWS Emulator in Docker; `aws({ local: floci() })` selects Floci. `voke local start --rebuild` rebuilds the emulator image. See the Local AWS guide.
+`voke local` runs the workflow of the **Local AWS Provider** set in `aws({ local })`: the AWS Emulator by default, or Floci with `aws({ local: floci() })`. `start` starts it, `bootstrap` deploys the project's resources into it, `stop` stops it, and `reset` deletes its state. See [Local AWS](/docs/guides/local-aws).
 
-## Remote code generation
+`voke local` also accepts the flags that the Local AWS Provider declares. They do not appear in `--help`. With `aws()`, every Local AWS Provider accepts:
+
+| Flag                 | Description                                                                 |
+| -------------------- | --------------------------------------------------------------------------- |
+| `--endpoint <value>` | Local AWS endpoint for `bootstrap`.                                         |
+| `--template <value>` | Template written by `bootstrap`. Default: `.voke/local/cloudformation.json` |
+
+The AWS Emulator also accepts:
+
+| Flag        | Description                                       |
+| ----------- | ------------------------------------------------- |
+| `--rebuild` | Rebuild the AWS Emulator image even if it exists. |
+
+Floci also accepts:
+
+| Flag                 | Description                                                    |
+| -------------------- | -------------------------------------------------------------- |
+| `--compose <value>`  | Docker Compose file. Default: `.voke/local/docker-compose.yml` |
+| `--data <value>`     | Floci data directory. Default: `.voke/local/data`              |
+| `--hostname <value>` | Floci hostname.                                                |
+| `--image <value>`    | Floci container image.                                         |
+| `--port <value>`     | Floci port.                                                    |
+
+```bash
+voke local start --rebuild
+```
+
+## migrate
+
+```txt
+Usage: voke migrate serverless [serverless.yml] [--out ./voke-migration]
+
+Generate a Voke skeleton from a Serverless Framework service.
+
+Flags:
+  --out <value>  Output directory. Default: ./voke-migration
+```
+
+```bash
+voke migrate serverless
+voke migrate serverless ./serverless.yml --out ./voke-migration
+```
+
+`voke migrate serverless` reads a Serverless Framework service and writes a Function-first Voke skeleton and a migration report to the output directory. It prints `Wrote migration skeleton to <directory>`. See [Serverless migration](/docs/guides/serverless-migration).
+
+## remote
+
+```txt
+Usage: voke remote generate [name]
+
+Generate Remote Function Registry modules from remotes.
+
+Flags:
+  --config <value>      Config file. Default: voke.config.ts
+  --entrypoint <value>  Project entrypoint. Default: ./src/index.ts
+  --name <value>        Project name when there is no config file
+  --region <value>      Region. Default: the config
+  --stage <value>       Stage. Default: VOKE_STAGE, then the config
+```
 
 ```bash
 voke remote generate
 voke remote generate users
 ```
 
-Fetches runtime-exposed Function Contract metadata from configured remotes and writes generated Remote Function Registry modules. Without a name, Voke generates every configured remote. With a name, Voke generates only that remote.
+`voke remote generate` fetches the Function Contract metadata of each remote in `remotes` and writes one Remote Function Registry module per remote, to `remotes.<name>.out`. With a name, it generates only that remote. It prints `Wrote <path>` for each module. See [Remote Functions](/docs/guides/remote-functions).
 
-## Serverless migration
+## remove
 
-```bash
-voke migrate serverless [serverless.yml] --out ./voke-migration
+```txt
+Usage: voke remove [--stage dev] [--region us-east-1] [--config voke.config.ts] [--yes]
+
+Delete a deployed stage through the Provider.
+
+Flags:
+  --config <value>      Config file. Default: voke.config.ts
+  --entrypoint <value>  Project entrypoint. Default: ./src/index.ts
+  --name <value>        Project name when there is no config file
+  --region <value>      Region. Default: the config
+  --stage <value>       Stage. Default: VOKE_STAGE, then the config
+  --yes                 Skip the confirmation prompt
 ```
 
-Generates a Function-first migration skeleton and report from Serverless Framework config.
+```bash
+voke remove --stage dev
+voke remove --stage preview --yes
+```
+
+`voke remove` deletes the stage's stack and its resources. It asks you to type the stack name (`<name>-<stage>`) to confirm. `--yes` skips the prompt and is required outside a terminal, for example in CI. It prints `Removed <name>-<stage>`, or `Nothing to remove` when the stage does not exist. See [Deploy](/docs/guides/deploy).
+
+## synth
+
+```txt
+Usage: voke synth [entrypoint] [out] [--config voke.config.ts] [--name api] [--stage local] [--region us-east-1]
+
+Write the Provider's deployment template.
+
+Flags:
+  --config <value>      Config file. Default: voke.config.ts
+  --entrypoint <value>  Project entrypoint. Default: ./src/index.ts
+  --name <value>        Project name when there is no config file
+  --region <value>      Region. Default: the config
+  --stage <value>       Stage. Default: VOKE_STAGE, then the config
+  --out <value>         Output file. Default: cloudFormation.out
+```
+
+```bash
+voke synth
+voke synth --stage prod --out ./dist/prod.json
+```
+
+`voke synth` imports the entrypoint, discovers the Functions, and writes the Provider's deployment template. With `aws()`, this is a CloudFormation template at `cloudFormation.out` (default `./dist/cloudformation.json`). It prints `Wrote template to <path> (<n> resources)`. It deploys nothing. See [Deploy](/docs/guides/deploy).
+
+## Next steps
+
+- [Config](/docs/reference/config): every setting the commands read.
+- [Getting started](/docs/getting-started): create and run a project.
+- [Deploy](/docs/guides/deploy): deploy a stage and remove it.
+- [Errors](/docs/reference/errors): what `CliUsageError` and the other errors contain.

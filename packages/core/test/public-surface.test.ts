@@ -3,29 +3,45 @@ import { expect, test } from "bun:test";
 import packageJson from "../package.json";
 import * as voke from "../src/index";
 
+// The pages that teach the vocabulary and the three ways to call a Function.
 const documentationFiles = [
   "../../../README.md",
   "../../../apps/docs/app/layout.tsx",
   "../../../apps/docs/app/(home)/page.tsx",
   "../../../apps/docs/content/docs/index.mdx",
   "../../../apps/docs/content/docs/getting-started.mdx",
+  "../../../apps/docs/content/docs/concepts.mdx",
   "../../../apps/docs/content/docs/guides/functions.mdx",
-  "../../../apps/docs/content/docs/guides/gateway-testing.mdx",
-  "../../../docs/e2e-testing.md",
-  "../../../docs/serverless-framework-migration.md",
+  "../../../apps/docs/content/docs/guides/http-routes.mdx",
+  "../../../apps/docs/content/docs/guides/testing.mdx",
   "../../../docs/stable-public-surface.md",
 ];
 
+// Every docs page, so no page teaches a removed name.
 const teachingSurfaceFiles = [
   "../../../README.md",
   "../../../apps/docs/app/layout.tsx",
   "../../../apps/docs/app/(home)/page.tsx",
   "../../../apps/docs/content/docs/index.mdx",
   "../../../apps/docs/content/docs/getting-started.mdx",
+  "../../../apps/docs/content/docs/concepts.mdx",
   "../../../apps/docs/content/docs/guides/functions.mdx",
-  "../../../apps/docs/content/docs/guides/gateway-testing.mdx",
-  "../../../docs/e2e-testing.md",
-  "../../../docs/serverless-framework-migration.md",
+  "../../../apps/docs/content/docs/guides/http-routes.mdx",
+  "../../../apps/docs/content/docs/guides/schemas.mdx",
+  "../../../apps/docs/content/docs/guides/authorizers.mdx",
+  "../../../apps/docs/content/docs/guides/sqs-events.mdx",
+  "../../../apps/docs/content/docs/guides/runtime-variables.mdx",
+  "../../../apps/docs/content/docs/guides/resources.mdx",
+  "../../../apps/docs/content/docs/guides/remote-functions.mdx",
+  "../../../apps/docs/content/docs/guides/testing.mdx",
+  "../../../apps/docs/content/docs/guides/local-aws.mdx",
+  "../../../apps/docs/content/docs/guides/deploy.mdx",
+  "../../../apps/docs/content/docs/guides/serverless-migration.mdx",
+  "../../../apps/docs/content/docs/guides/troubleshooting.mdx",
+  "../../../apps/docs/content/docs/reference/config.mdx",
+  "../../../apps/docs/content/docs/reference/cli.mdx",
+  "../../../apps/docs/content/docs/reference/errors.mdx",
+  "../../../apps/docs/content/docs/reference/packages.mdx",
   "../../../packages/core/src/cli.ts",
   "../../../packages/core/src/serverless-migration.ts",
 ];
