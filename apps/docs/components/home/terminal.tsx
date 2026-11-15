@@ -87,11 +87,7 @@ export const Terminal = ({
       className="voke-terminal flex h-full flex-col overflow-hidden rounded-[14px] border border-white/10 bg-voke-bakelite text-voke-bone"
       ref={ref}
     >
-      <div className="flex items-center gap-2 border-b border-white/10 px-4 py-2.5 text-[0.74rem] tracking-wide text-white/50 uppercase">
-        <span
-          className="voke-lamp"
-          data-off={lines < output.length ? "" : undefined}
-        />
+      <div className="border-b border-white/10 px-4 py-2.5 text-[0.74rem] tracking-wide text-white/50 uppercase">
         {title}
       </div>
       {/* The full transcript is read by assistive technology; the animation is decorative. */}

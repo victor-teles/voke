@@ -7,7 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type { KeyboardEvent, ReactNode } from "react";
+import type { CSSProperties, KeyboardEvent, ReactNode } from "react";
 
 export interface WiringSource {
   /** What Voke deploys for a Function with this Event Source. */
@@ -23,105 +23,168 @@ export interface WiringSource {
   when: string;
 }
 
-interface Cord {
-  height: number;
-  path: string;
-  width: number;
+interface Point {
+  x: number;
+  y: number;
 }
 
-const autoplayMs = 4200;
+interface Geometry {
+  inlet: Point;
+  sockets: Point[];
+}
+
+interface Patch {
+  previous: number | null;
+  selected: number;
+}
+
+const autoplayMs = 5600;
+const cornerRadius = 18;
+// The new cord starts while the old one is still pulling back.
+const overlapMs = 170;
 
 const prefersReducedMotion = (): boolean =>
   typeof window !== "undefined" &&
   window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-// A cord hangs: it leaves the jack level, sags below both ends, and rises into the plug.
-const cordPath = (
-  fromY: number,
-  toY: number,
-  width: number,
-  height: number
-): string => {
-  const sag = Math.min(height - 8, Math.max(fromY, toY) + 46);
+const centre = (
+  element: Element | null | undefined,
+  box: DOMRect
+): Point | null => {
+  const rect = element?.getBoundingClientRect();
 
-  return `M 0 ${fromY} C ${width * 0.42} ${fromY}, ${width * 0.3} ${sag}, ${width * 0.55} ${sag} S ${width * 0.72} ${toY}, ${width} ${toY}`;
+  if (rect === undefined || rect.width === 0) {
+    return null;
+  }
+
+  return {
+    x: rect.left + rect.width / 2 - box.left,
+    y: rect.top + rect.height / 2 - box.top,
+  };
 };
+
+/** A cord that leaves `from` level, turns twice halfway with rounded corners, and arrives level. */
+const cordPath = (from: Point, to: Point): string => {
+  const rise = to.y - from.y;
+
+  if (Math.abs(rise) < 2) {
+    return `M ${from.x} ${from.y} H ${to.x}`;
+  }
+
+  const midX = (from.x + to.x) / 2;
+  const turn = Math.min(
+    cornerRadius,
+    Math.abs(rise) / 2,
+    Math.abs(midX - from.x)
+  );
+  const across = Math.sign(to.x - from.x) || 1;
+  const down = Math.sign(rise);
+
+  return `M ${from.x} ${from.y} H ${midX - across * turn} Q ${midX} ${from.y} ${midX} ${from.y + down * turn} V ${to.y - down * turn} Q ${midX} ${to.y} ${midX + across * turn} ${to.y} H ${to.x}`;
+};
+
+const delay = (ms: number) => ({ "--d": `${ms}ms` }) as CSSProperties;
+const order = (index: number) => ({ "--i": index }) as CSSProperties;
 
 /**
  * The jack field: pick what calls the Function on the left, and a cord is patched into the
- * Function on the right. It cycles on its own until someone takes over.
+ * Function on the right. It cycles on its own, while it is on screen, until someone takes over.
  */
 export const Wiring = ({ sources }: { sources: readonly WiringSource[] }) => {
-  const [selected, setSelected] = useState(0);
+  const [patch, setPatch] = useState<Patch>({ previous: null, selected: 0 });
   const [autoplay, setAutoplay] = useState(true);
-  const [cord, setCord] = useState<Cord | null>(null);
-  const jacks = useRef<(HTMLButtonElement | null)[]>([]);
-  const gap = useRef<HTMLDivElement>(null);
-  const plug = useRef<HTMLSpanElement>(null);
-  const source = sources[selected] ?? sources[0];
+  const [inView, setInView] = useState(false);
+  const [geometry, setGeometry] = useState<Geometry | null>(null);
+  const stage = useRef<HTMLDivElement>(null);
+  const inlet = useRef<HTMLSpanElement>(null);
+  const tabs = useRef<(HTMLButtonElement | null)[]>([]);
+  const sockets = useRef<(HTMLSpanElement | null)[]>([]);
+  const count = sources.length;
+  const { previous, selected } = patch;
+  const source = sources[selected];
 
   const measure = useCallback(() => {
-    const area = gap.current;
-    const jack = jacks.current[selected];
-    const target = plug.current;
+    const box = stage.current?.getBoundingClientRect();
 
-    if (
-      area === null ||
-      jack === null ||
-      jack === undefined ||
-      target === null
-    ) {
+    if (box === undefined) {
       return;
     }
 
-    const box = area.getBoundingClientRect();
+    const to = centre(inlet.current, box);
+    const from = sockets.current
+      .slice(0, count)
+      .map((socket) => centre(socket, box));
+    const measured = from.filter((point) => point !== null);
 
-    if (box.width < 24) {
-      setCord(null);
+    // Below the desktop layout the sockets are hidden, and there is no cord to draw.
+    setGeometry(
+      to === null || measured.length !== count
+        ? null
+        : { inlet: to, sockets: measured }
+    );
+  }, [count]);
 
+  useLayoutEffect(() => {
+    const element = stage.current;
+
+    if (element === null) {
       return;
     }
 
-    const jackBox = jack.getBoundingClientRect();
-    const plugBox = target.getBoundingClientRect();
-    const fromY = jackBox.top + jackBox.height / 2 - box.top;
-    const toY = plugBox.top + plugBox.height / 2 - box.top;
-
-    setCord({
-      height: box.height,
-      path: cordPath(fromY, toY, box.width, box.height),
-      width: box.width,
-    });
-  }, [selected]);
-
-  useLayoutEffect(measure, [measure]);
-
-  useEffect(() => {
     const observer = new ResizeObserver(measure);
 
-    if (gap.current !== null) {
-      observer.observe(gap.current);
-    }
+    measure();
+    observer.observe(element);
+    // The labels set the column's height, so the sockets move when the fonts arrive.
+    document.fonts.addEventListener("loadingdone", measure);
 
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      document.fonts.removeEventListener("loadingdone", measure);
+    };
   }, [measure]);
 
   useEffect(() => {
-    if (!autoplay || prefersReducedMotion()) {
+    const element = stage.current;
+
+    if (element === null) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => setInView(entries.some((entry) => entry.isIntersecting)),
+      { threshold: 0.35 }
+    );
+
+    observer.observe(element);
+
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!(autoplay && inView) || prefersReducedMotion()) {
       return;
     }
 
     const timer = setInterval(
-      () => setSelected((current) => (current + 1) % sources.length),
+      () =>
+        setPatch((current) => ({
+          previous: current.selected,
+          selected: (current.selected + 1) % count,
+        })),
       autoplayMs
     );
 
     return () => clearInterval(timer);
-  }, [autoplay, sources.length]);
+  }, [autoplay, inView, count]);
 
   const choose = (index: number) => {
     setAutoplay(false);
-    setSelected(index);
+    setPatch((current) =>
+      current.selected === index
+        ? current
+        : { previous: current.selected, selected: index }
+    );
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -134,25 +197,38 @@ export const Wiring = ({ sources }: { sources: readonly WiringSource[] }) => {
     }
 
     event.preventDefault();
-    const next = (selected + step + sources.length) % sources.length;
+    const next = (selected + step + count) % count;
 
     choose(next);
-    jacks.current[next]?.focus();
+    tabs.current[next]?.focus();
   };
 
   if (source === undefined) {
     return null;
   }
 
+  const cordTo = (index: number | null): string | null => {
+    const socket = index === null ? undefined : geometry?.sockets[index];
+
+    return geometry === null || socket === undefined
+      ? null
+      : cordPath(geometry.inlet, socket);
+  };
+  const leaving = cordTo(previous);
+  const arriving = cordTo(selected);
+  const moved = previous !== null;
+
   return (
     <div
-      className="grid gap-5 lg:grid-cols-[15.5rem_minmax(3rem,7rem)_minmax(0,1fr)] lg:gap-0"
+      className="voke-wiring"
+      data-moved={moved ? "" : undefined}
       onPointerEnter={() => setAutoplay(false)}
+      ref={stage}
     >
       <div
         aria-label="What calls the Function"
         aria-orientation="vertical"
-        className="flex flex-wrap gap-1 lg:flex-col lg:flex-nowrap"
+        className="voke-jacks"
         onKeyDown={onKeyDown}
         role="tablist"
       >
@@ -160,86 +236,78 @@ export const Wiring = ({ sources }: { sources: readonly WiringSource[] }) => {
           <button
             aria-controls="voke-wiring-panel"
             aria-selected={index === selected}
-            className="voke-jack w-auto! lg:w-full!"
+            className="voke-jack"
             id={`voke-wiring-tab-${item.id}`}
             key={item.id}
             onClick={() => choose(index)}
             ref={(element) => {
-              jacks.current[index] = element;
+              tabs.current[index] = element;
             }}
             role="tab"
             tabIndex={index === selected ? 0 : -1}
             type="button"
           >
-            <span aria-hidden="true" className="voke-socket" />
-            <span className="text-[0.94rem] font-medium whitespace-nowrap">
-              {item.label}
-            </span>
+            {item.label}
+            <span
+              aria-hidden="true"
+              className="voke-socket"
+              ref={(element) => {
+                sockets.current[index] = element;
+              }}
+            />
           </button>
         ))}
       </div>
 
-      <div aria-hidden="true" className="relative hidden lg:block" ref={gap}>
-        {cord === null ? null : (
-          <svg
-            className="absolute inset-0 overflow-visible"
-            height={cord.height}
-            key={`${source.id}-${cord.path}`}
-            viewBox={`0 0 ${cord.width} ${cord.height}`}
-            width={cord.width}
-          >
-            <path className="voke-cord" d={cord.path} pathLength={1} />
-            <circle className="voke-signal motion-reduce:hidden" r="3.5">
-              <animateMotion
-                begin="0.55s"
-                dur="1.5s"
-                path={cord.path}
-                repeatCount="indefinite"
-              />
-            </circle>
-          </svg>
-        )}
-      </div>
+      <div aria-hidden="true" />
 
       <div
         aria-labelledby={`voke-wiring-tab-${source.id}`}
-        className="min-w-0 overflow-hidden rounded-[14px] border border-fd-border bg-fd-card shadow-[0_30px_70px_-40px_rgb(12_14_18/0.45)]"
+        className="voke-function"
         id="voke-wiring-panel"
         role="tabpanel"
       >
-        <div className="flex items-center gap-3 border-b border-fd-border px-4 py-2.5">
-          <span
-            className="voke-socket text-fd-foreground opacity-100!"
-            ref={plug}
-          />
-          <span className="font-mono text-[0.8rem] text-fd-muted-foreground">
-            {source.file}
-          </span>
-          <span className="ml-auto flex items-center gap-2 font-mono text-[0.72rem] tracking-wide text-fd-muted-foreground uppercase">
-            <span className="voke-lamp" />
+        <div className="voke-function-head">
+          <span aria-hidden="true" className="voke-inlet" ref={inlet} />
+          <span className="voke-function-file">{source.file}</span>
+          <span className="voke-function-when" key={source.id}>
             {source.when}
           </span>
         </div>
-        <div
-          className="voke-code-swap voke-flush min-h-[19.5rem] text-[0.84rem]"
-          key={source.id}
-        >
+        <div className="voke-function-code voke-flush" key={source.id}>
           {source.code}
         </div>
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-2 border-t border-fd-border bg-fd-muted/50 px-4 py-3">
-          <span className="voke-eyebrow mr-1 text-fd-muted-foreground">
-            Voke deploys
-          </span>
-          {source.deploys.map((item) => (
-            <span
-              className="rounded-md border border-fd-border bg-fd-background px-2 py-1 font-mono text-[0.74rem] text-fd-foreground"
-              key={item}
-            >
+        <div className="voke-deploys" key={`deploys-${source.id}`}>
+          <span className="voke-deploys-label">Voke deploys</span>
+          {source.deploys.map((item, index) => (
+            <span className="voke-chip" key={item} style={order(index)}>
               {item}
             </span>
           ))}
         </div>
       </div>
+
+      <svg aria-hidden="true" className="voke-cords">
+        {leaving === null ? null : (
+          <path
+            className="voke-cord"
+            d={leaving}
+            data-state="out"
+            key={`out-${previous}-${selected}`}
+            pathLength={1}
+          />
+        )}
+        {arriving === null ? null : (
+          <path
+            className="voke-cord"
+            d={arriving}
+            data-state="in"
+            key={`in-${selected}`}
+            pathLength={1}
+            style={delay(moved ? overlapMs : 0)}
+          />
+        )}
+      </svg>
     </div>
   );
 };

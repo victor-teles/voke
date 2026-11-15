@@ -234,17 +234,14 @@ export default async function HomePage() {
 
       <section className="mx-auto max-w-(--home-max) px-5 py-24 md:px-10 md:py-32">
         <Reveal className="max-w-[44rem]">
-          <p className="voke-eyebrow text-fd-primary">Event Sources</p>
-          <h2 className="voke-h2 mt-4">
-            Say what calls it. Voke wires the rest.
-          </h2>
+          <h2 className="voke-h2">Say what calls it. Voke wires the rest.</h2>
           <p className="mt-5 max-w-[38rem] text-[1.06rem] leading-[1.65] text-fd-muted-foreground">
             One helper per source. Each gives your handler a typed, validated
             input, and deploys the trigger and its permissions together with the
             Lambda function.
           </p>
         </Reveal>
-        <Reveal className="mt-12" index={1}>
+        <Reveal className="mt-14" index={1}>
           <Wiring sources={wiring} />
         </Reveal>
       </section>
