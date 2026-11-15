@@ -51,7 +51,7 @@ serves `GET /health` from an API Gateway v2 event.
 | 007  | `voke local` and `voke dev` run against the official AWS Emulator with real stack outputs            | P2       | M      | 010 (004 optional)  | DONE                          |
 | 011  | Function Contracts accept real Standard Schema validators such as Zod and Valibot                    | P1       | M      | —                   | DONE                          |
 | 012  | The docs site checks its own code samples, is readable by AI assistants, and has a real landing page | P2       | M      | (011)               | DONE                          |
-| 013  | The docs site is the single, accurate, task-oriented manual for Voke                                 | P2       | L      | 011, 012            | DONE (uncommitted)            |
+| 013  | The docs site is the single, accurate, task-oriented manual for Voke                                 | P2       | L      | 011, 012            | DONE                          |
 
 Dependencies in parentheses are ordering only (shared files), not hard prerequisites.
 

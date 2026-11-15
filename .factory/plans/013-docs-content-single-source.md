@@ -376,8 +376,8 @@ Each page covers at least the listed points.
 
 ## Execution notes (2026-11-14)
 
-Done on branch `feature/docs-content-single-source`, stacked on plan 012
-(`feature/docs-site-platform`, PR #61). Uncommitted. Gates:
+Done on branch `feature/docs-content-single-source` (PR #62), stacked on plan 012
+(`feature/docs-site-platform`, PR #61). Gates:
 
 - `bun run check`: 0 errors.
 - `bun run typecheck`: 19/19.
