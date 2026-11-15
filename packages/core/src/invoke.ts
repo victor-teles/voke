@@ -14,7 +14,11 @@ import type {
   VokeModelProviderExtensionRecord,
   VokeModelRecord,
 } from "./model";
-import type { VokeProvider } from "./provider";
+import type {
+  ProviderInvokeCapability,
+  ProviderInvokeTarget,
+  VokeProvider,
+} from "./provider";
 import { Voke } from "./route-builder";
 import { readEnv, sleep } from "./runtime-env";
 import { formatValidationIssue, readStandardResult } from "./standard-schema";
@@ -52,6 +56,7 @@ export type InvokeRuntime = "local" | "aws";
 
 export type InvokeTrace = Record<string, string | number | boolean | undefined>;
 export type InvokeErrorCode =
+  | "INVALID_OPTIONS"
   | "INVALID_PAYLOAD"
   | "INVALID_RESULT"
   | "LOCAL_FUNCTION_FAILED"
@@ -98,6 +103,8 @@ export interface InvokeContext<
 
 export interface AsyncInvokeResult {
   accepted: true;
+  /** The execution the Provider started, when its transport reports one. */
+  executionId?: string;
   requestId?: string;
 }
 
@@ -664,15 +671,25 @@ export type FunctionRegistry<
 };
 
 export interface InvokeRequest<TPayload = unknown> {
+  /** A caller-chosen name that makes starting the execution idempotent. */
+  executionName?: string;
   functionName: string;
   invocationType: "RequestResponse" | "Event";
-  payload: {
-    payload: TPayload;
-    trace: InvokeTrace;
-  };
+  /**
+   * The `{ payload, trace }` envelope for `runtime: "aws"`; the bare parsed payload for a
+   * Function the Provider routes through its invoke target.
+   */
+  payload:
+    | {
+        payload: TPayload;
+        trace: InvokeTrace;
+      }
+    | TPayload;
 }
 
 export interface InvokeTransportResponse<TResult = unknown> {
+  /** The execution the invocation started, when the platform reports one. */
+  executionId?: string;
   functionError?: string;
   statusCode?: number;
   payload?: TResult | { data: TResult };
@@ -686,6 +703,12 @@ export interface InvokeTransport {
 }
 
 export interface InvokeOptions {
+  /**
+   * Names the execution so starting it is idempotent. Only for Functions the Provider accepts it
+   * for (its invoke capability's `acceptsExecutionName`); an in-process run ignores it, and any
+   * other Function rejects with `INVALID_OPTIONS`.
+   */
+  executionName?: string;
   mode?: InvokeMode;
   runtime?: InvokeRuntime;
   trace?: InvokeTrace;
@@ -791,6 +814,7 @@ export interface FunctionRegistryInvoke<TRegistry> {
 const traceStack: InvokeTrace[] = [];
 interface FunctionRegistryActivation {
   activationKey: string;
+  invoke?: ProviderInvokeCapability;
   variableCache: RuntimeVariableCache;
   unregisteredVariableProviders: "defer" | "error";
   variableOverrides?: RuntimeVariableOverrides;
@@ -840,6 +864,8 @@ export const activateFunctionRegistry = (
   registry: object,
   activationKey: string,
   options: {
+    /** The Provider's invoke capability; its `target` can route Functions through its transport. */
+    invoke?: ProviderInvokeCapability;
     variableOverrides?: RuntimeVariableOverrides;
     variableProviders?: readonly RuntimeVariableProvider[];
   } = {}
@@ -858,6 +884,7 @@ export const activateFunctionRegistry = (
   const variableProviders = options.variableProviders ?? [];
   const activation: FunctionRegistryActivation = {
     activationKey,
+    invoke: options.invoke,
     // Without any provider (no configured Provider, no explicit providers), Runtime Variables
     // can still resolve from overrides and the environment, so provider checks wait for load.
     unregisteredVariableProviders:
@@ -1533,22 +1560,32 @@ const unwrapPayload = <TResult>(
   return payload as TResult;
 };
 
-const invokeAws = async (
+/**
+ * How a transport invocation is addressed. `runtime: "aws"` sends the `{ payload, trace }`
+ * envelope to the deployed name and unwraps a `{ data }` result; a Provider-routed Function
+ * gets the bare payload at the Provider's target and its result is used as returned.
+ */
+interface TransportRoute {
+  envelope: boolean;
+  functionName: string;
+  missingTransportMessage: string;
+  transport: InvokeTransport | undefined;
+}
+
+const invokeThroughTransport = async (
   definition: InvokableFunctionDefinition,
   payload: unknown,
-  options: InvokeOptions
+  options: InvokeOptions,
+  route: TransportRoute
 ): Promise<unknown> => {
-  const { transport } = options;
+  const { transport } = route;
   const functionName = deployedName(definition);
 
   if (transport === undefined) {
-    throw new InvokeError(
-      `invoke("${functionName}") requires an InvokeTransport for runtime "aws"`,
-      {
-        code: "MISSING_TRANSPORT",
-        functionName,
-      }
-    );
+    throw new InvokeError(route.missingTransportMessage, {
+      code: "MISSING_TRANSPORT",
+      functionName,
+    });
   }
 
   const parsedPayload = await parsePayload(definition, payload);
@@ -1558,13 +1595,18 @@ const invokeAws = async (
         Promise.resolve()
           .then(() =>
             transport.invoke({
-              functionName,
+              ...(options.executionName === undefined
+                ? {}
+                : { executionName: options.executionName }),
+              functionName: route.functionName,
               invocationType:
                 options.mode === "async" ? "Event" : "RequestResponse",
-              payload: {
-                payload: parsedPayload,
-                trace: resolveTrace(options),
-              },
+              payload: route.envelope
+                ? {
+                    payload: parsedPayload,
+                    trace: resolveTrace(options),
+                  }
+                : parsedPayload,
             })
           )
           .catch((error: unknown) => {
@@ -1585,6 +1627,9 @@ const invokeAws = async (
   if (options.mode === "async") {
     return {
       accepted: true,
+      ...(response.executionId === undefined
+        ? {}
+        : { executionId: response.executionId }),
       ...(response.requestId === undefined
         ? {}
         : { requestId: response.requestId }),
@@ -1608,7 +1653,44 @@ const invokeAws = async (
     );
   }
 
-  return await parseResult(definition, unwrapPayload(response.payload));
+  return await parseResult(
+    definition,
+    route.envelope ? unwrapPayload(response.payload) : response.payload
+  );
+};
+
+const invokeAws = async (
+  definition: InvokableFunctionDefinition,
+  payload: unknown,
+  options: InvokeOptions
+): Promise<unknown> => {
+  const functionName = deployedName(definition);
+
+  return await invokeThroughTransport(definition, payload, options, {
+    envelope: true,
+    functionName,
+    missingTransportMessage: `invoke("${functionName}") requires an InvokeTransport for runtime "aws"`,
+    transport: options.transport,
+  });
+};
+
+/** The Provider's target for this Function, unless the caller chose a runtime explicitly. */
+const providerInvokeTarget = (
+  definition: InvokableFunctionDefinition,
+  options: InvokeOptions
+):
+  | { capability: ProviderInvokeCapability; target: ProviderInvokeTarget }
+  | undefined => {
+  if (options.runtime !== undefined) {
+    return undefined;
+  }
+
+  const capability = activatedFunctionDefinitions.get(definition)?.invoke;
+  const target = capability?.target?.({ definition, key: definition.key });
+
+  return capability === undefined || target === undefined
+    ? undefined
+    : { capability, target };
 };
 
 const invokeFunction = async (
@@ -1626,6 +1708,33 @@ const invokeFunction = async (
     ...options,
     trace: resolveTrace(options),
   };
+  const routed = providerInvokeTarget(definition, invokeOptions);
+
+  if (routed !== undefined) {
+    const functionName = deployedName(definition);
+
+    return await invokeThroughTransport(definition, payload, invokeOptions, {
+      envelope: false,
+      functionName: routed.target.functionName,
+      missingTransportMessage: `invoke("${functionName}") is routed by the Provider, which supplies no invoke transport`,
+      transport: routed.capability.transport?.(),
+    });
+  }
+
+  const acceptsExecutionName =
+    activatedFunctionDefinitions
+      .get(definition)
+      ?.invoke?.acceptsExecutionName?.({ definition, key: definition.key }) ===
+    true;
+
+  if (options.executionName !== undefined && !acceptsExecutionName) {
+    const functionName = deployedName(definition);
+
+    throw new InvokeError(
+      `invoke("${functionName}") cannot use executionName: the Provider accepts it only for Functions whose executions it names`,
+      { code: "INVALID_OPTIONS", functionName }
+    );
+  }
 
   if (resolveRuntime(invokeOptions) === "aws") {
     return await invokeAws(definition, payload, invokeOptions);

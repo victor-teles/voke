@@ -26,6 +26,8 @@ export interface CloudFormationResource {
   Type: string;
   Properties: Record<string, CloudFormationValue>;
   Metadata?: Record<string, CloudFormationValue>;
+  DeletionPolicy?: "Delete" | "Retain";
+  UpdateReplacePolicy?: "Delete" | "Retain";
 }
 
 export type AwsResourceBindingValue = "ref" | "getAttArn" | "getAttId";

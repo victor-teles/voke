@@ -155,6 +155,26 @@ A local `functions.invoke(...)` needs a Function Registry that a Gateway has act
 
 A Function Registry belongs to one Gateway. Activating it again with a different name, stage, or region fails with `Function Registry is already activated with a different Gateway context`.
 
+### A Function must be replaced
+
+```txt
+Function FulfilOrderFunction must be replaced, which CloudFormation cannot do for a named Lambda. Lambda sets durable execution only when it creates a function, so adding or removing durable(...) needs a new Function: give it a new registry key or name, deploy, then remove the old one.
+```
+
+`voke deploy` stops before it changes anything. Voke gives every Lambda a fixed name, and CloudFormation cannot replace a resource with a fixed name. Changing an existing Function to `durable()`, or back to `fn()`, needs a new Lambda. Give the Function a new registry key or `name`, deploy, check that it works, then remove the old Function and deploy again. `voke deploy --dry-run` prints the same message as a warning. See [Durable Functions](/docs/guides/durable-functions#deploy).
+
+### A durable function needs a qualified name or ARN
+
+Lambda rejects an invocation of a durable function by its unqualified name or ARN. Voke invokes Durable Functions through their `live` alias, so this happens only when you call the Lambda from outside Voke, for example with the AWS CLI or from another service. Add the alias to the name: `<deployed-name>:live`. IAM policies for durable execution APIs also need a qualified ARN pattern, such as `arn:aws:lambda:<region>:<account>:function:<deployed-name>:*`.
+
+### executionName on a Function that is not durable
+
+```txt
+invoke("lookupOrder") cannot use executionName: the Provider accepts it only for Functions whose executions it names
+```
+
+The `InvokeError` has code `INVALID_OPTIONS`. Only Durable Functions accept `executionName`. Remove the option, or declare the Function with `durable()`.
+
 ## Next steps
 
 - [Errors reference](/docs/reference/errors): error classes and codes.

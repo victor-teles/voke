@@ -75,12 +75,13 @@ The AWS Provider and the AWS-specific authoring helpers.
 | `sns`, `eventBridge`, `schedule`                                                 | SNS, EventBridge and schedule **Event Sources**.                                                      |
 | `kinesis`, `dynamodbStream`                                                      | Kinesis and DynamoDB stream **Event Sources**, with the `StreamBatchResult` type.                     |
 | `s3`                                                                             | S3 **Event Sources**: object created and deleted events from a bucket.                                |
+| `durable`                                                                        | **Durable Functions**, with the `DurableContext` and `DurableInvokeContext` types.                    |
 | `secret`, `parameter`                                                            | **Runtime Variables** from Secrets Manager and SSM Parameter Store.                                   |
 | `createAuthorizers`, `jwtAuthorizer`, `lambdaAuthorizer`, `requestAuthorizer`    | API Gateway authorizers.                                                                              |
 | `bindResource`, `createAwsClientConfig`, `createResourceBindingName`, `toEnvKey` | Read resource bindings and configure AWS SDK clients at runtime.                                      |
 | `createLambdaHandlers`, `createAwsLambdaInvokeTransport`                         | Lambda handlers for the generated entry, and the Lambda Invoke transport for `functions.invoke(...)`. |
 
-Learn it in [Deploy](/docs/guides/deploy), [SQS events](/docs/guides/sqs-events), [SNS events](/docs/guides/sns-events), [EventBridge events](/docs/guides/eventbridge-events), [S3 events](/docs/guides/s3-events), [Scheduled Functions](/docs/guides/scheduled-functions), [Runtime Variables](/docs/guides/runtime-variables) and [Authorizers](/docs/guides/authorizers). See [Config](/docs/reference/config#aws-provider-options) for the `aws()` options.
+Learn it in [Deploy](/docs/guides/deploy), [SQS events](/docs/guides/sqs-events), [SNS events](/docs/guides/sns-events), [EventBridge events](/docs/guides/eventbridge-events), [S3 events](/docs/guides/s3-events), [Scheduled Functions](/docs/guides/scheduled-functions), [Durable Functions](/docs/guides/durable-functions), [Runtime Variables](/docs/guides/runtime-variables) and [Authorizers](/docs/guides/authorizers). See [Config](/docs/reference/config#aws-provider-options) for the `aws()` options.
 
 ### @voke/aws/cloudformation
 
@@ -108,9 +109,10 @@ Learn it in [Local AWS](/docs/guides/local-aws).
 
 ### @voke/aws/testing
 
-| Export                   | Use                                                                                                                                 |
-| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `createStackTestContext` | The environment and resource bindings to test a project against a local stack. It targets Floci; the AWS Emulator is not supported. |
+| Export                                                    | Use                                                                                                                                 |
+| --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `createStackTestContext`                                  | The environment and resource bindings to test a project against a local stack. It targets Floci; the AWS Emulator is not supported. |
+| `setupDurableTests`, `teardownDurableTests`, `runDurable` | Skip time in local durable executions, and run a **Durable Function** with its recorded operations.                                 |
 
 Learn it in [Testing](/docs/guides/testing).
 

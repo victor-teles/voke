@@ -12,6 +12,7 @@ import {
 } from "./event-sources";
 import type { VokeIssue } from "./event-sources";
 import { awsRouteAuth } from "./lambda";
+import { createAwsInvokeCapability } from "./lambda-invoke-transport";
 import {
   defineAwsLambdaSettings,
   validateAwsLambdaModel,
@@ -169,6 +170,15 @@ export {
   type S3ObjectEvent,
   type S3ObjectEventSchema,
 } from "./s3";
+export {
+  durable,
+  type DurableContext,
+  type DurableDuration,
+  type DurableFunctionHandler,
+  type DurableFunctionWithInputDefinitionInput,
+  type DurableInvokeContext,
+  type DurableZeroInputFunctionDefinitionInput,
+} from "./durable";
 export type {
   StreamBatchResult,
   StreamBatchResultBuilder,
@@ -262,6 +272,7 @@ export const aws = (options: AwsProviderOptions = {}): VokeProvider => {
         }),
     },
     diagnostics: createAwsDiagnostics(localProvider),
+    invoke: createAwsInvokeCapability(),
     local: {
       devEnvironment: async ({ config, endpoint, model, region, stage }) => {
         const environment = await createLocalAwsEnvironment({

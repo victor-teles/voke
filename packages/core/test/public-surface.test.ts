@@ -36,6 +36,7 @@ const teachingSurfaceFiles = [
   "../../../apps/docs/content/docs/guides/kinesis-events.mdx",
   "../../../apps/docs/content/docs/guides/dynamodb-stream-events.mdx",
   "../../../apps/docs/content/docs/guides/s3-events.mdx",
+  "../../../apps/docs/content/docs/guides/durable-functions.mdx",
   "../../../apps/docs/content/docs/guides/runtime-variables.mdx",
   "../../../apps/docs/content/docs/guides/resources.mdx",
   "../../../apps/docs/content/docs/guides/remote-functions.mdx",
@@ -64,6 +65,8 @@ const firstPartyExampleFiles = [
   "../../../examples/sqs-events/src/functions.ts",
   "../../../examples/event-sources/src/functions.ts",
   "../../../examples/stream-events/src/functions.ts",
+  "../../../examples/durable-workflow/src/functions.ts",
+  "../../../examples/durable-workflow/src/index.ts",
 ];
 
 const readPackageFile = async (path: string): Promise<string> =>
@@ -129,6 +132,7 @@ test("keeps AWS authoring in @voke/aws", async () => {
     "createLambdaHandlers",
     "createResourceBindingName",
     "createSqsEventHandler",
+    "durable",
     "dynamodbStream",
     "eventBridge",
     "jwtAuthorizer",
@@ -145,6 +149,7 @@ test("keeps AWS authoring in @voke/aws", async () => {
   ]);
   expect("dynamodbTable" in voke).toBe(false);
   expect("sqsQueue" in voke).toBe(false);
+  expect("durable" in voke).toBe(false);
 });
 
 test("keeps CloudFormation synthesis and resource builders in @voke/aws/cloudformation", async () => {
@@ -192,8 +197,12 @@ test("keeps AWS testing helpers in @voke/aws/testing", async () => {
 
   expect(Object.keys(awsTesting).toSorted()).toEqual([
     "createStackTestContext",
+    "runDurable",
+    "setupDurableTests",
+    "teardownDurableTests",
   ]);
   expect("createStackTestContext" in voke).toBe(false);
+  expect("runDurable" in voke).toBe(false);
 });
 
 test("keeps Remote Function helpers in @voke/remote", async () => {

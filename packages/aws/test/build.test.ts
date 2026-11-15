@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import { createFunctions, defineConfig, fn, http, route } from "voke";
 import type { StandardSchemaV1 } from "voke";
 
-import { aws, sqs } from "../src/index";
+import { aws, durable, sqs } from "../src/index";
 
 const schema = <TValue>(): StandardSchemaV1<TValue, TValue> => ({
   "~standard": {
@@ -99,4 +99,36 @@ test("a project without explicit entrypoints bundles to <outdir>/index.js", () =
   expect(result?.manifest.functions).toEqual({
     http: { file: "dist/index.js", handler: "index.http" },
   });
+});
+
+const externalsOf = (command: readonly string[] | undefined): string[] =>
+  (command ?? []).flatMap((part, index, all) =>
+    all[index - 1] === "--external" ? [part] : []
+  );
+
+test("the durable testing package is never bundled, and the durable SDK is bundled only when a Function needs it", () => {
+  const provider = aws();
+  const config = defineConfig({ name: "shop", provider });
+  const withDurable = provider.build?.plan?.({
+    build: config.build,
+    config,
+    entrypoint: "./src/index.ts",
+    functions: createFunctions({
+      fulfil: durable({
+        executionTimeout: { hours: 1 },
+        handler: () => "done",
+        output: schema<string>(),
+      }),
+    }),
+  });
+
+  expect(externalsOf(withDurable?.command)).toEqual([
+    "@aws-sdk/*",
+    "@aws/durable-execution-sdk-js-testing",
+  ]);
+  expect(externalsOf(plan()?.command)).toEqual([
+    "@aws-sdk/*",
+    "@aws/durable-execution-sdk-js-testing",
+    "@aws/durable-execution-sdk-js",
+  ]);
 });

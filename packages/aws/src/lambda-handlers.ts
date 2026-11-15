@@ -11,6 +11,7 @@ import type {
   RequestAuthorizerFunctionDefinition,
 } from "voke";
 
+import { createDurableLambdaHandler, isDurableFunction } from "./durable";
 import { requireAwsEventSourceAdapter } from "./event-sources";
 import { createAwsLambdaHandler } from "./lambda";
 import type {
@@ -18,6 +19,7 @@ import type {
   AwsLambdaHttpApiV2Event,
   HonoLikeApp,
 } from "./lambda";
+import { createAwsInvokeCapability } from "./lambda-invoke-transport";
 import { createAwsRuntimeVariableProvider } from "./runtime-variables";
 
 /** The module namespace of a project entrypoint. */
@@ -141,6 +143,7 @@ const resolveProject = (
 
     // A registry without a Gateway is activated here so Runtime Variables load from AWS.
     activateFunctionRegistry(functions, "aws-lambda-handlers", {
+      invoke: createAwsInvokeCapability(),
       variableProviders: [createAwsRuntimeVariableProvider()],
     });
 
@@ -211,6 +214,21 @@ const handlerFor = (
       );
     }
     default: {
+      if (isDurableFunction(definition)) {
+        // The Lambda event is the Function's payload, as for any invokable Function; the call
+        // runs inside the durable execution, so contract validation (and anything that wraps
+        // functions.invoke) runs on every replay.
+        return createDurableLambdaHandler(
+          definition,
+          async (event) =>
+            await functions.invoke(
+              key as never,
+              event as never,
+              { runtime: "local" } as never
+            )
+        );
+      }
+
       return createInvokableHandler(key, definition, functions, http);
     }
   }

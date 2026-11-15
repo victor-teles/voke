@@ -17,6 +17,7 @@
     "guides/kinesis-events",
     "guides/dynamodb-stream-events",
     "guides/s3-events",
+    "guides/durable-functions",
     "guides/runtime-variables",
     "guides/resources",
     "guides/remote-functions",

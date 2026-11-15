@@ -42,6 +42,8 @@
     "@aws-sdk/client-s3": "^3.1053.0",
     "@aws-sdk/client-secrets-manager": "^3.1053.0",
     "@aws-sdk/client-ssm": "^3.1053.0",
+    "@aws/durable-execution-sdk-js": "^3.0.0",
+    "@aws/durable-execution-sdk-js-testing": "^1.3.2",
     "@voke/build": "workspace:*",
     "@voke/http": "workspace:*",
     "hono": "^4.0.0",

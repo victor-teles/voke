@@ -15,6 +15,7 @@ Use the root package for the common Function-first Gateway authoring path:
 - Runtime Variable primitives (provider-neutral): `createVariableSource`, `createVariableProvider`
 - Error classes: `VokeConfigError`, `VokeModelError`, `VokeResourceBindingError`, `VokeRuntimeVariableError`, `InvokeError`
 - Provider building blocks: `functionRegistryEntries`, `createHandlerExportName`, `runRequestAuthorizer`, `readStandardResult` and `formatValidationIssue` (read a Standard Schema result), the `BuildPlan`, `ProviderBuildInput` and `RouteAuthContext` types, and the open Event Source types `EventSourceDefinition`, `EventFunctionHandler` and `VokeModelEventSource` that Provider packages build Event Source Functions with
+- Provider invoke routing: `ProviderInvokeCapability` (`transport`, `target`, `acceptsExecutionName`) and the `ProviderInvokeTarget` type; `InvokeOptions.executionName`, `AsyncInvokeResult.executionId`, and the `INVALID_OPTIONS` invoke error code
 - HTTP helpers: use `@voke/http`
 - Runtime AWS binding helpers: use `@voke/aws`
 - CloudFormation synthesis entrypoint: use `@voke/aws/cloudformation`
@@ -37,6 +38,8 @@ Use `@voke/aws` for AWS-specific authoring and runtime binding helpers:
 - Event Source Function helpers: `sqs`, `createSqsEventHandler`, `sns`, `eventBridge`, `schedule`, and their input and event types (`SnsMessage`, `SnsEventInvocationInput`, `EventBridgeEvent`, `EventBridgeEventInvocationInput`, `EventBridgePattern`, `ScheduledEvent`, `ScheduleEventInvocationInput`)
 - Stream Event Source Function helpers: `kinesis`, `dynamodbStream` (handlers return a `StreamBatchResult`)
 - S3 Event Source Function helper: `s3`, with `S3ObjectEvent`, `S3EventInvocationInput` and `S3EventKind`
+- Durable Function helper: `durable` (handlers receive `context.durable`, the AWS SDK's `DurableContext`; types `DurableContext`, `DurableDuration`, `DurableInvokeContext`, `DurableFunctionHandler`)
+- Durable Function test helpers in `@voke/aws/testing`: `setupDurableTests`, `teardownDurableTests`, `runDurable`
 - Generated Lambda handlers: `createLambdaHandlers` (used by the entry module `voke build` generates)
 - API Gateway authorizer helpers: `createAuthorizers`, `jwtAuthorizer`, `lambdaAuthorizer`, `requestAuthorizer`
 - Runtime binding helpers: `bindResource`, `createAwsClientConfig`

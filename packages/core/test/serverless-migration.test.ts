@@ -1086,14 +1086,16 @@ test("reports Serverless Framework plugin compatibility deterministically", () =
     },
     {
       manualSteps: [
-        "Move Step Functions definitions and IAM permissions manually; Voke does not synthesize state machines in the stable local/dev/build/synth scope.",
+        "Rewrite Lambda-centric workflows as durable() Functions from @voke/aws: steps, waits and callbacks become TypeScript in the Function's handler.",
+        "Declare state machines you keep as raw CloudFormation resources in voke.config.ts, with their IAM roles and permissions.",
       ],
       name: "serverless-step-functions",
       notes: [
-        "State machines are application workflow infrastructure and are not converted automatically.",
+        "Voke does not synthesize Step Functions state machines; AWS Lambda durable functions are its orchestration model.",
       ],
       status: "manual",
-      summary: "Step Functions definitions require manual migration.",
+      summary:
+        "Step Functions workflows move to durable Functions or raw CloudFormation resources.",
     },
     {
       manualSteps: [

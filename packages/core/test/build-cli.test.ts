@@ -68,6 +68,10 @@ test("build CLI builds the Provider's plan from the Functions the entrypoint dec
       "esm",
       "--external",
       "@aws-sdk/*",
+      "--external",
+      "@aws/durable-execution-sdk-js-testing",
+      "--external",
+      "@aws/durable-execution-sdk-js",
     ],
   ]);
 

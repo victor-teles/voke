@@ -114,6 +114,7 @@ export {
   type ProviderCommandRunner,
   type ProviderCommandRunOptions,
   type ProviderInvokeCapability,
+  type ProviderInvokeTarget,
   type ProviderLocalCapability,
   type ProviderLocalDevEnvironment,
   type ProviderLocalWorkflow,

@@ -2,6 +2,8 @@ import { createBuildPlan, handlerModule } from "@voke/build";
 import { createHandlerExportName, functionRegistryEntries } from "voke";
 import type { BuildPlan, ProviderBuildInput } from "voke";
 
+import { isDurableFunction } from "./durable";
+
 /** Where `voke build` writes the generated Lambda entry module, relative to the project. */
 export const generatedLambdaEntry = ".voke/build/index.ts";
 const generatedEntryDirectory = ".voke/build";
@@ -38,6 +40,26 @@ const generatedEntrySource = (
     "",
   ].join("\n");
 
+const durableTestingPackage = "@aws/durable-execution-sdk-js-testing";
+const durableSdkPackage = "@aws/durable-execution-sdk-js";
+
+/**
+ * `build.external` plus the durable packages a Lambda never needs: the testing package (local
+ * runs only) always, and the durable SDK when no Function is durable. Both are loaded with
+ * `import()` only on the paths that use them, so leaving them out never breaks a handler.
+ */
+const lambdaExternals = (input: ProviderBuildInput): string[] => {
+  const hasDurableFunction = functionRegistryEntries(input.functions).some(
+    ([, definition]) => isDurableFunction(definition)
+  );
+
+  return [
+    ...input.build.external,
+    durableTestingPackage,
+    ...(hasDurableFunction ? [] : [durableSdkPackage]),
+  ];
+};
+
 /**
  * The AWS build plan: one generated entry module that exports a Lambda handler per Function, bundled
  * to `<outdir>/index.js`, plus `<outdir>/voke-manifest.json` mapping each Function to its handler.
@@ -52,7 +74,7 @@ export const createAwsBuildPlan = (input: ProviderBuildInput): BuildPlan => {
     .map(([key]) => createHandlerExportName(key))
     .toSorted();
   const base = createBuildPlan({
-    build: input.build,
+    build: { ...input.build, external: lambdaExternals(input) },
     entrypoints: [generatedLambdaEntry],
     functions: input.functions,
     sources: {

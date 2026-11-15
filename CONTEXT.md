@@ -204,6 +204,14 @@ _Avoid_: SQS Batch Result for streams, checkpoint response
 The local test/runtime path that delivers an event-shaped payload to an Event Source Function.
 _Avoid_: Function invocation, route invocation
 
+**Durable Function**:
+A **Function** whose handler runs as a checkpointed, replayable execution that can pause and resume.
+_Avoid_: Workflow, state machine, saga function
+
+**Durable Execution**:
+One run of a **Durable Function**, identified by an execution id and optionally a caller-chosen name.
+_Avoid_: Workflow run, job, instance
+
 **Dev Function Summary**:
 A human-readable startup log that lists the runtime **Gateway** assembly's **Functions** and **Event Sources** during `voke dev`.
 _Avoid_: Inspect API, machine-readable manifest, config summary
@@ -391,6 +399,11 @@ _Avoid_: AWS secret name, parameter path, resource key
 - **Functions** are internal and invokable unless they define an HTTP route.
 - A **Function Registry** can perform **Event Invocation** for Event Source Functions.
 - A **Function Registry** can perform typed route invocation for route-backed **Functions**, while a **Gateway** performs HTTP request testing.
+- A **Durable Function** is an invokable **Function** authored with `durable()` through the **AWS Provider** package.
+- A **Durable Function** does not mix HTTP routes or **Event Sources**; an Event Source Function starts one with `functions.invoke(key, payload, { mode: "async" })`.
+- Deployed invocations of a **Durable Function** always go through the **Provider**, which starts a **Durable Execution**; local invocations run it in-process.
+- A caller can name a **Durable Execution** with `executionName`, which makes starting it idempotent.
+- Durable Functions are the supported orchestration model; Step Functions state machines are raw CloudFormation resources.
 
 ## Flagged ambiguities
 

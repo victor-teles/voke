@@ -18,6 +18,12 @@ import type {
   CloudFormationTemplate,
   CloudFormationValue,
 } from "./cloudformation-template";
+import {
+  durableConfig,
+  durableExecutionRoleStatements,
+  durableInvokeAccess,
+  durableVersionResources,
+} from "./durable-synthesis";
 import type { DynamodbStreamViewType } from "./dynamodb-stream";
 import { requireAwsEventSourceAdapter } from "./event-sources";
 import type {
@@ -988,6 +994,8 @@ export const synthesizeCloudFormationFromModel = (
     );
   }
 
+  const durableAccess = durableInvokeAccess(model);
+
   for (const [name, definition] of Object.entries(model.functions).toSorted(
     ([leftName], [rightName]) => {
       if (leftName === apiFunctionName) {
@@ -1012,6 +1020,8 @@ export const synthesizeCloudFormationFromModel = (
         model.resources
       ),
       ...toEventSourcePolicyStatements(name, definition, model),
+      ...durableAccess.statements,
+      ...durableExecutionRoleStatements(definition),
     ]);
     const environmentVariables: Record<string, CloudFormationValue> = {
       ...definition.environment,
@@ -1031,6 +1041,9 @@ export const synthesizeCloudFormationFromModel = (
         resourceProvider(resource).bindingValue
       );
     }
+
+    Object.assign(environmentVariables, durableAccess.environment);
+    const functionDurableConfig = durableConfig(definition);
 
     templateResources[logicalId] = {
       Metadata: {
@@ -1053,6 +1066,9 @@ export const synthesizeCloudFormationFromModel = (
                 S3Bucket: options.artifact.bucket,
                 S3Key: options.artifact.key,
               },
+        ...(functionDurableConfig === undefined
+          ? {}
+          : { DurableConfig: functionDurableConfig }),
         Environment: {
           Variables: environmentVariables,
         },
@@ -1066,6 +1082,14 @@ export const synthesizeCloudFormationFromModel = (
       },
       Type: "AWS::Lambda::Function",
     };
+
+    if (functionDurableConfig !== undefined) {
+      // Durable Functions are invoked through a published version, never unqualified.
+      Object.assign(
+        templateResources,
+        durableVersionResources(logicalId, templateResources[logicalId])
+      );
+    }
     // An explicit log group gives the logs a retention period and removes them with the stack.
     templateResources[logGroupLogicalId] = {
       Properties: {

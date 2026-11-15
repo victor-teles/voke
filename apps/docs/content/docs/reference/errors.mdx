@@ -128,6 +128,7 @@ Unsupported Serverless event kafka on function worker: kafka is not an automatic
 | `TRANSPORT_FAILED`       | The transport (Lambda Invoke or HTTP to a remote) throws or answers with an error status.                         |
 | `TRANSPORT_STATUS_ERROR` | The invoked Lambda returns a function error or a status of 400 or more.                                           |
 | `LOCAL_FUNCTION_FAILED`  | An async local invocation (`mode: "async"`) fails. Voke passes it to `onAsyncError`, or logs it.                  |
+| `INVALID_OPTIONS`        | An invoke option does not apply to the Function, such as `executionName` on a Function that is not durable.       |
 
 The message names the Function and the failure, for example `Invalid payload for getUser: id: Expected string length to be at least 1`.
 

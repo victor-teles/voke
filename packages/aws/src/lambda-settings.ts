@@ -36,13 +36,24 @@ export const defaultAwsLambdaSettings: AwsLambdaSettings = {
   runtime: "nodejs22.x",
 };
 
+/**
+ * Durable execution settings in the Function's `lambda.function` record. Only `durable(...)`
+ * writes them, so `awsLambda()` does not accept them.
+ */
+export interface AwsLambdaDurableOptions {
+  /** `DurableConfig.ExecutionTimeout`, in seconds (1-31,622,400). */
+  executionTimeoutSeconds: number;
+  /** `DurableConfig.RetentionPeriodInDays` (1-90). Lambda defaults to 14. */
+  retentionDays?: number;
+}
+
 /** The per-Function override that `awsLambda()` stores in `synthesis.provider.aws`. */
 export interface AwsLambdaFunctionOptions {
   architecture?: AwsLambdaArchitecture;
   runtime?: AwsLambdaRuntime;
 }
 
-const lambdaFunctionRecordType = "lambda.function";
+export const lambdaFunctionRecordType = "lambda.function";
 const runtimes: readonly AwsLambdaRuntime[] = ["nodejs22.x", "nodejs24.x"];
 const architectures: readonly AwsLambdaArchitecture[] = ["arm64", "x86_64"];
 
@@ -110,6 +121,70 @@ export const defineAwsLambdaSettings = (
   return settings;
 };
 
+// DurableConfig limits from the AWS::Lambda::Function DurableConfig reference.
+const maxExecutionTimeoutSeconds = 31_622_400;
+const maxDurableRetentionDays = 90;
+const durableRecordKeys: ReadonlySet<string> = new Set([
+  "executionTimeoutSeconds",
+  "retentionDays",
+]);
+
+const integerRangeIssue = (
+  value: unknown,
+  min: number,
+  max: number,
+  path: string
+): VokeIssue | undefined =>
+  typeof value === "number" &&
+  Number.isInteger(value) &&
+  value >= min &&
+  value <= max
+    ? undefined
+    : {
+        message: `expected a whole number from ${min} to ${max}; received ${JSON.stringify(value)}`,
+        path,
+      };
+
+const durableRecordIssues = (durable: unknown, path: string): VokeIssue[] => {
+  if (
+    typeof durable !== "object" ||
+    durable === null ||
+    Array.isArray(durable)
+  ) {
+    return [
+      {
+        message: `expected { executionTimeoutSeconds, retentionDays? } (declare the Function with durable() from "@voke/aws"); received ${JSON.stringify(durable)}`,
+        path,
+      },
+    ];
+  }
+
+  const record = durable as Record<string, unknown>;
+
+  return [
+    ...Object.keys(record)
+      .filter((key) => !durableRecordKeys.has(key))
+      .map((key) => ({
+        message: `unknown durable setting "${key}"; expected executionTimeoutSeconds or retentionDays`,
+        path: `${path}.${key}`,
+      })),
+    integerRangeIssue(
+      record.executionTimeoutSeconds,
+      1,
+      maxExecutionTimeoutSeconds,
+      `${path}.executionTimeoutSeconds`
+    ),
+    record.retentionDays === undefined
+      ? undefined
+      : integerRangeIssue(
+          record.retentionDays,
+          1,
+          maxDurableRetentionDays,
+          `${path}.retentionDays`
+        ),
+  ].filter((issue) => issue !== undefined);
+};
+
 const functionRecordIssues = (
   name: string,
   record: VokeModelProviderExtensionRecord
@@ -125,9 +200,12 @@ const functionRecordIssues = (
     ];
   }
 
-  const { architecture, runtime } = record.properties;
+  const { architecture, durable, runtime } = record.properties;
 
   return [
+    ...(durable === undefined
+      ? []
+      : durableRecordIssues(durable, `${path}.properties.durable`)),
     runtime === undefined
       ? undefined
       : oneOfIssue(runtimes, runtime, `${path}.properties.runtime`),
@@ -237,6 +315,14 @@ export const resolveFunctionLambdaSettings = (
       (properties.runtime as AwsLambdaRuntime | undefined) ?? settings.runtime,
   };
 };
+
+/** The Function's durable execution settings, or undefined for a Function not declared durable. */
+export const resolveFunctionDurableSettings = (
+  definition: VokeModelFunction
+): AwsLambdaDurableOptions | undefined =>
+  definition.provider?.aws?.properties.durable as
+    | AwsLambdaDurableOptions
+    | undefined;
 
 /**
  * The visibility timeout Voke derives for a queue with no explicit value: six times the largest

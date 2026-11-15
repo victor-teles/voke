@@ -185,6 +185,7 @@ const createGatewayApp = (
   assertUniqueFunctionRoutes(functions);
   assertRouteParamSchemas(functions);
   activateFunctionRegistry(functions, activationKey(config), {
+    invoke: config.provider?.invoke,
     variableOverrides: options.variables?.overrides,
     variableProviders: gatewayVariableProviders(config, options.variables),
   });

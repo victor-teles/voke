@@ -335,21 +335,19 @@ Why Voke needs it:
 
 Voke should avoid premature workflow DSL design, but it should leave a path for typed orchestration around Functions.
 
-Deliverables:
+Outcome (decided 2026-11-14, ADR 0014): AWS Lambda durable functions are the supported orchestration model. A `durable(...)` Function from `@voke/aws` is ordinary TypeScript with checkpointed `step`, `wait` and callbacks, tested locally through the AWS durable execution testing runner and deployed as a durable Lambda behind a `live` alias. Step Functions gets no builder or DSL; state machines stay reachable as raw CloudFormation resources. The `workflow(...)` exploration is dropped.
 
-- Add Step Functions migration reporting first.
-- Add typed `workflow(...)` exploration only after EventBridge and direct Function invocation are stable.
-- Add helpers for idempotency keys, retries, and dead-letter destinations before introducing a full workflow DSL.
-- Add ADR comparing Step Functions synthesis, EventBridge choreography, and userland orchestration.
+Delivered:
 
-Acceptance tests:
+- `durable(...)`, `runDurable` / `setupDurableTests` test helpers, synthesis (DurableConfig, retained versions, `live` alias, checkpoint and invoke grants), a deploy guard for Functions that would need replacement, and `executionName` for idempotent starts.
+- The `serverless-step-functions` migration entry points at `durable(...)` and raw CloudFormation resources.
+- `examples/durable-workflow` and the Durable Functions guide.
 
-- Compatibility report tests for Step Functions plugin configs.
-- ADR-backed prototype before public API.
+Follow-ups:
 
-Docs and examples:
-
-- Add an orchestration decision guide.
+- Prove the deployed path on real AWS (deploy, wait, redeploy while an execution is paused).
+- `voke executions` (list, inspect, stop), callback helpers, pruning retained versions, KMS keys for execution state.
+- Idempotency helpers should treat `executionName` as the idempotent start for Durable Functions.
 
 ## Explicit Non-Goals
 
