@@ -255,7 +255,9 @@ export type CaptureCommand = (
 ) => Promise<string>;
 
 const captureCommand: CaptureCommand = async (command, options) => {
-  const env: Record<string, string | undefined> = { ...process.env };
+  // Typed as ProcessEnv so the spawn call also typechecks in apps whose types extend it (Next.js
+  // makes NODE_ENV required).
+  const env: NodeJS.ProcessEnv = { ...process.env };
 
   for (const name of options.unsetEnv) {
     Reflect.deleteProperty(env, name);

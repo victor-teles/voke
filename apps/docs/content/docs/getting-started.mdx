@@ -41,7 +41,8 @@ my-api/
 
 Inside an existing project, add `voke.config.ts`:
 
-```ts
+```ts twoslash
+// @filename: voke.config.ts
 import { defineConfig } from "voke";
 import { aws } from "@voke/aws";
 import { dynamodbTable, sqsQueue } from "@voke/aws/cloudformation";
@@ -63,7 +64,14 @@ export default defineConfig({
 
 Create route-backed Functions and mount them in a Gateway:
 
-```ts
+```ts twoslash
+// @filename: voke.config.ts
+import { aws } from "@voke/aws";
+import { defineConfig } from "voke";
+
+export default defineConfig({ name: "hello-api", provider: aws() });
+// @filename: src/index.ts
+// ---cut---
 import { createFunctions, http, route, voke } from "voke";
 import config from "../voke.config";
 
@@ -97,7 +105,18 @@ bun run release:check
 
 For local HTTP behavior, call the Gateway directly from tests:
 
-```ts
+```ts twoslash
+import { createFunctions, http, route, voke } from "voke";
+
+const gateway = voke(
+  createFunctions({
+    http: http({
+      routes: [route.get("/health", { handler: () => ({ ok: true }) })],
+    }),
+  }),
+  { config: { name: "hello-api" } }
+);
+// ---cut---
 const response = await gateway.request("/health");
 ```
 

@@ -20,7 +20,14 @@ Serverless projects often drift across framework config, handler files, local te
 
 ## The mental model
 
-```ts
+```ts twoslash
+// @filename: voke.config.ts
+import { aws } from "@voke/aws";
+import { defineConfig } from "voke";
+
+export default defineConfig({ name: "hello-api", provider: aws() });
+// @filename: src/index.ts
+// ---cut---
 import { createFunctions, http, route, voke } from "voke";
 import config from "../voke.config";
 

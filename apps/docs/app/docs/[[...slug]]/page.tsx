@@ -3,11 +3,14 @@ import {
   DocsDescription,
   DocsPage,
   DocsTitle,
-} from "fumadocs-ui/page";
+  MarkdownCopyButton,
+  ViewOptionsPopover,
+} from "fumadocs-ui/layouts/docs/page";
 import { notFound } from "next/navigation";
 
 import { getMDXComponents } from "@/components/mdx";
-import { source } from "@/lib/source";
+import { editUrl } from "@/lib/site";
+import { markdownUrl, ogImagePath, source } from "@/lib/source";
 
 interface PageProps {
   params: Promise<{
@@ -29,6 +32,13 @@ export default async function Page({ params }: PageProps) {
     <DocsPage toc={page.data.toc}>
       <DocsTitle>{page.data.title}</DocsTitle>
       <DocsDescription>{page.data.description}</DocsDescription>
+      <div className="-mt-4 mb-2 flex flex-row items-center gap-2 border-b border-fd-border pb-6">
+        <MarkdownCopyButton markdownUrl={markdownUrl(page)} />
+        <ViewOptionsPopover
+          githubUrl={editUrl(page.path)}
+          markdownUrl={markdownUrl(page)}
+        />
+      </div>
       <DocsBody>
         <MDXContent components={getMDXComponents()} />
       </DocsBody>
@@ -48,6 +58,7 @@ export const generateMetadata = async ({ params }: PageProps) => {
 
   return {
     description: page.data.description,
+    openGraph: { images: ogImagePath(page) },
     title: page.data.title,
   };
 };

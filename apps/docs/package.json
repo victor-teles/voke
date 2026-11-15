@@ -8,25 +8,36 @@
     "generate": "fumadocs-mdx",
     "build": "next build --webpack",
     "typecheck": "bun run generate && tsgo --project tsconfig.json --noEmit",
-    "clean": "rm -rf .next .source"
+    "clean": "rm -rf .next .source",
+    "test": "fumadocs-mdx && bun test",
+    "lint:links": "fumadocs-mdx && bun --preload ./scripts/mdx-preload.ts scripts/lint-links.ts"
   },
   "dependencies": {
-    "@types/mdx": "latest",
-    "fumadocs-core": "latest",
-    "fumadocs-mdx": "latest",
-    "fumadocs-ui": "latest",
-    "next": "latest",
-    "react": "latest",
-    "react-dom": "latest"
+    "@types/mdx": "^2.0.13",
+    "fumadocs-core": "^16.8.12",
+    "fumadocs-mdx": "^15.0.7",
+    "fumadocs-twoslash": "^3.3.1",
+    "fumadocs-ui": "^16.8.12",
+    "next": "^16.2.6",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "latest",
-    "@types/node": "latest",
-    "@types/react": "latest",
-    "@types/react-dom": "latest",
+    "@tailwindcss/postcss": "^4.3.0",
+    "@types/node": "^25.9.1",
+    "@types/react": "^19.2.15",
+    "@types/react-dom": "^19.2.3",
     "@typescript/native-preview": "catalog:",
-    "postcss": "latest",
-    "tailwindcss": "latest",
-    "typescript": "latest"
+    "@voke/aws": "workspace:*",
+    "@voke/http": "workspace:*",
+    "@voke/remote": "workspace:*",
+    "@voke/schema": "workspace:*",
+    "@voke/testing": "workspace:*",
+    "hono": "^4.0.0",
+    "next-validate-link": "^1.6.7",
+    "postcss": "^8.5.15",
+    "tailwindcss": "^4.3.0",
+    "typescript": "^6.0.3",
+    "voke": "workspace:*"
   }
 }

@@ -319,3 +319,77 @@ end with the list empty.
   samples come from `apps/docs/snippets/`.
 - Deferred: hosting and deploy, an API reference generated from types, a static search index,
   versioned docs, and "last updated" dates.
+
+## Execution notes (2026-11-14)
+
+Done on branch `feature/docs-site-platform` (PR #61), stacked on plan 011 (`feature/real-standard-schema`,
+PR #60). Gates: `bun run check` 0 errors, `bun run typecheck` 19/19, `bun run test`
+24/24 tasks (docs 7, core 247, `@voke/aws` 99). The root test run builds the docs site before
+testing it (`@voke/docs:build` precedes `@voke/docs:test` in the turbo log), so CI builds it with no
+workflow change.
+
+- **Versions:** every `"latest"` in `apps/docs/package.json` is pinned to the installed version
+  (Fumadocs 16.8.12, MDX 15.0.7, Next 16.2.6, React 19.2.6, Tailwind 4.3.0, TypeScript 6.0.3).
+  - `fumadocs-twoslash` is **3.3.1**. 4.x needs `fumadocs-core` 16.15+, which would have meant
+    upgrading every Fumadocs package; 3.x works with the installed 16.8.
+  - The workspace packages and `hono` are `devDependencies`, so samples resolve.
+- **Checked samples:** blocks marked `ts twoslash` compile against the real packages during
+  `next build`, with type hovers and a file-system type cache.
+  - Evidence: setting `name: 42` in a Getting Started sample made `bun run build` exit 1, naming
+    `content/docs/getting-started.mdx` and error 2322. The sample was restored and the build passes.
+  - `getting-started.mdx` (3 samples) and `index.mdx` (1) are converted, using hidden `voke.config.ts`
+    setup through `// @filename` and `// ---cut---`.
+- **Sample policy:** `test/samples.test.ts` fails on any unchecked `ts`/`tsx` block outside
+  `legacyUncheckedPages`. That list has 5 pages (deploy, functions, gateway-testing, local-aws,
+  config); the test also fails if a listed page has no unchecked block left.
+- **Landing page** (`app/(home)/`):
+  - It uses `HomeLayout` with the docs navigation: Docs, search, theme, GitHub.
+  - Content: one `h1`, the three commands in a copyable block, "Get started" and "Read the docs",
+    tabs showing `snippets/voke.config.ts` and `snippets/index.ts`, and three feature cards linked to
+    real pages.
+  - The snippets are compiled by the app's typecheck and highlighted at build time. The
+    `<span>`-built sample and the `voke-code-*` classes are gone.
+  - Added `app/not-found.tsx`.
+- **Metadata and discovery:** `lib/site.ts` (`NEXT_PUBLIC_SITE_URL`, default `http://localhost:3942`)
+  feeds `metadataBase`, Open Graph/Twitter, `robots.txt` and `sitemap.xml`. Added a placeholder "V"
+  icon (`app/icon.svg`) and a per-page Open Graph image at `/og/<slug>/image.png`.
+- **Page actions:** "Copy Markdown" and the "Open" menu (with the GitHub edit link) appear under each
+  title.
+- **LLM routes:** `/llms.txt`, `/llms-full.txt` and `/llms.mdx/docs/<slug>`. This Fumadocs version's
+  `llms()` has only `index`, so pages render from `page.data.getText("processed")`.
+- **Components:** `Steps`, `Tabs`, `Files`, `Callout`, `Cards` and `TypeTable` are registered in
+  `components/mdx.tsx`.
+- **Link checking:** `scripts/lint-links.ts` (`bun run lint:links`) runs `next-validate-link`, and
+  `test/links.test.ts` fails on a broken link or anchor. It was proven by adding a missing page and a
+  missing anchor, which were both reported. Bun loads the content through `scripts/mdx-preload.ts`
+  (the Fumadocs MDX plugin; its setup is async and must be awaited).
+- **Tests:** `test/llms.test.ts` (every page in `llms.txt`; page Markdown) and
+  `test/edit-links.test.ts` (every edit URL resolves to a real file).
+
+Checked in the browser against `next start`:
+
+- Every route returns the right status and content type, and an unknown page returns 404.
+- The landing page at 1440 px (light and dark) and 390 px (dark) has no horizontal scroll, one `h1`,
+  and `nav`/`main` landmarks. Tabbing goes Voke → Docs → Search → Theme → GitHub → Copy → code → Get
+  started → Read the docs → tabs, each with a visible focus style.
+- A Twoslash popup opens and shows `createFunctions`' real signature.
+
+Bugs found and fixed while checking:
+
+- Highlighted code on the landing page rendered light in dark mode. Fixed with `defaultColor: false`,
+  as Fumadocs' own code blocks use.
+- The theme's `secondary` token was a strong accent (orange in dark, near-black in light), but
+  Fumadocs draws subtle surfaces with it: the search box, tab lists and buttons. That made tab
+  labels illegible. It is now a subtle surface color in both themes.
+- Twoslash popups opened behind the sticky docs sidebar (z-index 20), because their positioner forms
+  a stacking context. Fixed in `global.css`.
+
+Deviations:
+
+- `packages/aws/src/local.ts`: `captureCommand` typed its child environment as a plain `Record`, so
+  `@voke/aws` source failed to typecheck in a Next.js app, where `NODE_ENV` is a required field of
+  `process.env`. It is now typed as `NodeJS.ProcessEnv`. This was outside the listed scope.
+- The landing page moved to `app/(home)/page.tsx`, and `public-surface.test.ts` reads it there.
+- No `.twoslash` entry in `.gitignore`: fumadocs-twoslash 3.x does not write that folder.
+- The "Open" menu's links could not be read through the browser tool. The edit URLs are covered by
+  `test/edit-links.test.ts` instead.
