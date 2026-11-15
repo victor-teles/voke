@@ -17,6 +17,7 @@
   "dependencies": {
     "@voke/aws": "workspace:*",
     "@voke/http": "workspace:*",
+    "@voke/openapi": "workspace:*",
     "@voke/schema": "workspace:*",
     "hono": "^4.0.0",
     "voke": "workspace:*"

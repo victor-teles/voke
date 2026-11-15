@@ -4,7 +4,10 @@ import { Hono } from "hono";
 import { createFunctions, fn, voke } from "voke";
 import type { StandardSchemaV1, VokeEnv } from "voke";
 
-import { mountDevFunctionEndpoints } from "../src/index";
+import {
+  createFunctionContractArtifact,
+  mountDevFunctionEndpoints,
+} from "../src/index";
 
 const userId: StandardSchemaV1<{ id: string }, { id: string }> = {
   "~standard": {
@@ -69,6 +72,42 @@ test("dev Function endpoints answer with the standard data envelope", async () =
   };
 
   expect(contract.data.project).toBe("users");
+});
+
+test("the contract artifact reads Standard JSON Schema through the shared reader", () => {
+  const withJsonSchema: StandardSchemaV1<{ id: string }, { id: string }> = {
+    "~standard": {
+      ...userId["~standard"],
+      jsonSchema: {
+        input: () => ({
+          $schema: "https://json-schema.org/draft/2020-12/schema",
+          properties: { id: { minLength: 1, type: "string" } },
+          required: ["id"],
+          type: "object",
+        }),
+        output: () => ({ oneOf: [{ type: "string" }, { type: "number" }] }),
+      },
+    },
+  };
+  const artifact = createFunctionContractArtifact(
+    "users",
+    createFunctions({
+      getUser: fn({
+        handler: (payload) => payload,
+        input: withJsonSchema,
+        output: withJsonSchema,
+      }),
+    })
+  );
+
+  expect(artifact.functions.getUser).toEqual({
+    input: {
+      properties: { id: { type: "string" } },
+      required: ["id"],
+      type: "object",
+    },
+    output: true,
+  });
 });
 
 test("dev Function endpoints keep their error envelopes and codes", async () => {

@@ -701,6 +701,60 @@ test("an unknown command with a config but no matching Plugin keeps the usage er
   ).rejects.toThrow("Unknown command: docs import");
 });
 
+test("voke openapi generate writes the OpenAPI document of a project", async () => {
+  const directory = tempPath(`voke-openapi-cli-${crypto.randomUUID()}`);
+  const coreIndex = `${import.meta.dir}/../src/index.ts`;
+  const openapiIndex = `${import.meta.dir}/../../openapi/src/index.ts`;
+  const configPath = `${directory}/voke.config.ts`;
+  const lines: string[] = [];
+
+  await Bun.write(
+    `${directory}/src/index.ts`,
+    `import { createFunctions, http, route } from "${coreIndex}";
+
+export const functions = createFunctions({
+  http: http({
+    routes: [
+      route.get("/health", { handler: () => "ok" }),
+      route.get("/internal", { handler: () => "ok", meta: { hidden: true } }),
+    ],
+  }),
+});
+`
+  );
+  await Bun.write(
+    configPath,
+    `import { openapi } from "${openapiIndex}";
+
+export default {
+  entrypoint: ${JSON.stringify(`${directory}/src/index.ts`)},
+  name: "openapi-cli",
+  plugins: [openapi({ expose: true })],
+};
+`
+  );
+
+  await runCli(
+    [
+      "openapi",
+      "generate",
+      "--out",
+      `${directory}/openapi.json`,
+      `--config=${configPath}`,
+    ],
+    { output: (line) => lines.push(line) }
+  );
+
+  const document = await Bun.file(`${directory}/openapi.json`).json();
+
+  expect(lines).toEqual([`Wrote ${directory}/openapi.json (1 operation)`]);
+  expect(document).toMatchObject({
+    info: { title: "openapi-cli" },
+    openapi: "3.1.0",
+  });
+  expect(Object.keys(document.paths)).toEqual(["/health"]);
+});
+
 test("the reserved Plugin names are the built-in command names and help", () => {
   expect([...reservedPluginCommandNames].toSorted()).toEqual(
     [...Object.keys(commandSpecs), "help"].toSorted()

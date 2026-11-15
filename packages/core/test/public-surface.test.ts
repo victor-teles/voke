@@ -27,6 +27,7 @@ const teachingSurfaceFiles = [
   "../../../apps/docs/content/docs/concepts.mdx",
   "../../../apps/docs/content/docs/guides/functions.mdx",
   "../../../apps/docs/content/docs/guides/http-routes.mdx",
+  "../../../apps/docs/content/docs/guides/openapi.mdx",
   "../../../apps/docs/content/docs/guides/schemas.mdx",
   "../../../apps/docs/content/docs/guides/authorizers.mdx",
   "../../../apps/docs/content/docs/guides/sqs-events.mdx",
@@ -114,9 +115,13 @@ test("keeps the stable root runtime surface intentional", () => {
     "loadVokeConfig",
     // A Provider building block: the project's Functions plus the Plugin-contributed ones.
     "projectFunctionEntries",
+    // The one JSON Schema reader: OpenAPI documents and Function Contract Artifacts share it.
+    "readJsonSchema",
     "readStandardResult",
     "route",
     "runRequestAuthorizer",
+    // Narrows JSON Schema to the Function Contract Artifact's subset (@voke/remote uses it).
+    "toContractJsonSchema",
     "voke",
   ]);
   // toEnvKey is an AWS binding-name helper: it lives in @voke/aws only.
@@ -237,6 +242,17 @@ test("keeps schema helpers in @voke/schema", async () => {
 
   expect(Object.keys(schemaHelpers).toSorted()).toEqual(["schema"]);
   expect("schema" in voke).toBe(false);
+});
+
+test("keeps OpenAPI helpers in @voke/openapi", async () => {
+  const openapiHelpers = await importPackage("@voke/openapi");
+
+  expect(Object.keys(openapiHelpers).toSorted()).toEqual([
+    "createOpenApiDocument",
+    "openapi",
+  ]);
+  expect("openapi" in voke).toBe(false);
+  expect("createOpenApiDocument" in voke).toBe(false);
 });
 
 test("keeps local AWS provider helpers in @voke/aws/local", async () => {

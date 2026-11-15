@@ -231,6 +231,28 @@ voke migrate serverless ./serverless.yml --out ./voke-migration
 
 `voke migrate serverless` reads a Serverless Framework service and writes a Function-first Voke skeleton and a migration report to the output directory. It prints `Wrote migration skeleton to <directory>`. See [Serverless migration](/docs/guides/serverless-migration).
 
+## openapi
+
+A command of the `openapi()` Plugin from `@voke/openapi`: it exists when `voke.config.ts` declares that Plugin.
+
+```txt
+Usage: voke openapi generate [--out openapi.json] [--server <url>]
+
+Write the OpenAPI document of the project's HTTP API.
+
+Flags:
+  --out <value>     Output file. Default: openapi.json
+  --server <value>  A server URL to list in the document
+  --config <value>  Config file. Default: voke.config.ts
+```
+
+```bash
+voke openapi generate
+voke openapi generate --out ./dist/openapi.json --server https://api.example.com
+```
+
+`voke openapi generate` imports the entrypoint and writes the OpenAPI 3.1 document of every route as two-space JSON. It prints `Wrote <path> (<n> operations)`. See [OpenAPI and API reference](/docs/guides/openapi).
+
 ## remote
 
 ```txt

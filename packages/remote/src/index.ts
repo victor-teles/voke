@@ -4,7 +4,13 @@ import { dirname } from "node:path";
 
 import { error as errorResponse, ok } from "@voke/http";
 import type { Hono } from "hono";
-import { InvokeError, invokeRegistryFunction, VokeConfigError } from "voke";
+import {
+  InvokeError,
+  invokeRegistryFunction,
+  readJsonSchema,
+  toContractJsonSchema,
+  VokeConfigError,
+} from "voke";
 import type {
   FunctionRegistry,
   FunctionRegistryInput,
@@ -201,20 +207,10 @@ const fingerprint = (value: unknown): string => {
   return `sha256:${digest}`;
 };
 
-const schemaMetadata = (schema: StandardSchemaV1 | undefined): JsonSchema => {
-  const schemaWithMetadata = schema as
-    | (StandardSchemaV1 & {
-        jsonSchema?: JsonSchema;
-        "~voke"?: { jsonSchema?: JsonSchema };
-      })
-    | undefined;
-
-  return (
-    schemaWithMetadata?.jsonSchema ??
-    schemaWithMetadata?.["~voke"]?.jsonSchema ??
-    true
-  );
-};
+const schemaMetadata = (
+  schema: StandardSchemaV1 | undefined,
+  io: "input" | "output"
+): JsonSchema => toContractJsonSchema(readJsonSchema(schema, io));
 
 export const createFunctionContractArtifact = (
   project: string,
@@ -232,8 +228,8 @@ export const createFunctionContractArtifact = (
       input:
         invokable.input === undefined
           ? undefined
-          : schemaMetadata(invokable.input),
-      output: schemaMetadata(invokable.output),
+          : schemaMetadata(invokable.input, "input"),
+      output: schemaMetadata(invokable.output, "output"),
     };
   }
 

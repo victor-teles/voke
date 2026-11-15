@@ -124,6 +124,55 @@ test("the request-timing Plugin reports the route handler time in a header", asy
   expect(response.headers.get("x-handler-ms")).toMatch(/^\d+\.\d{2}$/u);
 });
 
+test("the openapi Plugin serves the OpenAPI document of the routes", async () => {
+  const response = await helloApi.request("http://localhost/openapi.json");
+  const document = await response.json();
+
+  expect(response.status).toBe(200);
+  expect(document).toMatchObject({
+    info: { title: "Hello API" },
+    openapi: "3.1.0",
+    servers: [{ url: "http://localhost" }],
+  });
+  expect(Object.keys(document.paths)).toEqual([
+    "/",
+    "/health",
+    "/typed",
+    "/users",
+    "/users/{id}",
+  ]);
+  expect(document.paths["/users/{id}"].get).toMatchObject({
+    operationId: "httpGetUsersById",
+    summary: "Get a user",
+    tags: ["users"],
+  });
+  expect(
+    document.paths["/users/{id}"].get.responses["200"].content[
+      "application/json"
+    ].schema.properties.data
+  ).toEqual({
+    additionalProperties: false,
+    properties: { id: { type: "string" }, name: { type: "string" } },
+    required: ["id", "name"],
+    type: "object",
+  });
+});
+
+test("the API reference page is a public route of the deployed openapi-docs Function", async () => {
+  // `voke build` exports the Function `openapi-docs` as `index.openapiDocs`.
+  const docsHandler = createLambdaHandlers({ default: helloApi })
+    .openapiDocs as typeof handler;
+  const response = await docsHandler(
+    lambdaEvent({
+      rawPath: "/docs",
+      requestContext: { http: { method: "GET", path: "/docs" } },
+    })
+  );
+
+  expect(response.statusCode).toBe(200);
+  expect(response.body).toContain("Scalar.createApiReference");
+});
+
 test("request info middleware preserves VOKE_AWS_CONTEXT fallback", async () => {
   const app = new Hono();
 

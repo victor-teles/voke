@@ -23,6 +23,8 @@ Use the root package for the common Function-first Gateway authoring path:
 - Internal model inspection: use root type exports from `voke`
 - Remote helpers: use `@voke/remote`
 - Build helpers: use `@voke/build`
+- OpenAPI documents and the API Reference Page: use `@voke/openapi`
+- JSON Schema building blocks: `readJsonSchema` (Standard JSON Schema, draft 2020-12) and `toContractJsonSchema` (the Function Contract Artifact subset), shared by `@voke/openapi` and `@voke/remote`; the `RouteMeta` type documents a route
 - Invoke helpers: `functions.invoke(...)` and `functions.route(...)`
 - Test helpers used by stable examples: use `@voke/testing`
 - AWS-specific test helpers: use `@voke/aws/testing`
@@ -68,6 +70,7 @@ These packages are stable, but should be used only when the caller needs the spe
 - `@voke/aws/testing`
 - `@voke/build`
 - `@voke/http`
+- `@voke/openapi`
 - `@voke/remote`
 - `@voke/schema`
 - `@voke/testing`

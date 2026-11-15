@@ -29,6 +29,33 @@ export type StandardSchemaResult<TOutput> =
   | StandardSchemaSuccessResult<TOutput>
   | StandardSchemaFailureResult;
 
+/**
+ * The JSON Schema dialect a Standard JSON Schema converter is asked for
+ * (https://standardschema.dev/json-schema). Any other string is allowed; a library throws for a
+ * target it does not support.
+ */
+export type StandardJsonSchemaTarget =
+  | "draft-2020-12"
+  | "draft-07"
+  | "openapi-3.0"
+  // oxlint-disable-next-line typescript/ban-types -- keeps the literal suggestions, as the specification does
+  | ({} & string);
+
+export interface StandardJsonSchemaOptions {
+  readonly target: StandardJsonSchemaTarget;
+  readonly libraryOptions?: Record<string, unknown> | undefined;
+}
+
+/** The Standard JSON Schema converter at `~standard.jsonSchema`. Each method may throw. */
+export interface StandardJsonSchemaConverter {
+  readonly input: (
+    options: StandardJsonSchemaOptions
+  ) => Record<string, unknown>;
+  readonly output: (
+    options: StandardJsonSchemaOptions
+  ) => Record<string, unknown>;
+}
+
 export interface StandardSchemaV1<TInput = unknown, TOutput = TInput> {
   readonly "~standard": {
     readonly vendor: string;
@@ -44,6 +71,8 @@ export interface StandardSchemaV1<TInput = unknown, TOutput = TInput> {
           readonly output: TOutput;
         }
       | undefined;
+    /** Standard JSON Schema: present when the library can describe the schema as JSON Schema. */
+    readonly jsonSchema?: StandardJsonSchemaConverter | undefined;
   };
 }
 
@@ -108,6 +137,54 @@ export const readStandardResult = <TOutput>(
   result.issues === undefined
     ? { ok: true, value: result.value }
     : { issues: result.issues.map(normalizeIssue), ok: false };
+
+const isJsonObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const convertedJsonSchema = (
+  schema: StandardSchemaV1,
+  io: "input" | "output"
+): Record<string, unknown> | undefined => {
+  const converter = schema["~standard"].jsonSchema;
+
+  if (converter === undefined) {
+    return undefined;
+  }
+
+  try {
+    const converted = converter[io]({ target: "draft-2020-12" });
+
+    return isJsonObject(converted) ? converted : undefined;
+  } catch {
+    // The specification lets a converter throw for a schema JSON Schema cannot represent
+    // (a Zod date, `@voke/schema`'s `undefined`); that schema then has no JSON Schema.
+    return undefined;
+  }
+};
+
+/**
+ * The one place Voke reads a schema's JSON Schema (draft 2020-12) for its input or output side:
+ * the Standard JSON Schema converter, else a hand-written top-level `jsonSchema` object, else
+ * `undefined`.
+ */
+export const readJsonSchema = (
+  schema: StandardSchemaV1 | undefined,
+  io: "input" | "output"
+): Record<string, unknown> | undefined => {
+  if (schema === undefined) {
+    return undefined;
+  }
+
+  const converted = convertedJsonSchema(schema, io);
+
+  if (converted !== undefined) {
+    return converted;
+  }
+
+  const handWritten: unknown = (schema as { jsonSchema?: unknown }).jsonSchema;
+
+  return isJsonObject(handWritten) ? handWritten : undefined;
+};
 
 /** `path.to.field: message`, or the message alone without a path. */
 export const formatValidationIssue = (issue: ValidationIssue): string =>

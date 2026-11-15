@@ -202,6 +202,17 @@ type RouteSchemaInput<TSchema, TFallback> = TSchema extends AnyStandardSchema
     : StandardSchemaInput<TSchema>
   : TFallback;
 
+/** Documentation for a route. The Gateway ignores it at run time. */
+export interface RouteMeta {
+  readonly summary?: string;
+  readonly description?: string;
+  readonly tags?: readonly string[];
+  readonly operationId?: string;
+  readonly deprecated?: boolean;
+  /** Leave the route out of generated documentation. */
+  readonly hidden?: boolean;
+}
+
 export interface RouteDefinitionInput<
   _TMethod extends RouteMethod,
   _TPath extends string,
@@ -224,6 +235,7 @@ export interface RouteDefinitionInput<
     TVariables
   >;
   readonly headers?: THeadersSchema;
+  readonly meta?: RouteMeta;
   readonly middleware?: readonly MiddlewareHandler<VokeEnv>[];
   readonly output?: TOutputSchema;
   readonly params?: TParamsSchema;

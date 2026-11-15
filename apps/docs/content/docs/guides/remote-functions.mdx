@@ -190,10 +190,24 @@ Function Contract, as for any invocation.
 ### Types come from JSON Schema
 
 The payload and result types, and the checks above, come from the JSON Schema in the contract
-metadata. Voke reads that JSON Schema from a `jsonSchema` property on each input and output schema.
-`@voke/schema` and Zod schemas do not have that property, so their contract entry is `true`: the
-generated `invoke()` accepts any payload, returns `unknown`, and the consumer does no checks. The
-provider's own validation still runs.
+metadata. Voke reads each schema's JSON Schema through [Standard JSON Schema](https://standardschema.dev/json-schema):
+the input side for `input` and the output side for `output`. `@voke/schema` and Zod schemas
+implement it, so their contract entries are typed. A schema without it can carry a hand-written
+`jsonSchema` property instead.
+
+The contract keeps a subset of JSON Schema: `type`, `properties`, `required`, `items`,
+`additionalProperties`, `const` and `enum`. Voke drops other keywords, such as `minLength`. A part
+of a schema that the subset cannot express (a union, `anyOf`, `oneOf`, `allOf`, `not`, `$ref`, or a
+`type` list such as a nullable field) becomes `true`: any value is accepted there and its type is
+`unknown`. A schema with no JSON Schema at all, such as a Zod date, also becomes `true`. The
+provider's own validation still runs in every case.
+
+<Callout type="warn">
+  Contracts generated before Voke read Standard JSON Schema have `true` entries
+  for `@voke/schema` and Zod schemas, so their fingerprints changed once. Run
+  `voke remote generate` once in every consumer and commit the generated
+  modules; until then, calls fail with contract drift.
+</Callout>
 
 ## Contract drift
 

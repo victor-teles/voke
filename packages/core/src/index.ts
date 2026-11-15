@@ -38,11 +38,16 @@ export {
   type InvokeOptions,
   type InvokeTransport,
   type RouteAuthContext,
+  type RouteMeta,
   type InvokeTransportResponse,
 } from "./invoke";
 export {
   formatValidationIssue,
+  readJsonSchema,
   readStandardResult,
+  type StandardJsonSchemaConverter,
+  type StandardJsonSchemaOptions,
+  type StandardJsonSchemaTarget,
   type StandardSchemaFailureResult,
   type StandardSchemaInput,
   type StandardSchemaIssue,
@@ -125,6 +130,8 @@ export {
   type VokeProvider,
   type VokeProviderCapability,
 } from "./provider";
+// A package building block: @voke/remote narrows contract JSON Schema the same way.
+export { toContractJsonSchema } from "./remote";
 export { route } from "./route-builder";
 export {
   projectFunctionEntries,

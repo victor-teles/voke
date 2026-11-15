@@ -8,6 +8,7 @@
     "---Guides---",
     "guides/functions",
     "guides/http-routes",
+    "guides/openapi",
     "guides/schemas",
     "guides/authorizers",
     "guides/sqs-events",

@@ -62,6 +62,8 @@ The core package: Functions, the Gateway, the config, and the error classes. It 
 
 `voke` also exports building blocks for Provider packages, such as `functionRegistryEntries`, `projectFunctionEntries`, `createHandlerExportName`, `runRequestAuthorizer`, `readStandardResult` and `formatValidationIssue`. Application code does not need them.
 
+`readJsonSchema` reads a schema's JSON Schema through Standard JSON Schema, and `toContractJsonSchema` narrows it to the subset of the Function Contract Artifact. `@voke/openapi` and `@voke/remote` use them.
+
 Learn it in [Functions](/docs/guides/functions), [HTTP routes](/docs/guides/http-routes) and [Concepts](/docs/concepts).
 
 ## @voke/aws
@@ -163,6 +165,17 @@ Typed **Remote Function Registries**, to call the Functions of another Voke Proj
 | `defineRemoteConfig`, `remoteEnvironment`                     | Resolve `remotes` settings and the environment variables they produce.                 |
 
 Learn it in [Remote Functions](/docs/guides/remote-functions).
+
+## @voke/openapi
+
+The **OpenAPI Document** of a Gateway's HTTP API, generated from route contracts, and the **API Reference Page** that renders it with Scalar.
+
+| Export                  | Use                                                                                                                                                                    |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `openapi`               | The Plugin for `voke.config.ts`: serves `/openapi.json` and `/docs` under `voke dev` (or from the deployed API with `expose: true`), and adds `voke openapi generate`. |
+| `createOpenApiDocument` | Build the OpenAPI 3.1 document from a list of Functions, with the `OpenApiDocument` and `OpenApiOptions` types.                                                        |
+
+Learn it in [OpenAPI and API reference](/docs/guides/openapi).
 
 ## @voke/build
 

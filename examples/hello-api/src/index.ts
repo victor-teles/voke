@@ -22,6 +22,11 @@ const createUserBody = schema.object({
   name: schema.string(),
 });
 
+const userOutput = schema.object({
+  id: schema.string(),
+  name: schema.string(),
+});
+
 const functions = createFunctions({
   http: http({
     routes: [
@@ -54,6 +59,8 @@ const functions = createFunctions({
 
           return user;
         },
+        meta: { summary: "Get a user", tags: ["users"] },
+        output: userOutput,
         params: userParams,
       }),
       route.post("/users", {
@@ -76,6 +83,11 @@ const functions = createFunctions({
           users.set(user.id, user);
 
           return created(user);
+        },
+        meta: {
+          description: "Answers 201 with the created user.",
+          summary: "Create a user",
+          tags: ["users"],
         },
       }),
     ],

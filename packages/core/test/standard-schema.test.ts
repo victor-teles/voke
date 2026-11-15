@@ -5,7 +5,9 @@ import { z } from "zod";
 import { voke } from "../src/app";
 import { createFunctions, fn, http, InvokeError } from "../src/invoke";
 import type { StandardSchemaV1 } from "../src/invoke";
+import { toContractJsonSchema } from "../src/remote";
 import { route } from "../src/route-builder";
+import { readJsonSchema } from "../src/standard-schema";
 
 const user = z.object({ id: z.string() });
 
@@ -119,4 +121,90 @@ test("accepts an async specification-shaped schema and normalizes { key } path s
     issues: [{ message: "id is required", path: ["id"] }],
     message: "Invalid payload for getOrder: id: id is required",
   });
+});
+
+test("readJsonSchema reads a Zod schema's 2020-12 JSON Schema for each side", () => {
+  const withDefault = z.object({
+    id: z.string(),
+    role: z.string().default("member"),
+  });
+
+  expect(readJsonSchema(withDefault, "input")).toEqual({
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    properties: {
+      id: { type: "string" },
+      role: { default: "member", type: "string" },
+    },
+    required: ["id"],
+    type: "object",
+  });
+  expect(readJsonSchema(withDefault, "output")).toMatchObject({
+    additionalProperties: false,
+    required: ["id", "role"],
+    type: "object",
+  });
+});
+
+test("readJsonSchema treats a converter that throws as no JSON Schema", () => {
+  expect(readJsonSchema(z.date(), "input")).toBeUndefined();
+});
+
+test("readJsonSchema reads a hand-written jsonSchema property", () => {
+  const handWritten = {
+    ...orderId,
+    jsonSchema: { properties: { id: { type: "string" } }, type: "object" },
+  };
+
+  expect(readJsonSchema(handWritten, "output")).toEqual({
+    properties: { id: { type: "string" } },
+    type: "object",
+  });
+});
+
+test("readJsonSchema returns undefined for a schema without JSON Schema", () => {
+  expect(readJsonSchema(orderId, "input")).toBeUndefined();
+});
+
+test("toContractJsonSchema keeps only the keywords of the contract subset", () => {
+  expect(
+    toContractJsonSchema({
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      additionalProperties: false,
+      properties: {
+        id: { minLength: 1, type: "string" },
+        role: { enum: ["admin", "member"], type: "string" },
+        tags: { items: { type: "string" }, type: "array" },
+      },
+      required: ["id"],
+      type: "object",
+    })
+  ).toEqual({
+    additionalProperties: false,
+    properties: {
+      id: { type: "string" },
+      role: { enum: ["admin", "member"], type: "string" },
+      tags: { items: { type: "string" }, type: "array" },
+    },
+    required: ["id"],
+    type: "object",
+  });
+});
+
+test("toContractJsonSchema turns a node the subset cannot express into true", () => {
+  expect(
+    toContractJsonSchema({
+      properties: {
+        either: { anyOf: [{ type: "string" }, { type: "number" }] },
+        nullable: { type: ["string", "null"] },
+        ref: { $ref: "#/$defs/user" },
+      },
+      type: "object",
+    })
+  ).toEqual({
+    properties: { either: true, nullable: true, ref: true },
+    type: "object",
+  });
+  expect(toContractJsonSchema(null)).toBe(true);
+  expect(toContractJsonSchema("string")).toBe(true);
+  expect(toContractJsonSchema({ not: { type: "string" } })).toBe(true);
 });

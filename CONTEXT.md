@@ -38,6 +38,14 @@ _Avoid_: Function implementation import, remote source import, TypeScript-only c
 
 **Remote Function Registry**:
 A typed catalog of Functions provided by another **Voke Project** and invoked through that project's runtime endpoint instead of local handlers.
+
+**OpenAPI Document**:
+The OpenAPI 3.1 description of a **Gateway**'s **HTTP API**, generated from route contracts.
+_Avoid_: Swagger file, contract artifact
+
+**API Reference Page**:
+The browsable HTML page that renders an **OpenAPI Document**, served next to it by the `openapi()` **Plugin**.
+_Avoid_: Swagger UI, docs site
 _Avoid_: Imported implementation registry, HTTP route client
 
 **Dev Function Invoke Endpoint**:
@@ -264,6 +272,9 @@ _Avoid_: Plugin route, internal endpoint
 - Runtime-exposed provider metadata is the primary source for generating a **Function Contract Artifact**.
 - A **Function Contract Artifact** is portable metadata for code generation and cross-language consumption.
 - A **Function Contract Artifact** has a stable fingerprint that changes when its public Function contract surface changes.
+- An **OpenAPI Document** describes routes, which callers reach over HTTP; a **Function Contract Artifact** describes invokable **Functions**, which callers reach with `invoke`. Neither replaces the other.
+- An **OpenAPI Document** and a **Function Contract Artifact** read JSON Schema from **Function Contracts** through the same reader (Standard JSON Schema); the artifact keeps a narrower subset.
+- An **OpenAPI Document** is served under `voke dev` only, unless the `openapi()` **Plugin** is told to expose it; an exposed document and **API Reference Page** are public **Plugin Function** routes.
 - **Remote Code Generation** is the primary happy path for consuming provider metadata.
 - `voke remote generate` runs **Remote Code Generation** for every configured remote by default.
 - `voke remote generate <name>` runs **Remote Code Generation** for one configured remote.

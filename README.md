@@ -79,6 +79,7 @@ This repository uses Bun workspaces and Turborepo.
 
 - `packages/core`: the `voke` package (Functions, Gateway, config, CLI).
 - `packages/aws`: the AWS Provider (`@voke/aws`), plus `@voke/schema`, `@voke/http`, `@voke/testing`, `@voke/remote` and `@voke/build` next to it.
+- `packages/openapi`: `@voke/openapi`, the Plugin that generates an OpenAPI 3.1 document from route contracts and serves a Scalar API reference page.
 - `apps/docs`: the documentation site.
 - `examples/*`: example projects (`hello-api`, `e2e`, `cross-function`, `sqs-events`, `serverless-migration`).
 - `docs/adr`: architecture decision records.

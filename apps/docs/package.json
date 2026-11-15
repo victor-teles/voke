@@ -33,6 +33,7 @@
     "@typescript/native-preview": "catalog:",
     "@voke/aws": "workspace:*",
     "@voke/http": "workspace:*",
+    "@voke/openapi": "workspace:*",
     "@voke/remote": "workspace:*",
     "@voke/schema": "workspace:*",
     "@voke/testing": "workspace:*",

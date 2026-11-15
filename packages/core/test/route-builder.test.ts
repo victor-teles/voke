@@ -618,3 +618,25 @@ test("does not execute route-only functions through function invocation", async 
     code: "MISSING_FUNCTION",
   });
 });
+
+test("a route keeps its meta and the Gateway ignores it", async () => {
+  const meta = {
+    deprecated: true,
+    description: "Returns the service status.",
+    operationId: "getHealth",
+    summary: "Health check",
+    tags: ["ops"],
+  } as const;
+  const health = new Voke().get("/health", {
+    handler: () => ({ ok: true }),
+    meta,
+  });
+  const gateway = voke(createFunctions({ http: http({ routes: [health] }) }), {
+    config: { name: "meta-api" },
+  });
+  const response = await gateway.request("/health");
+
+  expect(health.meta).toEqual(meta);
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ data: { ok: true } });
+});

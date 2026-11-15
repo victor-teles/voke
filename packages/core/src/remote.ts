@@ -17,6 +17,7 @@ import type {
 } from "./invoke";
 import { InvokeError, invokeRegistryFunction } from "./invoke";
 import { readEnv, sha256Hex } from "./runtime-env";
+import { readJsonSchema } from "./standard-schema";
 
 type JsonPrimitive = boolean | null | number | string;
 
@@ -192,20 +193,113 @@ const stableStringify = (value: unknown): string => {
 const fingerprint = (value: unknown): string =>
   `sha256:${sha256Hex(stableStringify(value))}`;
 
-const schemaMetadata = (schema: StandardSchemaV1 | undefined): JsonSchema => {
-  const schemaWithMetadata = schema as
-    | (StandardSchemaV1 & {
-        jsonSchema?: JsonSchema;
-        "~voke"?: { jsonSchema?: JsonSchema };
-      })
-    | undefined;
+type JsonSchemaObject = Exclude<JsonSchema, boolean>;
+type JsonSchemaTypeName = NonNullable<JsonSchemaObject["type"]>;
 
-  return (
-    schemaWithMetadata?.jsonSchema ??
-    schemaWithMetadata?.["~voke"]?.jsonSchema ??
-    true
-  );
+const jsonSchemaTypeNames = new Set<unknown>([
+  "array",
+  "boolean",
+  "integer",
+  "null",
+  "number",
+  "object",
+  "string",
+] satisfies JsonSchemaTypeName[]);
+
+// Keywords whose meaning the subset cannot keep: dropping them would make the schema stricter
+// or looser than the source, so the whole node becomes `true` instead.
+const inexpressibleKeywords = [
+  "$ref",
+  "allOf",
+  "anyOf",
+  "if",
+  "not",
+  "oneOf",
+] as const;
+
+const isJsonPrimitive = (value: unknown): value is JsonPrimitive =>
+  value === null ||
+  typeof value === "boolean" ||
+  typeof value === "number" ||
+  typeof value === "string";
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const isExpressible = (node: Record<string, unknown>): boolean =>
+  !inexpressibleKeywords.some((keyword) => keyword in node) &&
+  (node.type === undefined || jsonSchemaTypeNames.has(node.type)) &&
+  (node.const === undefined || isJsonPrimitive(node.const)) &&
+  (node.enum === undefined ||
+    (Array.isArray(node.enum) && node.enum.every(isJsonPrimitive)));
+
+/**
+ * Narrows a JSON Schema to the keywords the Function Contract Artifact keeps
+ * (`additionalProperties`, `const`, `enum`, `items`, `properties`, `required`, a single `type`).
+ * Other annotations and constraints are dropped; a node using `anyOf`, `oneOf`, `allOf`, `not`,
+ * `$ref`, `if` or a `type` array becomes `true`, as does anything that is not a schema.
+ */
+export const toContractJsonSchema = (schema: unknown): JsonSchema => {
+  if (typeof schema === "boolean") {
+    return schema;
+  }
+
+  if (!isRecord(schema) || !isExpressible(schema)) {
+    return true;
+  }
+
+  const narrowed: {
+    -readonly [TKey in keyof JsonSchemaObject]: JsonSchemaObject[TKey];
+  } = {};
+
+  if (
+    typeof schema.additionalProperties === "boolean" ||
+    isRecord(schema.additionalProperties)
+  ) {
+    narrowed.additionalProperties = toContractJsonSchema(
+      schema.additionalProperties
+    );
+  }
+
+  if (schema.const !== undefined) {
+    narrowed.const = schema.const as JsonPrimitive;
+  }
+
+  if (schema.enum !== undefined) {
+    narrowed.enum = schema.enum as JsonPrimitive[];
+  }
+
+  if (schema.items !== undefined) {
+    narrowed.items = toContractJsonSchema(schema.items);
+  }
+
+  if (isRecord(schema.properties)) {
+    narrowed.properties = Object.fromEntries(
+      Object.entries(schema.properties).map(([key, value]) => [
+        key,
+        toContractJsonSchema(value),
+      ])
+    );
+  }
+
+  if (
+    Array.isArray(schema.required) &&
+    schema.required.every((key) => typeof key === "string")
+  ) {
+    narrowed.required = schema.required as string[];
+  }
+
+  if (schema.type !== undefined) {
+    narrowed.type = schema.type as JsonSchemaTypeName;
+  }
+
+  return narrowed;
 };
+
+const schemaMetadata = (
+  schema: StandardSchemaV1 | undefined,
+  io: "input" | "output"
+): JsonSchema => toContractJsonSchema(readJsonSchema(schema, io));
 
 export const createFunctionContractArtifact = (
   project: string,
@@ -223,8 +317,8 @@ export const createFunctionContractArtifact = (
       input:
         invokable.input === undefined
           ? undefined
-          : schemaMetadata(invokable.input),
-      output: schemaMetadata(invokable.output),
+          : schemaMetadata(invokable.input, "input"),
+      output: schemaMetadata(invokable.output, "output"),
     };
   }
 

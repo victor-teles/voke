@@ -82,7 +82,7 @@ builds the site machinery; 013 rewrites the content on top of both.
 | 017  | A Function can react to objects created or deleted in an S3 bucket                                                                   | P2       | M      | 014, 015 (016) | DONE (S3 key encoding unconfirmed, ADR 0013) |
 | 018  | A Function declared with `durable(...)` runs as an AWS Lambda durable function, locally and when deployed                            | P1       | L      | (014)          | DONE (real-AWS proof not run)                |
 | 019  | A Plugin declared in `voke.config.ts` can wrap every Function, extend the Gateway, contribute to the deployment and add CLI commands | P1       | L      | (014, 018)     | DONE                                         |
-| 020  | `@voke/openapi` generates an OpenAPI 3.1 document from route contracts and serves it with a Scalar API reference page                | P1       | L      | 019            | TODO                                         |
+| 020  | `@voke/openapi` generates an OpenAPI 3.1 document from route contracts and serves it with a Scalar API reference page                | P1       | L      | 019            | DONE                                         |
 | 021  | `@voke/idempotency` makes a retried handler run once, backed by a DynamoDB table the Plugin provisions                               | P2       | M      | 019 (014, 018) | TODO                                         |
 
 Three tracks: Event Sources (014 → 015 → 016 → 017), durable functions (018), and Plugins

@@ -124,7 +124,7 @@ Deliverables:
 - Add a typed error response convention that maps known Voke errors, validation errors, and user-thrown HTTP errors to stable responses.
 - Add a request/response interceptor API scoped to HTTP Functions, with explicit ordering and typed context.
 - Add route-level and Function-level defaults for response serialization.
-- Add OpenAPI export from route contracts after request/response shape metadata is complete, as the first Plugin (`.factory/plans/020-openapi-and-scalar-plugin.md`).
+- Add OpenAPI export from route contracts after request/response shape metadata is complete, as the first Plugin (`.factory/plans/020-openapi-and-scalar-plugin.md`). Delivered: `@voke/openapi` with a Scalar API reference page and `voke openapi generate` (ADR 0016); response status codes and error shapes remain.
 
 Acceptance tests:
 
