@@ -5,6 +5,9 @@ import { VokeConfigError } from "voke";
 import type { VokeModel, VokeModelEventSource, VokeModelError } from "voke";
 
 import type { CloudFormationResource } from "./cloudformation-template";
+import { eventBridgeEventSourceAdapter } from "./eventbridge";
+import { scheduleEventSourceAdapter } from "./schedule";
+import { snsEventSourceAdapter } from "./sns";
 import { sqsEventSourceAdapter } from "./sqs";
 
 export type VokeIssue = Parameters<typeof VokeModelError.validation>[0][number];
@@ -34,10 +37,23 @@ export interface AwsEventSourceAdapter {
   synthesize(context: AwsEventSourceSynthesisContext): {
     resources: Record<string, CloudFormationResource>;
   };
+  /**
+   * Resources one stack needs once for all Event Sources of this type, such as a shared IAM role.
+   * Synthesis calls it once, after every Function, with each Event Source of this type in Function
+   * order; it is not called when the stack has none.
+   */
+  synthesizeStack?(contexts: readonly AwsEventSourceSynthesisContext[]): {
+    resources: Record<string, CloudFormationResource>;
+  };
 }
 
 const adapters: ReadonlyMap<string, AwsEventSourceAdapter> = new Map(
-  [sqsEventSourceAdapter].map((adapter) => [adapter.source, adapter])
+  [
+    sqsEventSourceAdapter,
+    snsEventSourceAdapter,
+    eventBridgeEventSourceAdapter,
+    scheduleEventSourceAdapter,
+  ].map((adapter) => [adapter.source, adapter])
 );
 
 export const unsupportedEventSourceMessage = (

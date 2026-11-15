@@ -95,6 +95,39 @@ export {
   type SqsRecord,
   type SqsValidMessage,
 } from "./sqs";
+export {
+  sns,
+  type SnsAwsEvent,
+  type SnsEventInvocationInput,
+  type SnsEventSourceDefinition,
+  type SnsFilterPolicy,
+  type SnsFilterPolicyScope,
+  type SnsFunctionDefinitionInput,
+  type SnsMessage,
+  type SnsMessageAttribute,
+  type SnsMessageSchema,
+  type SnsNotification,
+  type SnsRecord,
+} from "./sns";
+export {
+  eventBridge,
+  type EventBridgeAwsEvent,
+  type EventBridgeEvent,
+  type EventBridgeEventInvocationInput,
+  type EventBridgeEventSchema,
+  type EventBridgeEventSourceDefinition,
+  type EventBridgeFunctionDefinitionInput,
+  type EventBridgePattern,
+} from "./eventbridge";
+export {
+  schedule,
+  type ScheduledEvent,
+  type ScheduledEventSchema,
+  type ScheduleEnvelope,
+  type ScheduleEventInvocationInput,
+  type ScheduleEventSourceDefinition,
+  type ScheduleFunctionDefinitionInput,
+} from "./schedule";
 
 const validateAwsModel = (model: VokeModel): void => {
   const issues: VokeIssue[] = [];

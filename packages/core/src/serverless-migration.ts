@@ -1292,10 +1292,10 @@ const eventManualReason = (event: ServerlessFunctionEvent): string => {
       return "S3 notifications require bucket notification wiring and permissions that Voke does not generate in this migration phase.";
     }
     case "schedule": {
-      return "Scheduled triggers require EventBridge rule infrastructure that must be reviewed before migration.";
+      return "Rewrite it with `schedule()` from `@voke/aws`; review the expression and time zone.";
     }
     case "sns": {
-      return "SNS subscriptions and publish/subscribe permissions are inventory-only in this migration phase.";
+      return "Rewrite it with `sns()` from `@voke/aws` and declare the topic with `snsTopic()`; review the filter policy.";
     }
     case "stream": {
       return "Stream event source mappings need batching, starting position, and source permissions reviewed manually.";

@@ -30,6 +30,9 @@ const teachingSurfaceFiles = [
   "../../../apps/docs/content/docs/guides/schemas.mdx",
   "../../../apps/docs/content/docs/guides/authorizers.mdx",
   "../../../apps/docs/content/docs/guides/sqs-events.mdx",
+  "../../../apps/docs/content/docs/guides/sns-events.mdx",
+  "../../../apps/docs/content/docs/guides/eventbridge-events.mdx",
+  "../../../apps/docs/content/docs/guides/scheduled-functions.mdx",
   "../../../apps/docs/content/docs/guides/runtime-variables.mdx",
   "../../../apps/docs/content/docs/guides/resources.mdx",
   "../../../apps/docs/content/docs/guides/remote-functions.mdx",
@@ -56,6 +59,7 @@ const firstPartyExampleFiles = [
   "../../../examples/hello-api/src/local.ts",
   "../../../examples/hello-api/src/middleware/request-info.ts",
   "../../../examples/sqs-events/src/functions.ts",
+  "../../../examples/event-sources/src/functions.ts",
 ];
 
 const readPackageFile = async (path: string): Promise<string> =>
@@ -121,11 +125,14 @@ test("keeps AWS authoring in @voke/aws", async () => {
     "createLambdaHandlers",
     "createResourceBindingName",
     "createSqsEventHandler",
+    "eventBridge",
     "jwtAuthorizer",
     "lambdaAuthorizer",
     "parameter",
     "requestAuthorizer",
+    "schedule",
     "secret",
+    "sns",
     "sqs",
     "toEnvKey",
   ]);

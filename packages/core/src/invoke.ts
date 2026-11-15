@@ -1902,7 +1902,11 @@ const formatEventSourceSummary = (eventSource: EventSourceDefinition): string =>
     colorize(eventSource.resource ?? "-", color.bold),
     colorize(
       Object.entries(eventSource.properties)
-        .map(([name, value]) => `${name}=${String(value)}`)
+        // Scalars print as-is; objects and arrays (an event pattern, a filter policy) as JSON.
+        .map(
+          ([name, value]) =>
+            `${name}=${typeof value === "object" && value !== null ? JSON.stringify(value) : String(value)}`
+        )
         .join(" "),
       color.dim
     ),

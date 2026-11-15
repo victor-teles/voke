@@ -1,0 +1,150 @@
+---
+title: EventBridge events
+description: Run a Function for each EventBridge event that matches a pattern, on the default bus or your own, and test the Function locally.
+---
+
+After reading this page you can attach a Function to an EventBridge event bus with a pattern, type
+the event's `detail`, and test the Function without AWS.
+
+## Declare the bus and the Function
+
+Create the Function with `eventBridge()` from `@voke/aws`. `pattern` selects the events, and `detail`
+is the schema for each event's `detail`. To use your own event bus, declare it in `resources` with
+`eventBus()` from `@voke/aws/cloudformation` and pass its resource key as `bus`:
+
+```ts twoslash
+// @filename: voke.config.ts
+import { aws } from "@voke/aws";
+import { eventBus } from "@voke/aws/cloudformation";
+import { defineConfig } from "voke";
+
+export default defineConfig({
+  name: "orders",
+  provider: aws(),
+  resources: {
+    ordersBus: eventBus(),
+  },
+});
+
+// @filename: src/index.ts
+import { eventBridge } from "@voke/aws";
+import { schema } from "@voke/schema";
+import { createFunctions } from "voke";
+
+const orderPaid = schema.object({
+  orderId: schema.string(),
+  status: schema.string(),
+});
+
+export const functions = createFunctions({
+  onOrderPaid: eventBridge({
+    bus: "ordersBus",
+    pattern: {
+      source: ["orders"],
+      detailType: ["OrderPaid"],
+      detail: { status: ["PAID"] },
+    },
+    detail: orderPaid,
+    handler: async (event) => {
+      console.info(`order ${event.detail.orderId} paid at ${event.time}`);
+    },
+  }),
+});
+```
+
+- Without `bus`, the rule listens on the account's default event bus, where AWS services send their
+  events.
+- `bus` is the key of a resource in `resources`. Model validation fails if no resource has that key,
+  or if the resource is not an `eventBus()`.
+- `pattern.source` and `pattern.detailType` list the accepted values. At least one of them must have
+  a value, or `eventBridge()` throws a `VokeConfigError`: a rule that matches every event on a bus is
+  almost always a mistake.
+- `pattern.detail` is an
+  [EventBridge content filter](https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-event-patterns.html).
+  Voke copies it to the rule untouched.
+
+## Handle an event
+
+EventBridge delivers one event per invocation. Voke validates the event's `detail` with `detail`
+before your handler runs. The handler receives:
+
+| Field        | Value                                      |
+| ------------ | ------------------------------------------ |
+| `detail`     | The validated detail, typed from `detail`. |
+| `source`     | The event source, for example `orders`.    |
+| `detailType` | The event's `detail-type`.                 |
+| `id`         | The event id.                              |
+| `time`       | When the event happened, ISO 8601.         |
+| `account`    | The AWS account that sent the event.       |
+| `region`     | The AWS Region of the event.               |
+| `resources`  | The ARNs the event is about. Often empty.  |
+| `raw`        | The original EventBridge event.            |
+
+The handler returns nothing. An event whose `detail` does not match `detail` fails the invocation
+with an `InvokeError` with code `INVALID_PAYLOAD`, and your handler never sees it. EventBridge invokes
+the Function asynchronously, so Lambda retries a failed invocation and then drops the event.
+
+## Test an EventBridge Function
+
+`voke dev` does not receive events from event buses. Test an EventBridge Function with
+`functions.sendEvent(name, { detail })`. It runs the same validation and handler code as the deployed
+Lambda:
+
+```ts twoslash
+import { eventBridge } from "@voke/aws";
+import { schema } from "@voke/schema";
+import { createFunctions } from "voke";
+
+const functions = createFunctions({
+  onOrderPaid: eventBridge({
+    pattern: { source: ["orders"], detailType: ["OrderPaid"] },
+    detail: schema.object({ orderId: schema.string() }),
+    handler: (event) => {
+      console.info(event.source, event.detailType, event.detail.orderId);
+    },
+  }),
+});
+
+// ---cut---
+await functions.sendEvent("onOrderPaid", { detail: { orderId: "ord_1" } });
+// orders OrderPaid ord_1
+```
+
+Only `detail` is required. `source` and `detailType` default to the first value in the Function's
+pattern, `id` to `evt_1` and `time` to now; pass any of them to override it. The pattern is not
+applied locally.
+
+See [Testing](/docs/guides/testing) for test setup.
+
+## What gets deployed
+
+`voke build` generates the Lambda handler, and `voke synth` adds, for each EventBridge Function:
+
+- an `AWS::Events::Rule` on the bus (the default bus when `bus` is omitted), with the pattern and the
+  Function as its target;
+- an `AWS::Lambda::Permission` that lets `events.amazonaws.com` invoke the Function, only from that
+  rule.
+
+`voke local bootstrap` creates the event bus but not the rule: the local stack holds resources only.
+See [Local AWS](/docs/guides/local-aws).
+
+To run a Function on a schedule, use [Scheduled Functions](/docs/guides/scheduled-functions), not an
+EventBridge rule.
+
+## Limits
+
+<Callout type="info">
+
+EventBridge support is intentionally small in v1:
+
+- One rule per Function. To match two unrelated patterns, create two Functions.
+- There are no input transformers, retry policies or dead-letter queues on the rule.
+- An `eventBridge()` Function cannot have HTTP routes or an output schema.
+
+</Callout>
+
+## Next steps
+
+- [Scheduled Functions](/docs/guides/scheduled-functions): run a Function on a schedule.
+- [Resources and bindings](/docs/guides/resources): put events on the bus from another Function.
+- [Testing](/docs/guides/testing): test Functions and the Gateway.

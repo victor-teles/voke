@@ -12,8 +12,17 @@ import type { MiddlewareHandler } from "hono";
 import { voke } from "../src/app";
 import type { VokeEnv } from "../src/context";
 import { VokeConfigError } from "../src/errors";
-import { fn, createFunctions, http } from "../src/invoke";
-import type { InvokeError, StandardSchemaV1 } from "../src/invoke";
+import {
+  fn,
+  createFunctions,
+  formatDevFunctionSummary,
+  http,
+} from "../src/invoke";
+import type {
+  EventFunctionDefinition,
+  InvokeError,
+  StandardSchemaV1,
+} from "../src/invoke";
 import { Voke } from "../src/route-builder";
 import { createVariableProvider, createVariableSource } from "../src/variables";
 import { setEnv } from "./support/env";
@@ -366,6 +375,26 @@ ${ansi.cyan}${ansi.bold}Event Functions${ansi.reset}
   expect(logs.join("\n")).not.toContain("orderSecret");
   expect(logs.join("\n")).not.toContain("routeSecret");
   expect(logs.join("\n")).not.toContain("/prod/");
+});
+
+test("the Dev Function Summary prints object Event Source properties as JSON", () => {
+  const onOrder: EventFunctionDefinition = {
+    events: [
+      {
+        properties: { pattern: { source: ["shop"] }, retries: 2 },
+        resource: "ordersBus",
+        source: "eventBridge",
+      },
+    ],
+    handler: () => {},
+    input: schema<unknown, unknown>((value) => value),
+    key: "",
+    kind: "event",
+  };
+  const summary = formatDevFunctionSummary(createFunctions({ onOrder }));
+
+  expect(summary).toContain('pattern={"source":["shop"]} retries=2');
+  expect(summary).not.toContain("[object Object]");
 });
 
 test("returns a stable Voke error envelope when route body validation fails through gateway requests", async () => {

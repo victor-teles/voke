@@ -168,6 +168,18 @@ _Avoid_: Batch schema, raw SQS body schema
 The handler result that tells an **SQS Event Source** which messages failed while allowing successful messages in the same batch to stay acknowledged.
 _Avoid_: Raw Lambda batch response as primary contract
 
+**SNS Event Source**:
+An AWS **Event Source** where an SNS topic invokes a **Function** through a Lambda subscription, one message per invocation.
+_Avoid_: SNS route, SNS worker, topic resource
+
+**EventBridge Event Source**:
+An AWS **Event Source** where an EventBridge rule on an event bus invokes a **Function** for each event that matches its pattern.
+_Avoid_: EventBridge worker, event bus resource, scheduled rule
+
+**Schedule Event Source**:
+An AWS **Event Source** where an EventBridge Scheduler schedule invokes a **Function** on a recurring `rate(...)` or `cron(...)` expression.
+_Avoid_: Cron job, scheduled rule, timer
+
 **Event Invocation**:
 The local test/runtime path that delivers an event-shaped payload to an Event Source Function.
 _Avoid_: Function invocation, route invocation
@@ -247,6 +259,12 @@ _Avoid_: AWS secret name, parameter path, resource key
 - An **SQS Message Schema** describes one message body, while an **SQS Message Batch** is the handler input.
 - An **SQS Event Source** uses partial batch failure reporting by default.
 - An SQS Function can have one or more **SQS Event Sources**.
+- An **SNS Event Source**, an **EventBridge Event Source** and a **Schedule Event Source** are authored through the **AWS Provider** package, with `sns()`, `eventBridge()` and `schedule()`.
+- An **SNS Event Source** delivers one message per invocation; an **EventBridge Event Source** delivers one event per invocation.
+- An **SNS Event Source** references its topic, and an **EventBridge Event Source** its event bus, by Voke resource key; an **EventBridge Event Source** without a bus uses the account's default event bus.
+- For an **SNS Event Source** or an **EventBridge Event Source**, an invalid payload fails the invocation, so the provider's retry and failure handling apply.
+- A **Schedule Event Source** delivers a Voke-defined scheduled event, and every **Schedule Event Source** in a stack shares one scheduler role.
+- An SNS, EventBridge or schedule Function has exactly one **Event Source** in v1.
 - Project code primarily invokes **Functions** through its imported **Function Registry**.
 - A **Function Registry** is activated for local invocation by a **Gateway**.
 - A **Gateway** accepts a **Function Registry** as top-level app composition.

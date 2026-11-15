@@ -669,7 +669,7 @@ test("creates a measurable migration report and Voke skeleton files", () => {
   expect(migration.report.unsupported).toEqual([
     "plugin serverless-webpack maps to Voke Bun build but requires bundler option review",
     "sqs event on fulfillOrder requires manual implementation. Queue source cannot be resolved to a migrated Voke SQS queue resource.",
-    "schedule event on scheduledReport requires manual implementation. Scheduled triggers require EventBridge rule infrastructure that must be reviewed before migration.",
+    "schedule event on scheduledReport requires manual implementation. Rewrite it with `schedule()` from `@voke/aws`; review the expression and time zone.",
   ]);
   expect(migration.report.manualSteps).toContain(
     "Move one Serverless function at a time by routing migrated HTTP paths to Voke while the original service keeps the remaining functions."
@@ -727,10 +727,10 @@ test("reports expanded event coverage and unknown fields deterministically", () 
   ]);
   expect(migration.report.unsupported).toEqual([
     "plugin serverless-esbuild maps to Voke Bun build but requires bundler option review",
-    "sns event on apiHandler requires manual implementation. SNS subscriptions and publish/subscribe permissions are inventory-only in this migration phase.",
+    "sns event on apiHandler requires manual implementation. Rewrite it with `sns()` from `@voke/aws` and declare the topic with `snsTopic()`; review the filter policy.",
     "sqs event on apiHandler requires manual implementation. Queue source OrdersQueue is not generated as a Voke SQS queue resource.",
     "s3 event on apiHandler requires manual implementation. S3 notifications require bucket notification wiring and permissions that Voke does not generate in this migration phase.",
-    "schedule event on apiHandler requires manual implementation. Scheduled triggers require EventBridge rule infrastructure that must be reviewed before migration.",
+    "schedule event on apiHandler requires manual implementation. Rewrite it with `schedule()` from `@voke/aws`; review the expression and time zone.",
     "stream event on apiHandler requires manual implementation. Stream event source mappings need batching, starting position, and source permissions reviewed manually.",
     "Unsupported Serverless event kafka on function apiHandler: kafka is not an automatic Voke migration target. Recreate the trigger, permissions, batching, and failure behavior manually before cutting over.",
     "stream event on kinesisWorker requires manual implementation. Stream event source mappings need batching, starting position, and source permissions reviewed manually.",

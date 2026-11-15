@@ -34,7 +34,7 @@ The root should not export removed pre-stable APIs such as `api()`, `createGatew
 Use `@voke/aws` for AWS-specific authoring and runtime binding helpers:
 
 - Runtime Variable builders: `secret`, `parameter` (each with `.fromResource(...)`)
-- Event Source Function helpers: `sqs`, `createSqsEventHandler`
+- Event Source Function helpers: `sqs`, `createSqsEventHandler`, `sns`, `eventBridge`, `schedule`, and their input and event types (`SnsMessage`, `SnsEventInvocationInput`, `EventBridgeEvent`, `EventBridgeEventInvocationInput`, `EventBridgePattern`, `ScheduledEvent`, `ScheduleEventInvocationInput`)
 - Generated Lambda handlers: `createLambdaHandlers` (used by the entry module `voke build` generates)
 - API Gateway authorizer helpers: `createAuthorizers`, `jwtAuthorizer`, `lambdaAuthorizer`, `requestAuthorizer`
 - Runtime binding helpers: `bindResource`, `createAwsClientConfig`

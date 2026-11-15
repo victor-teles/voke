@@ -19,6 +19,10 @@ import type {
   CloudFormationValue,
 } from "./cloudformation-template";
 import { requireAwsEventSourceAdapter } from "./event-sources";
+import type {
+  AwsEventSourceAdapter,
+  AwsEventSourceSynthesisContext,
+} from "./event-sources";
 import {
   defaultAwsLambdaSettings,
   derivedVisibilityTimeout,
@@ -856,6 +860,10 @@ export const synthesizeCloudFormationFromModel = (
   const templateResources: Record<string, CloudFormationResource> = {};
   const outputs: Record<string, CloudFormationOutput> = {};
   const policyStatements: CloudFormationValue[] = [];
+  const stackEventSources = new Map<
+    AwsEventSourceAdapter,
+    AwsEventSourceSynthesisContext[]
+  >();
 
   for (const [name, resource] of Object.entries(model.resources)) {
     const logicalId = toLogicalId(name);
@@ -967,16 +975,30 @@ export const synthesizeCloudFormationFromModel = (
       eventSource,
     ] of definition.eventSources.entries()) {
       const adapter = requireAwsEventSourceAdapter(eventSource.type, name);
+      const eventSourceContext: AwsEventSourceSynthesisContext = {
+        eventSource,
+        eventSourceIndex,
+        functionKey: name,
+        lambdaLogicalId: logicalId,
+        model,
+      };
 
       Object.assign(
         templateResources,
-        adapter.synthesize({
-          eventSource,
-          eventSourceIndex,
-          functionKey: name,
-          lambdaLogicalId: logicalId,
-          model,
-        }).resources
+        adapter.synthesize(eventSourceContext).resources
+      );
+      stackEventSources.set(adapter, [
+        ...(stackEventSources.get(adapter) ?? []),
+        eventSourceContext,
+      ]);
+    }
+  }
+  // Stack-level resources, such as one role shared by every Event Source of a type.
+  for (const [adapter, contexts] of stackEventSources) {
+    if (adapter.synthesizeStack !== undefined) {
+      Object.assign(
+        templateResources,
+        adapter.synthesizeStack(contexts).resources
       );
     }
   }

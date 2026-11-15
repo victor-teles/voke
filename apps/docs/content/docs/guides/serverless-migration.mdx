@@ -195,6 +195,9 @@ Known plugins get a status and a note. For example, `serverless-offline` is repo
 | `sns`, `s3`, `schedule`, `stream` events | Inventory only                                                                   | Manual task in the report                   |
 | `plugins`                                | Reported                                                                         | Per-plugin notes                            |
 
+For an `sns` or `schedule` event, the report's manual task tells you to rewrite the function with
+[`sns()`](/docs/guides/sns-events) or [`schedule()`](/docs/guides/scheduled-functions) from `@voke/aws`.
+
 ## Migrate incrementally
 
 Move one function at a time, and keep the Serverless Framework service running until each one is verified.

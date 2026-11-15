@@ -1,23 +1,18 @@
-import {
-  formatValidationIssue,
-  InvokeError,
-  readStandardResult,
-  VokeConfigError,
-  VokeModelError,
-} from "voke";
+import { VokeConfigError, VokeModelError } from "voke";
 import type {
   EventFunctionDefinition,
   EventSourceDefinition,
   FunctionSynthesisConfig,
   InvokeContext,
+  InvokeError,
   RuntimeVariableCatalog,
   StandardSchemaInput,
   StandardSchemaOutput,
   StandardSchemaV1,
-  ValidationIssue,
 } from "voke";
 
 import { resourceProvider, toLogicalId } from "./cloudformation-template";
+import { parseJsonEventPayload } from "./event-payload";
 import type {
   AwsEventSourceAdapter,
   AwsEventSourceContext,
@@ -233,50 +228,14 @@ const createSqsRecord = (
   };
 };
 
-const invalidMessageError = (
-  messageId: string,
-  detail: string,
-  cause?: unknown,
-  issues?: readonly ValidationIssue[]
-): InvokeError =>
-  new InvokeError(`Invalid SQS message body for ${messageId}: ${detail}`, {
-    cause,
-    code: "INVALID_PAYLOAD",
-    functionName: messageId,
-    issues,
-  });
-
 const parseMessageBody = async <TBodySchema extends AnyStandardSchema>(
   schema: TBodySchema,
   raw: SqsRecord
-): Promise<StandardSchemaOutput<TBodySchema>> => {
-  try {
-    const result = readStandardResult(
-      await schema["~standard"].validate(JSON.parse(raw.body) as unknown)
-    );
-
-    if (result.ok) {
-      return result.value as StandardSchemaOutput<TBodySchema>;
-    }
-
-    throw invalidMessageError(
-      raw.messageId,
-      result.issues.map(formatValidationIssue).join("; "),
-      undefined,
-      result.issues
-    );
-  } catch (error) {
-    if (error instanceof InvokeError) {
-      throw error;
-    }
-
-    throw invalidMessageError(
-      raw.messageId,
-      error instanceof Error ? error.message : String(error),
-      error
-    );
-  }
-};
+): Promise<StandardSchemaOutput<TBodySchema>> =>
+  await parseJsonEventPayload(schema, raw.body, {
+    description: "SQS message body",
+    id: raw.messageId,
+  });
 
 const parseSqsMessageBatch = async <
   TBodySchema extends AnyStandardSchema,

@@ -47,13 +47,13 @@
 
 ### Medium risk
 
-| Area    | Task                                                                                                                                      | Reason                                                                                             | Generated output                            | Confidence |
-| ------- | ----------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------- | ---------- |
-| Routing | Review generated route and worker handlers before deleting the matching Serverless Framework function.                                    | Generated skeletons are starter code and do not migrate business logic.                            | -                                           | high       |
-| Build   | Review Serverless package patterns against the generated Bun build workflow.                                                              | Voke builds with Bun and does not execute Serverless packaging filters.                            | `./voke-orders/package.json`                | medium     |
-| Build   | Review `custom.webpack` options and port any required aliases, loaders, externals, or minification settings into the Voke build workflow. | serverless-webpack: Build behavior maps to the Voke Bun build pipeline.                            | `./voke-orders/SERVERLESS_COMPATIBILITY.md` | medium     |
-| Events  | sqs event on fulfillOrder requires manual implementation.                                                                                 | Queue source cannot be resolved to a migrated Voke SQS queue resource.                             | -                                           | high       |
-| Events  | schedule event on scheduledReport requires manual implementation.                                                                         | Scheduled triggers require EventBridge rule infrastructure that must be reviewed before migration. | -                                           | high       |
+| Area    | Task                                                                                                                                      | Reason                                                                              | Generated output                            | Confidence |
+| ------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------- | ---------- |
+| Routing | Review generated route and worker handlers before deleting the matching Serverless Framework function.                                    | Generated skeletons are starter code and do not migrate business logic.             | -                                           | high       |
+| Build   | Review Serverless package patterns against the generated Bun build workflow.                                                              | Voke builds with Bun and does not execute Serverless packaging filters.             | `./voke-orders/package.json`                | medium     |
+| Build   | Review `custom.webpack` options and port any required aliases, loaders, externals, or minification settings into the Voke build workflow. | serverless-webpack: Build behavior maps to the Voke Bun build pipeline.             | `./voke-orders/SERVERLESS_COMPATIBILITY.md` | medium     |
+| Events  | sqs event on fulfillOrder requires manual implementation.                                                                                 | Queue source cannot be resolved to a migrated Voke SQS queue resource.              | -                                           | high       |
+| Events  | schedule event on scheduledReport requires manual implementation.                                                                         | Rewrite it with `schedule()` from `@voke/aws`; review the expression and time zone. | -                                           | high       |
 
 ### Low risk
 
@@ -92,7 +92,7 @@
 
 - plugin serverless-webpack maps to Voke Bun build but requires bundler option review
 - sqs event on fulfillOrder requires manual implementation. Queue source cannot be resolved to a migrated Voke SQS queue resource.
-- schedule event on scheduledReport requires manual implementation. Scheduled triggers require EventBridge rule infrastructure that must be reviewed before migration.
+- schedule event on scheduledReport requires manual implementation. Rewrite it with `schedule()` from `@voke/aws`; review the expression and time zone.
 
 ### Manual steps
 

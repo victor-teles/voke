@@ -74,16 +74,16 @@ builds the site machinery; 013 rewrites the content on top of both.
 
 ### Lambda ecosystem features (plans 014–021)
 
-| Plan | Title                                                                                                                                | Priority | Effort | Depends on     | Status             |
-| ---- | ------------------------------------------------------------------------------------------------------------------------------------ | -------- | ------ | -------------- | ------------------ |
-| 014  | A Provider package can add an Event Source without changing core                                                                     | P1       | M      | —              | DONE (uncommitted) |
-| 015  | A Function can be triggered by an SNS topic, an EventBridge rule or a schedule                                                       | P1       | L      | 014            | TODO               |
-| 016  | A Function can consume a Kinesis stream or a DynamoDB table stream in typed batches                                                  | P2       | L      | 014 (015)      | TODO               |
-| 017  | A Function can react to objects created or deleted in an S3 bucket                                                                   | P2       | M      | 014, 015 (016) | TODO               |
-| 018  | A Function declared with `durable(...)` runs as an AWS Lambda durable function, locally and when deployed                            | P1       | L      | (014)          | TODO               |
-| 019  | A Plugin declared in `voke.config.ts` can wrap every Function, extend the Gateway, contribute to the deployment and add CLI commands | P1       | L      | (014, 018)     | TODO               |
-| 020  | `@voke/openapi` generates an OpenAPI 3.1 document from route contracts and serves it with a Scalar API reference page                | P1       | L      | 019            | TODO               |
-| 021  | `@voke/idempotency` makes a retried handler run once, backed by a DynamoDB table the Plugin provisions                               | P2       | M      | 019 (014, 018) | TODO               |
+| Plan | Title                                                                                                                                | Priority | Effort | Depends on     | Status        |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------ | -------- | ------ | -------------- | ------------- |
+| 014  | A Provider package can add an Event Source without changing core                                                                     | P1       | M      | —              | DONE (PR #63) |
+| 015  | A Function can be triggered by an SNS topic, an EventBridge rule or a schedule                                                       | P1       | L      | 014            | DONE          |
+| 016  | A Function can consume a Kinesis stream or a DynamoDB table stream in typed batches                                                  | P2       | L      | 014 (015)      | TODO          |
+| 017  | A Function can react to objects created or deleted in an S3 bucket                                                                   | P2       | M      | 014, 015 (016) | TODO          |
+| 018  | A Function declared with `durable(...)` runs as an AWS Lambda durable function, locally and when deployed                            | P1       | L      | (014)          | TODO          |
+| 019  | A Plugin declared in `voke.config.ts` can wrap every Function, extend the Gateway, contribute to the deployment and add CLI commands | P1       | L      | (014, 018)     | TODO          |
+| 020  | `@voke/openapi` generates an OpenAPI 3.1 document from route contracts and serves it with a Scalar API reference page                | P1       | L      | 019            | TODO          |
+| 021  | `@voke/idempotency` makes a retried handler run once, backed by a DynamoDB table the Plugin provisions                               | P2       | M      | 019 (014, 018) | TODO          |
 
 Three tracks: Event Sources (014 → 015 → 016 → 017), durable functions (018), and Plugins
 (019 → 020 → 021). The tracks have no hard dependency on each other, but they edit the same
