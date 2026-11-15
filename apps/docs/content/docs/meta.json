@@ -1,16 +1,28 @@
 {
   "title": "Voke",
   "pages": [
+    "---Start---",
     "index",
     "getting-started",
+    "concepts",
     "---Guides---",
     "guides/functions",
-    "guides/gateway-testing",
-    "guides/deploy",
+    "guides/http-routes",
+    "guides/schemas",
+    "guides/authorizers",
+    "guides/sqs-events",
+    "guides/runtime-variables",
+    "guides/resources",
+    "guides/remote-functions",
+    "guides/testing",
     "guides/local-aws",
+    "guides/deploy",
     "guides/serverless-migration",
+    "guides/troubleshooting",
     "---Reference---",
     "reference/config",
-    "reference/cli"
+    "reference/cli",
+    "reference/errors",
+    "reference/packages"
   ]
 }

@@ -1,312 +1,259 @@
 ---
 title: Functions
-description: Define invokable, route-backed, and event-source Voke Functions with explicit contracts and typed registry calls.
+description: Define invokable Functions with a typed contract, group them in a Function Registry, and call them with functions.invoke.
 ---
 
-## Function
+After reading this page you can define a **Function** with `fn()`, register it with `createFunctions()`, and call it from code and tests with `functions.invoke(...)`.
 
-A **Function** is a named serverless compute unit in a Voke Project. It can be invokable, route-backed, or event-source backed.
+## Define and invoke a Function
 
-Use `fn()` for invokable Functions and `createFunctions()` for the project registry:
+A Function is a named unit of compute that Voke deploys as one AWS Lambda function. An invokable Function has a **Function Contract**: an `input` schema for the payload and an `output` schema for the result. Voke validates both on every call.
 
-```ts
-import { createFunctions, fn } from "voke";
-import type { StandardSchemaV1 } from "voke";
+```ts twoslash
+// @filename: voke.config.ts
+import { aws } from "@voke/aws";
+import { defineConfig } from "voke";
 
-const userInput: StandardSchemaV1<{ id: string }, { id: string }> = {
-  "~standard": {
-    validate: (value) => ({ value }),
-    vendor: "example",
-    version: 1,
-  },
-};
-
-const getUser = fn({
-  name: "getUser",
-  input: userInput,
-  output: userInput,
-  handler: async (payload) => ({ id: payload.id }),
-});
-
-const functions = createFunctions({ getUser });
-
-const user = await functions.invoke("getUser", { id: "usr_1" });
-```
-
-## Runtime Variables
-
-Runtime Variables are per-Function implementation dependencies for values loaded at runtime. They do not change a Function Contract, and they are not exposed to generated remote clients.
-
-Use provider-specific builders for app code. The first-party AWS builders live in `@voke/aws`:
-
-```ts
+export default defineConfig({ name: "users-api", provider: aws() });
+// @filename: src/index.ts
+// ---cut---
+import { schema } from "@voke/schema";
 import { createFunctions, fn, voke } from "voke";
-import { parameter, secret } from "@voke/aws";
+import config from "../voke.config";
 
-export const functions = createFunctions({
-  checkout: fn({
-    input: checkoutInput,
-    output: checkoutOutput,
-    variables: {
-      flags: parameter("/prod/checkout/flags", { decrypt: false }),
-      stripeKey: secret("/prod/stripe/key", {
-        cache: { ttlSeconds: 60 },
-        load: "beforeHandler",
-      }),
-    },
-    handler: async (payload, context) => {
-      const stripeKey = await context.variables.stripeKey.text();
-      const flags = await context.variables.flags.json(flagsSchema);
-
-      return checkout(payload, { flags, stripeKey });
-    },
-  }),
+const user = schema.object({
+  id: schema.string(),
+  name: schema.string(),
 });
-
-export const gateway = voke(functions, {
-  variables: {
-    overrides: {
-      defaults: {
-        flags: '{"enabled":true}',
-      },
-      functions: {
-        checkout: {
-          stripeKey: "sk_test_local",
-        },
-      },
-    },
-  },
-});
-```
-
-Direct `secret(...)` and `parameter(...)` calls reference external AWS names or ARNs. Use `.fromResource(...)` for Voke-managed CloudFormation resource keys:
-
-```ts
-import { parameter, secret } from "@voke/aws";
-
-const variables = {
-  publicConfig: parameter.fromResource("publicConfig"),
-  signingSecret: secret.fromResource("signingSecret"),
-};
-```
-
-Runtime Variables are required by default. Add `{ optional: true }` when absence is allowed. `text()` and `json(schema?)` return `undefined` for missing optional values, but invalid JSON, schema failures, AWS access failures, and provider failures still throw `VokeRuntimeVariableError`.
-
-Values cache by warm Function runtime and Runtime Variable key. Use `cache: false` to reload after each completed read, `cache: { ttlSeconds }` for time-based reuse, and `await context.variables.key.refresh()` to rerun overrides, environment fallback, and provider loading.
-
-Local and test resolution checks Function-scoped overrides, project defaults, `VOKE_VARIABLE_<FUNCTION>_<KEY>`, `VOKE_VARIABLE_<KEY>`, then the provider. Override values are strings so `text()` and `json(schema?)` behave the same across overrides, environment fallback, and providers.
-
-Provider authors can use `createVariableProvider` and `createVariableSource` from `voke` to create provider objects and provider-specific builders. Providers are registered at the Gateway/test/runtime boundary, and unknown third-party providers fail before handler execution when Voke has enough context.
-
-## Remote Function Registries
-
-Use a **Remote Function Registry** when one Voke Project needs to invoke Functions exposed by another Voke Project during local development.
-
-Provider project:
-
-```ts
-import { createFunctions, fn, voke } from "voke";
 
 export const functions = createFunctions({
   getUser: fn({
-    name: "getUser",
-    input: userInput,
-    output: userOutput,
-    handler: async (payload) => ({ id: payload.id, name: "Victor" }),
+    input: schema.object({ id: schema.string() }),
+    output: user,
+    handler: async (payload) => ({ id: payload.id, name: "Ada" }),
   }),
 });
 
-export const gateway = voke(functions, { config: { name: "users" } });
+export default voke(functions, { config });
+
+const result = await functions.invoke("getUser", { id: "usr_1" });
+//    ^?
 ```
 
-Consumer config:
+- `fn()` declares the Function. The handler receives the payload after the `input` schema parsed it, so `payload.id` is typed as `string`.
+- `createFunctions()` builds the **Function Registry**. Each object key becomes the Function's identity in your project.
+- `voke(functions, { config })` creates the **Gateway**. It also activates the registry for local invocation (see [Activate the registry](#activate-the-registry)).
+- `functions.invoke(key, payload)` validates the payload, runs the handler, validates the result, and returns it. The key and the payload are type-checked against the contract.
 
-```ts
+The `input` and `output` fields accept any Standard Schema validator. This page uses `@voke/schema`; Zod works the same way. See [Schemas and validation](/docs/guides/schemas).
+
+### Functions without input
+
+Leave out `input` when a Function takes no payload. Call it with the key only:
+
+```ts twoslash
+// @filename: voke.config.ts
+import { aws } from "@voke/aws";
 import { defineConfig } from "voke";
 
-export default defineConfig({
-  name: "wallet",
-  remotes: {
-    users: {
-      targets: {
-        local: "http://localhost:3001",
-      },
-    },
-  },
+export default defineConfig({ name: "users-api", provider: aws() });
+// @filename: src/index.ts
+// ---cut---
+import { schema } from "@voke/schema";
+import { createFunctions, fn, voke } from "voke";
+import config from "../voke.config";
+
+const functions = createFunctions({
+  countUsers: fn({
+    output: schema.object({ total: schema.number() }),
+    handler: () => ({ total: 42 }),
+  }),
 });
+
+voke(functions, { config });
+
+const { total } = await functions.invoke("countUsers");
 ```
 
-Generate the checked-in remote module:
+### The handler context
 
-```bash
-voke remote generate users
+A handler receives a second argument, the invoke context:
+
+| Field          | Description                                                                                |
+| -------------- | ------------------------------------------------------------------------------------------ |
+| `functionName` | The Function's deployed name: `name` when set, otherwise the registry key.                 |
+| `trace`        | The trace metadata passed with `invoke(..., { trace })`.                                   |
+| `variables`    | The Function's Runtime Variables. See [Runtime Variables](/docs/guides/runtime-variables). |
+
+## Activate the registry
+
+Local invocation needs an activated Function Registry, and `voke(functions, { config })` activates it. If you call `functions.invoke(...)` before a Gateway exists, the call rejects with a `VokeConfigError` (code `CONFIG_ERROR`):
+
+```txt
+Local Function invocation requires Gateway activation. Call voke(functions) before invoking local functions.
 ```
 
-Then invoke by Function key from the generated registry:
+In tests, import the module that calls `voke(...)`, or call `voke(functions, { config })` in the test setup before you invoke. You can create more than one Gateway for the same registry with the same project name, stage and region. A Gateway with a different name, stage or region throws `Function Registry is already activated with a different Gateway context`.
 
-```ts
-import { users } from "./voke/remotes/users";
+## Invoke options
 
-const user = await users.invoke("getUser", { id: "usr_1" });
+`functions.invoke(key, payload, options)` accepts these options:
+
+| Option         | Type                                       | Default   | Description                                                                                                        |
+| -------------- | ------------------------------------------ | --------- | ------------------------------------------------------------------------------------------------------------------ |
+| `mode`         | `"sync"` or `"async"`                      | `"sync"`  | `"async"` returns `{ accepted: true }` at once and runs the Function in the background.                            |
+| `trace`        | object of string, number or boolean values | none      | Metadata the handler reads from `context.trace`.                                                                   |
+| `timeoutMs`    | `number`                                   | none      | Rejects with an `InvokeError` with code `TIMEOUT` when the call takes longer.                                      |
+| `retries`      | `number`                                   | `0`       | Extra attempts after a failed attempt. `retries: 2` runs the Function at most three times.                         |
+| `onAsyncError` | `(error: InvokeError) => void`             | none      | Receives the error of a failed `"async"` call. Without it, Voke logs the message with `console.error`.             |
+| `runtime`      | `"local"` or `"aws"`                       | `"local"` | `"local"` runs the handler in the current process. `"aws"` calls the deployed Lambda through `transport`.          |
+| `transport`    | `InvokeTransport`                          | none      | Required when `runtime` is `"aws"`. `createAwsLambdaInvokeTransport()` from `@voke/aws` calls Lambda's Invoke API. |
+
+```ts twoslash
+// @filename: voke.config.ts
+import { aws } from "@voke/aws";
+import { defineConfig } from "voke";
+
+export default defineConfig({ name: "users-api", provider: aws() });
+// @filename: src/index.ts
+// ---cut---
+import { schema } from "@voke/schema";
+import { createFunctions, fn, voke } from "voke";
+import type { InvokeError } from "voke";
+import config from "../voke.config";
+
+const functions = createFunctions({
+  sendWelcomeEmail: fn({
+    input: schema.object({ userId: schema.string() }),
+    output: schema.object({ sent: schema.boolean() }),
+    handler: (payload, context) => {
+      console.info("request", context.trace.requestId, payload.userId);
+      return { sent: true };
+    },
+  }),
+});
+
+voke(functions, { config });
+
+const sent = await functions.invoke(
+  "sendWelcomeEmail",
+  { userId: "usr_1" },
+  { retries: 2, timeoutMs: 5000, trace: { requestId: "req_1" } }
+);
+
+const queued = await functions.invoke(
+  "sendWelcomeEmail",
+  { userId: "usr_1" },
+  {
+    mode: "async",
+    onAsyncError: (error: InvokeError) =>
+      console.error(error.code, error.message),
+  }
+);
+// queued is { accepted: true }
 ```
 
-During `voke dev`, the provider exposes Voke-owned contract metadata at `/_voke/contract` and a reserved internal Function invoke endpoint. Internal Functions do not need public HTTP routes to be invoked by another local Voke Project.
+A local timeout rejects the call, but it does not stop the handler: the handler runs until it returns. The default runtime is `"local"` unless the environment variable `VOKE_INVOKE_RUNTIME` is `aws`. With `runtime: "aws"`, Voke invokes the Lambda by its deployed name, and `mode: "async"` uses Lambda's `Event` invocation type.
 
-## Registry identity
+### Invoke errors
 
-The Function Registry key is the stable project identity used for type-safe invocation. The optional `name` field on a Function is a deployed Lambda name override, not the local registry key.
+A failed call rejects with an `InvokeError` from `voke`. Its `code` tells you what failed:
 
-```ts
+| Code                     | Cause                                                                          |
+| ------------------------ | ------------------------------------------------------------------------------ |
+| `INVALID_PAYLOAD`        | The payload failed the `input` schema. `error.issues` lists each problem.      |
+| `INVALID_RESULT`         | The handler's return value failed the `output` schema.                         |
+| `TIMEOUT`                | The call took longer than `timeoutMs`.                                         |
+| `MISSING_FUNCTION`       | The key is not an invokable Function, for example an HTTP or SQS Function.     |
+| `MISSING_TRANSPORT`      | `runtime` is `"aws"` and no `transport` was given.                             |
+| `LOCAL_FUNCTION_FAILED`  | An `"async"` local call threw. Delivered to `onAsyncError`.                    |
+| `TRANSPORT_FAILED`       | The transport threw, for example a network or credentials failure.             |
+| `TRANSPORT_STATUS_ERROR` | The deployed Lambda returned a function error or a status code of 400 or more. |
+
+An error that the handler throws in a `"sync"` local call rejects the call unchanged.
+
+## Registry key and deployed name
+
+The registry key is the identity you use in code: `functions.invoke("getUser", ...)`, typed route calls and Lambda handler names all use it. The optional `name` field on `fn()` changes only the deployed Lambda function name.
+
+```ts twoslash
+// @filename: voke.config.ts
+import { aws } from "@voke/aws";
+import { defineConfig } from "voke";
+
+export default defineConfig({ name: "users-api", provider: aws() });
+// @filename: src/index.ts
+// ---cut---
+import { schema } from "@voke/schema";
+import { createFunctions, fn, voke } from "voke";
+import config from "../voke.config";
+
+const user = schema.object({ id: schema.string() });
+
 const functions = createFunctions({
   getUser: fn({
     name: "production-user-reader",
-    input: userInput,
-    output: userInput,
-    handler: async (payload) => payload,
+    input: user,
+    output: user,
+    handler: (payload) => payload,
   }),
 });
 
+voke(functions, { config });
+
+// Still invoked by its registry key.
 await functions.invoke("getUser", { id: "usr_1" });
 ```
 
-## Route-backed Functions
+Without `name`, the deployed Lambda is named `<project name>-<stage>-<registry key>`, for example `users-api-dev-getUser`. With `name`, it is that value in every stage. Error messages such as `Invalid payload for production-user-reader` use the deployed name. The keys `invoke`, `route` and `sendEvent` are reserved: `createFunctions()` throws when you use one.
 
-Route-backed Functions expose HTTP routes through the Gateway. The Route Builder keeps HTTP route declarations in the first-party Voke API:
+## Set timeout and memory per Function
 
-```ts
-import { createFunctions, http, route, voke } from "voke";
+Every Function gets its timeout and memory from `runtime` in `voke.config.ts`: 15 seconds and 1024 MB by default. Override them for one Function with `synthesis`:
 
-export const functions = createFunctions({
-  http: http({
-    routes: [
-      route.get("/health", {
-        handler: () => ({ ok: true }),
-      }),
-    ],
+```ts twoslash
+// @filename: voke.config.ts
+import { aws } from "@voke/aws";
+import { defineConfig } from "voke";
+
+export default defineConfig({
+  name: "reports-api",
+  provider: aws(),
+  runtime: { memory: 512, timeout: 10 },
+});
+// @filename: src/index.ts
+// ---cut---
+import { schema } from "@voke/schema";
+import { createFunctions, fn, voke } from "voke";
+import config from "../voke.config";
+
+const functions = createFunctions({
+  buildReport: fn({
+    input: schema.object({ month: schema.string() }),
+    output: schema.object({ url: schema.string() }),
+    synthesis: { memory: 2048, timeout: 120 },
+    handler: (payload) => ({ url: `https://example.com/${payload.month}.pdf` }),
   }),
 });
 
-export const gateway = voke(functions);
+export default voke(functions, { config });
 ```
 
-## HTTP API Authorizers
+`synthesis.timeout` is in seconds and `synthesis.memory` is in MB. When the AWS Provider synthesizes the stack, it rejects a timeout outside 1-900 seconds and memory outside 128-10240 MB. A Function that serves HTTP routes cannot have a timeout above 30 seconds. See [HTTP routes](/docs/guides/http-routes) and the [configuration reference](/docs/reference/config).
 
-Use an Authorizer Registry when route-backed Functions should be protected by AWS API Gateway HTTP API v2 authorizers:
+## Other kinds of Functions
 
-```ts
-import {
-  createAuthorizers,
-  jwtAuthorizer,
-  lambdaAuthorizer,
-  requestAuthorizer,
-} from "@voke/aws";
-import { createFunctions, http, route, voke } from "voke";
+`fn()` declares an invokable Function: other code calls it by key. The same registry also holds:
 
-const authorizers = createAuthorizers({
-  session: lambdaAuthorizer({ function: "authorizeSession" }),
-  userJwt: jwtAuthorizer({
-    audience: "users-api",
-    issuer: "https://auth.example.com",
-  }),
-});
+- HTTP route Functions, declared with `http()`. See [HTTP routes](/docs/guides/http-routes).
+- SQS Event Source Functions, declared with `sqs()` from `@voke/aws`. See [SQS events](/docs/guides/sqs-events).
+- Request Authorizer Functions, declared with `requestAuthorizer()` from `@voke/aws`. See [Authorizers](/docs/guides/authorizers).
 
-export const functions = createFunctions({
-  authorizeSession: requestAuthorizer({
-    handler: async (request) => ({
-      authorized: request.headers.get("authorization") === "Bearer dev",
-      context: { userId: "usr_1" },
-    }),
-  }),
-  users: http({
-    authorizer: "userJwt",
-    authorizers,
-    routes: [
-      route.get("/me", {
-        authorizer: "session",
-        handler: (request) => ({ userId: request.auth.context.userId }),
-      }),
-      route.get("/health", {
-        authorizer: "none",
-        handler: () => ({ ok: true }),
-      }),
-    ],
-  }),
-});
+`functions.invoke(...)` calls only invokable Functions. Use `functions.route(...)` for HTTP routes and `functions.sendEvent(...)` for SQS Functions.
 
-export const gateway = voke(functions);
-```
+## Next steps
 
-The `http(...)` default authorizer protects routes that do not specify an override. A route uses `authorizer: "none"` when it is intentionally public. Merely defining an Authorizer Registry does not protect routes until the default or a route override references an authorizer.
-
-JWT and Lambda Authorizers default to the `Authorization` header. Lambda Authorizers can set `cacheTtlSeconds`, which defaults to `0`, and can target a local Request Authorizer Function, an external deployed Lambda name, or a Lambda ARN. ARN targets are preferred for external authorizers because account and region ownership are explicit. External targets are bring-your-own-permission in v1.
-
-## SQS Event Source Functions
-
-SQS Event Source Functions are invoked by a queue and tested through `functions.sendEvent(...)`. They do not declare an output schema because Voke owns the SQS batch result contract:
-
-```ts
-import { createFunctions } from "voke";
-import { sqs } from "@voke/aws";
-import type { StandardSchemaV1 } from "voke";
-
-const orderMessageSchema: StandardSchemaV1<
-  { orderId: string },
-  { orderId: string }
-> = {
-  "~standard": {
-    validate: (value) => ({
-      value: value as { orderId: string },
-    }),
-    vendor: "example",
-    version: 1,
-  },
-};
-
-export const processOrder = sqs({
-  name: "processOrder",
-  queue: "ordersQueue",
-  message: orderMessageSchema,
-  handler: async (batch) => {
-    for (const message of batch.messages) {
-      await processOrderMessage(message.body);
-    }
-
-    return batch.ok();
-  },
-});
-
-export const functions = createFunctions({ processOrder });
-```
-
-Use `sqsQueue()` in config to define the AWS queue resource. Use `sqs({ queue: "ordersQueue" })` on a Function to attach that queue as a Lambda event source.
-
-Local tests can send minimal body-first messages:
-
-```ts
-await functions.sendEvent("processOrder", {
-  messages: [{ body: { orderId: "ord_1" } }],
-  source: "sqs",
-});
-```
-
-Each message body is serialized as JSON locally, parsed as JSON in the SQS runtime, and validated with the provided Standard Schema-compatible validator. Invalid JSON or schema failures become partial batch failures by default; use `sqs({ invalidMessageBody: "include" })` when a handler needs to inspect invalid messages directly.
-
-Voke enables Lambda partial batch failure reporting for every synthesized SQS Event Source mapping. `batch.ok()` returns `{ batchItemFailures: [] }` unless validation already marked messages as failed, and `batch.batchResult().fail(message)` adds explicit per-message failures.
-
-The v1 SQS boundary is intentionally small: Event Source Functions cannot mix with HTTP routes or invokable output contracts, event-source options are limited to batch size, maximum batching window, and enabled state, and DLQ/redrive configuration is deferred to the queue resource lifecycle.
-
-## How Functions become Lambda handlers
-
-The project entrypoint (`entrypoint` in `voke.config.ts`, `./src/index.ts` by default) is the only place Functions are declared. It exports either a Gateway (`export default voke(functions, { config })`) or, for projects without HTTP routes, the registry itself (`export const functions = createFunctions({ ... })`). `voke.config.ts` does not accept Functions.
-
-`voke synth` and `voke build` import the entrypoint to discover the Functions. While it loads, `process.env.VOKE_SYNTH` is `"1"`, so guard side effects such as opening connections or starting servers:
-
-```ts
-if (process.env.VOKE_SYNTH !== "1") {
-  await connectToDatabase();
-}
-```
-
-`voke build` then generates `.voke/build/index.ts`, which exports one Lambda handler per Function, and bundles it to `dist/index.js` with `dist/voke-manifest.json` listing each Function's handler. You never write Lambda handlers yourself.
-
-Handler export names come from registry keys: a key that is a valid identifier keeps its spelling (`http` becomes `index.http`), and other keys become camelCase (`process-order` becomes `index.processOrder`). Renaming a registry key renames its Lambda handler. Deployed Lambda names are `<name>-<stage>-<key>` unless a Function sets `name`.
+- [HTTP routes](/docs/guides/http-routes)
+- [Schemas and validation](/docs/guides/schemas)
+- [Testing](/docs/guides/testing)
+- [Concepts](/docs/concepts)

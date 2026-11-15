@@ -1,15 +1,24 @@
 ---
 title: Deploy
-description: Deploy a Voke project to AWS with one command, and remove it again.
+description: Deploy a Voke project to an AWS stage with one command, preview the changes, and remove the stage again.
 ---
 
-`voke deploy` builds your project, packages it, uploads it, and deploys it through the Provider set in `voke.config.ts`. With the AWS Provider no AWS CLI is needed.
+After reading this page you can deploy your project to a stage on AWS, find its API URL, and delete the stage.
 
-## Before you deploy
+`voke deploy` builds your project, packages it, uploads it, and deploys it through the Provider set in `voke.config.ts`. With the AWS Provider no AWS CLI is needed: Voke calls AWS through the AWS SDK.
 
-Set the AWS Provider in `voke.config.ts`:
+```bash
+voke deploy --stage dev
+```
 
-```ts
+## Deploy a stage
+
+<Steps>
+<Step>
+
+### Set the AWS Provider
+
+```ts twoslash
 import { aws } from "@voke/aws";
 import { defineConfig } from "voke";
 
@@ -20,9 +29,30 @@ export default defineConfig({
 });
 ```
 
-Voke uses the standard AWS credential chain: a profile (`AWS_PROFILE`), an SSO login, or environment credentials. It never prints credential values.
+Without a Provider, `voke deploy` stops with `No provider configured`. The region comes from `--region`, then `region` in the config, then `AWS_REGION`, then `us-east-1`. See the [config reference](/docs/reference/config) for every setting and its default.
 
-## Deploy a stage
+</Step>
+<Step>
+
+### Sign in to AWS
+
+Voke uses the standard AWS credential chain: a profile (`AWS_PROFILE`), an SSO login, or environment credentials. It never prints credential values. Run `voke doctor` to check that AWS answers with your credentials.
+
+</Step>
+<Step>
+
+### Preview the changes
+
+```bash
+voke deploy --stage dev --dry-run
+```
+
+A dry run builds and uploads the bundle, then prints every resource CloudFormation would add, modify, or remove. It applies nothing and does not write the outputs file.
+
+</Step>
+<Step>
+
+### Deploy
 
 ```bash
 voke deploy --stage dev
@@ -30,7 +60,7 @@ voke deploy --stage dev
 
 Voke prints each resource as CloudFormation changes it, then the outputs, with the API URL first:
 
-```text
+```txt
 Building hello-api (dev)
 Packaged hello-api-dev (dev)  110 KB
 Uploaded artifact
@@ -42,28 +72,42 @@ Deployed in 48s
 ApiUrl  https://abc123.execute-api.us-east-1.amazonaws.com
 ```
 
-The stage comes from `--stage`, then `VOKE_STAGE`, then `stage` in `voke.config.ts`. Each stage is its own stack named `<name>-<stage>`, and the API URL has no stage suffix.
+Deploying the same build again uploads nothing and reports `No changes`.
 
-The stage `local` is reserved for the local emulator: `voke deploy` refuses it unless `AWS_ENDPOINT_URL` (or `VOKE_AWS_ENDPOINT_URL`) points at a local endpoint.
+</Step>
+</Steps>
+
+## Stages
+
+The stage comes from `--stage`, then `VOKE_STAGE`, then `stage` in `voke.config.ts`, which defaults to `local`. Each stage is its own CloudFormation stack named `<name>-<stage>`. The API uses the HTTP API `$default` stage, so the API URL has no stage suffix.
+
+The stage `local` is reserved for the [Local AWS Provider](/docs/guides/local-aws). `voke deploy` refuses it unless `AWS_ENDPOINT_URL` or `VOKE_AWS_ENDPOINT_URL` is set:
+
+```txt
+Stage "local" is reserved for the local emulator. Deploy to AWS with: voke deploy --stage dev
+```
 
 ## What gets created
 
 - A `voke-bootstrap` stack, once per account and region, with one private, encrypted S3 bucket for deployment bundles and templates.
 - Your app stack `<name>-<stage>`: one Lambda per Function, IAM roles, the HTTP API, and the resources you declared.
 
-Deploying the same build again uploads nothing and reports `No changes`.
-
-## Preview changes
-
-```bash
-voke deploy --stage dev --dry-run
-```
-
-A dry run prints every resource CloudFormation would add, modify, or remove, and applies nothing.
-
 ## Outputs file
 
-After each deploy Voke writes `.voke/outputs/<stage>.json` with the stack id, region, stage, and outputs. Smoke tests can read the API URL from it.
+After each deploy Voke writes `.voke/outputs/<stage>.json` with the stack id, region, stage, and outputs. Smoke tests can read the API URL from it:
+
+```json title=".voke/outputs/dev.json"
+{
+  "id": "hello-api-dev",
+  "outputs": {
+    "ApiUrl": "https://abc123.execute-api.us-east-1.amazonaws.com"
+  },
+  "region": "us-east-1",
+  "stage": "dev"
+}
+```
+
+See [Testing](/docs/guides/testing#smoke-test-a-deployed-stage) for a smoke test that uses it.
 
 ## Remove a stage
 
@@ -71,7 +115,7 @@ After each deploy Voke writes `.voke/outputs/<stage>.json` with the stack id, re
 voke remove --stage dev
 ```
 
-In a terminal Voke asks you to type `<name>-<stage>` to confirm. Pass `--yes` to skip the prompt (required in CI). A stage that is not deployed reports `Nothing to remove`. If a resource cannot be deleted, for example a bucket that still holds objects, Voke names it and the reason.
+In a terminal, Voke asks you to type `<name>-<stage>` to confirm. Pass `--yes` to skip the prompt. Outside a terminal, for example in CI, `--yes` is required. A stage that is not deployed reports `Nothing to remove`. If a resource cannot be deleted, for example a bucket that still holds objects, Voke names it and the reason.
 
 ## Permissions for the deploying identity
 
@@ -82,3 +126,10 @@ The identity that runs `voke deploy` needs:
 - IAM: create roles and pass them to Lambda.
 - Lambda and API Gateway (HTTP APIs): create, update, and delete functions, APIs, routes, and permissions.
 - The services behind the resources you declare (DynamoDB, SQS, SNS, EventBridge, S3) and, for Runtime Variables, Secrets Manager and SSM parameters.
+
+## Next steps
+
+- [CLI reference](/docs/reference/cli): every flag of `voke deploy` and `voke remove`.
+- [Testing](/docs/guides/testing): smoke test the deployed stage.
+- [Troubleshooting](/docs/guides/troubleshooting): fix credential and config errors.
+- [Config reference](/docs/reference/config): settings and defaults.

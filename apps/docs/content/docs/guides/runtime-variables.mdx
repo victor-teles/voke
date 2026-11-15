@@ -1,0 +1,263 @@
+---
+title: Runtime Variables
+description: Read secrets and parameters from AWS Secrets Manager and SSM Parameter Store in a Function, and override them in local runs and tests.
+---
+
+After reading this page you can give a Function a secret or a parameter, read it in the handler,
+replace it with a local value in development and tests, and know which IAM permissions Voke grants
+for it.
+
+A **Runtime Variable** is a value that a Function loads when it runs, from AWS Secrets Manager or
+SSM Parameter Store. You declare it on the Function that uses it. It is not part of the Function
+Contract, so it does not appear in the contract metadata or in generated remote clients.
+
+## Declare and read a Runtime Variable
+
+Declare Runtime Variables in the `variables` field of a Function, with `secret()` and `parameter()`
+from `@voke/aws`. Read them in the handler through `context.variables`:
+
+```ts twoslash
+// @filename: voke.config.ts
+import { aws } from "@voke/aws";
+import { defineConfig } from "voke";
+
+export default defineConfig({ name: "checkout", provider: aws() });
+
+// @filename: src/index.ts
+import { parameter, secret } from "@voke/aws";
+import { schema } from "@voke/schema";
+import { createFunctions, fn, voke } from "voke";
+
+import config from "../voke.config";
+
+const flagsSchema = schema.object({ newCheckout: schema.boolean() });
+
+const functions = createFunctions({
+  checkout: fn({
+    input: schema.object({ orderId: schema.string() }),
+    output: schema.object({ charged: schema.boolean() }),
+    variables: {
+      stripeKey: secret("prod/stripe/key"),
+      flags: parameter("/prod/checkout/flags", { decrypt: false }),
+    },
+    handler: async (payload, context) => {
+      const stripeKey = await context.variables.stripeKey.text();
+      const flags = await context.variables.flags.json(flagsSchema);
+
+      return { charged: flags.newCheckout && stripeKey.length > 0 };
+    },
+  }),
+});
+
+export default voke(functions, { config });
+```
+
+- `secret(secretId)` reads the `SecretString` of a Secrets Manager secret. `secretId` is the secret
+  name or its ARN.
+- `parameter(name, { decrypt })` reads an SSM parameter. `decrypt` defaults to `true`
+  (`WithDecryption`), so `SecureString` parameters come back decrypted.
+
+Every Function kind accepts `variables`: `fn()`, `http()`, `sqs()` and Request Authorizer
+Functions. Route handlers receive the same `context` as their second argument.
+
+Each key in `context.variables` is a handle with three methods:
+
+| Method          | Returns                                                                               |
+| --------------- | ------------------------------------------------------------------------------------- |
+| `text()`        | The value as a string.                                                                |
+| `json(schema?)` | The value parsed as JSON. With a schema, the value validated by it and typed from it. |
+| `refresh()`     | Loads the value again, skipping the cache, and returns the same handle.               |
+
+Voke loads a value the first time you read it, not when the Function starts.
+
+## Use a secret or parameter that the stack creates
+
+`secret("...")` and `parameter("...")` take the name of a secret or parameter that already exists in
+AWS. To read one that your project declares in `resources`, use `.fromResource(resourceKey)`:
+
+```ts twoslash
+// @filename: voke.config.ts
+import { aws } from "@voke/aws";
+import { secret, ssmParameter } from "@voke/aws/cloudformation";
+import { defineConfig } from "voke";
+
+export default defineConfig({
+  name: "checkout",
+  provider: aws(),
+  resources: {
+    signingSecret: secret(),
+    publicConfig: ssmParameter({ value: '{"newCheckout":true}' }),
+  },
+});
+
+// @filename: src/index.ts
+import { parameter, secret } from "@voke/aws";
+import { schema } from "@voke/schema";
+import { fn } from "voke";
+
+// ---cut---
+export const sign = fn({
+  output: schema.string(),
+  variables: {
+    signingKey: secret.fromResource("signingSecret"),
+    config: parameter.fromResource("publicConfig"),
+  },
+  handler: async (_payload, context) =>
+    await context.variables.signingKey.text(),
+});
+```
+
+At run time, Voke finds the deployed secret or parameter through the resource's binding environment
+variable (`VOKE_RESOURCE_SIGNING_SECRET_ID`, `VOKE_RESOURCE_PUBLIC_CONFIG_NAME`). See
+[Resources and bindings](/docs/guides/resources).
+
+`secret` from `@voke/aws` builds a Runtime Variable. `secret` from `@voke/aws/cloudformation`
+declares a Secrets Manager resource. They are different functions with the same name.
+
+## Options
+
+Pass options as the last argument: `secret(secretId, options)`,
+`parameter(name, { decrypt }, options)`, `secret.fromResource(key, options)` and
+`parameter.fromResource(key, { decrypt }, options)`.
+
+| Option     | Default  | Effect                                                                                                                                          |
+| ---------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `optional` | `false`  | `true` returns `undefined` when the value does not exist, instead of throwing.                                                                  |
+| `cache`    | `true`   | `true` keeps the value for the life of the warm runtime. `{ ttlSeconds }` keeps it for that many seconds. `false` loads it again on every read. |
+| `load`     | `"lazy"` | `"beforeHandler"` loads the value before the handler runs, so a missing value fails the call before your code starts.                           |
+
+```ts twoslash
+import { parameter, secret } from "@voke/aws";
+
+// ---cut---
+const variables = {
+  stripeKey: secret("prod/stripe/key", {
+    cache: { ttlSeconds: 60 },
+    load: "beforeHandler",
+  }),
+  banner: parameter("/prod/banner", { decrypt: false }, { optional: true }),
+};
+```
+
+With `optional: true`, the type of `text()` is `Promise<string | undefined>`.
+
+The cache is per Function and per variable, inside one warm runtime. Two reads that start at the same
+time share one load. A failed load is not cached, so the next read tries again.
+
+## Local values and test values
+
+Voke resolves each Runtime Variable in this order, and stops at the first value it finds:
+
+1. `variables.overrides.functions[functionKey][variableKey]`, passed to `voke()`.
+2. `variables.overrides.defaults[variableKey]`, passed to `voke()`.
+3. The environment variable `VOKE_VARIABLE_<FUNCTION>_<KEY>`.
+4. The environment variable `VOKE_VARIABLE_<KEY>`.
+5. The Provider: AWS Secrets Manager or SSM Parameter Store.
+
+The order is the same in `voke dev`, in tests and in a deployed Lambda. `refresh()` runs the whole
+order again.
+
+Pass overrides to `voke()` in the entrypoint or in a test:
+
+```ts twoslash
+// @filename: voke.config.ts
+import { aws } from "@voke/aws";
+import { defineConfig } from "voke";
+
+export default defineConfig({ name: "checkout", provider: aws() });
+
+// @filename: src/index.ts
+import { secret } from "@voke/aws";
+import { schema } from "@voke/schema";
+import { createFunctions, fn, voke } from "voke";
+
+import config from "../voke.config";
+
+const functions = createFunctions({
+  checkout: fn({
+    output: schema.string(),
+    variables: { stripeKey: secret("prod/stripe/key") },
+    handler: async (_payload, context) =>
+      await context.variables.stripeKey.text(),
+  }),
+});
+
+// ---cut---
+export const gateway = voke(functions, {
+  config,
+  variables: {
+    overrides: {
+      defaults: { stripeKey: "sk_test_shared" },
+      functions: { checkout: { stripeKey: "sk_test_checkout" } },
+    },
+  },
+});
+
+console.info(await functions.invoke("checkout")); // "sk_test_checkout"
+```
+
+Override values must be strings, as if they came from AWS. `json()` parses them the same way.
+A value that is not a string throws `VokeRuntimeVariableError` when the Function runs.
+
+The environment variable names use the Function's registry key and the variable key, converted to
+upper snake case. For the Function `checkout` and the variable `stripeKey`:
+
+```bash
+VOKE_VARIABLE_CHECKOUT_STRIPE_KEY=sk_test_checkout bun test
+VOKE_VARIABLE_STRIPE_KEY=sk_test_shared bun test
+```
+
+A Gateway without a Provider (no `provider` in its config) has no AWS loader. Its Runtime Variables
+resolve only from overrides and environment variables, which is useful in unit tests.
+
+## Errors
+
+Every Runtime Variable failure throws `VokeRuntimeVariableError` from `voke`, with code
+`RUNTIME_VARIABLE_ERROR`:
+
+- A required value does not exist (the secret or parameter is not found, and no override or
+  environment variable is set).
+- The AWS call fails, for example because of missing permissions. The AWS error is the `cause`.
+- The secret has only `SecretBinary`. Runtime Variables read `SecretString` only.
+- `json()` gets text that is not valid JSON, or a value that fails the schema. Schema issues are in
+  `issues`.
+- No Runtime Variable provider is registered for the variable, for example an AWS variable in a
+  Gateway without a Provider and with no override.
+
+`optional: true` changes only the first case. The other failures still throw.
+
+Error messages name the Function and the variable key. They do not contain the value. When a route
+handler throws one of these errors, Voke logs it and the HTTP response is a 500 with
+`Internal server error`. See
+[Errors](/docs/reference/errors).
+
+## IAM permissions
+
+Voke synthesizes one IAM role per Function. For each Runtime Variable a Function declares, its role
+gets one statement:
+
+| Declaration                   | Actions                                 | Resource                                                  |
+| ----------------------------- | --------------------------------------- | --------------------------------------------------------- |
+| `secret("name")`              | `secretsmanager:GetSecretValue`         | `arn:aws:secretsmanager:<region>:<account>:secret:name-*` |
+| `secret("arn:...")`           | `secretsmanager:GetSecretValue`         | The ARN, as given.                                        |
+| `parameter("/name")`          | `ssm:GetParameter`, `ssm:GetParameters` | `arn:aws:ssm:<region>:<account>:parameter/name`           |
+| `secret.fromResource(key)`    | `secretsmanager:GetSecretValue`         | The ARN of the declared secret.                           |
+| `parameter.fromResource(key)` | `ssm:GetParameter`, `ssm:GetParameters` | The ARN of the declared parameter.                        |
+
+The `-*` suffix matches the random suffix that Secrets Manager adds to secret ARNs. Only the
+Function that declares a variable gets the statement for it. Other Functions in the project do not.
+
+Two limits apply:
+
+- Voke grants no KMS permissions. A `SecureString` parameter or a secret encrypted with a
+  customer-managed KMS key also needs `kms:Decrypt` on that key, which you must grant outside Voke.
+- Resources declared in `resources` are a separate case: every Function gets access to every declared
+  resource. A `secret()` resource is readable by all Functions, even those that do not declare
+  `secret.fromResource(...)`. See [Resources and bindings](/docs/guides/resources).
+
+## Next steps
+
+- [Resources and bindings](/docs/guides/resources): declare the secrets and parameters your stack creates.
+- [Testing](/docs/guides/testing): run Functions with overrides in tests.
+- [Errors](/docs/reference/errors): the error classes and codes.
+- [Config reference](/docs/reference/config): `environment` and the other settings.

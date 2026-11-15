@@ -1,6 +1,6 @@
 # Error conventions
 
-Voke errors should help application developers understand what failed, where it failed, and what to try next.
+Rules for contributors writing Voke errors. Voke errors should help application developers understand what failed, where it failed, and what to try next. For the errors users see, their codes and the HTTP error body, see the Errors reference (`apps/docs/content/docs/reference/errors.mdx`).
 
 ## Framework errors
 
@@ -34,18 +34,4 @@ Migration unsupported-feature messages should name the Serverless feature and th
 Unsupported Serverless event kafka on function worker: kafka is not an automatic Voke migration target. Recreate the trigger, permissions, batching, and failure behavior manually before cutting over.
 ```
 
-Runtime Variable errors should identify the Function key, Runtime Variable key, and redacted source label without including loaded values:
-
-```txt
-Runtime variable "stripeKey" for Function "checkout" could not be loaded from AWS Secrets Manager secret "/prod/stripe/key".
-```
-
-## HTTP error responses
-
-The Gateway answers route errors with the public body `{ error: { code?, message, issues?, details? } }`:
-
-- Invalid input (`InvokeError` with code `INVALID_PAYLOAD`): status 400 with `issues`.
-- Invalid handler output (`InvokeError` with code `INVALID_RESULT`): status 500 with `issues`.
-- Any other thrown error: status 500, code `INTERNAL_SERVER_ERROR`, message `Internal server error`. The original message never reaches the client. Voke logs the error once to `console.error` as one JSON line (`level`, `message`, `name`, `stack`, and `code` when present). Under `voke dev` only, the response also carries `details.message`, so you can see the cause locally. The stage does not enable this.
-
-For a failure the client should see, handle it in the handler and return the response you want; do not rely on a thrown message.
+Runtime Variable errors should identify the Function key, the Runtime Variable key, and a redacted source label, never the loaded value.

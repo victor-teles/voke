@@ -8,13 +8,7 @@ const contentDirectory = join(import.meta.dir, "..", "content", "docs");
  * Pages whose TypeScript samples are not compiled yet. This list may only shrink: the test fails
  * when a listed page has no unchecked sample left, so remove it from here once converted.
  */
-export const legacyUncheckedPages: readonly string[] = [
-  "guides/deploy.mdx",
-  "guides/functions.mdx",
-  "guides/gateway-testing.mdx",
-  "guides/local-aws.mdx",
-  "reference/config.mdx",
-];
+export const legacyUncheckedPages: readonly string[] = [];
 
 const fencePattern = /^```(?:ts|tsx)(?:[ \t]+(?<meta>[^\n]*))?$/gmu;
 

@@ -1,41 +1,43 @@
 ---
 title: Introduction
-description: Understand Voke's TypeScript-first Function model and AWS Lambda deployment.
+description: Learn what Voke is, who it is for, and what a minimal Voke project looks like.
 ---
 
-Voke is a TypeScript-first AWS Lambda framework for creating, testing, building, and synthesizing route-backed APIs and related serverless Functions from a config-first project model.
+Voke is a TypeScript framework for HTTP APIs and workers that run on AWS Lambda. You declare typed Functions in one entrypoint, and Voke runs them locally with Bun, tests them in process, and deploys them to AWS with one command.
 
-The core idea is simple: describe work as **Functions**, collect them in a **Function Registry**, expose route-backed Functions through a **Gateway**, and keep deployment settings in `voke.config.ts`.
+Voke is for TypeScript developers who build HTTP APIs and workers on AWS Lambda and want one typed codebase for local development, tests and deployment.
 
-## Why Voke exists
+<Callout type="info">
+  Voke is not published yet, and the published package names are not final. To
+  try it now, see [Getting Started](/docs/getting-started).
+</Callout>
 
-Serverless projects often drift across framework config, handler files, local test harnesses, and deployment templates. Voke keeps those decisions explicit:
+## The smallest project
 
-- `voke.config.ts` is the project source of truth.
-- `fn()` declares an invokable serverless compute unit.
-- `http()` declares a route-backed Function from Route Builder routes.
-- `createFunctions()` creates the typed registry used by project code.
-- `voke(functions)` exposes route-backed Functions over HTTP.
-- `voke synth` produces a direct CloudFormation template.
-
-## The mental model
+A Voke project has two files. `voke.config.ts` holds the project settings and the **Provider** (`aws()`), which tells Voke how to build and deploy. `src/index.ts` is the entrypoint: it declares the Functions and exports a **Gateway** that serves them over HTTP.
 
 ```ts twoslash
 // @filename: voke.config.ts
 import { aws } from "@voke/aws";
 import { defineConfig } from "voke";
 
-export default defineConfig({ name: "hello-api", provider: aws() });
+export default defineConfig({
+  name: "hello-api",
+  provider: aws(),
+});
+
 // @filename: src/index.ts
-// ---cut---
+import { schema } from "@voke/schema";
 import { createFunctions, http, route, voke } from "voke";
+
 import config from "../voke.config";
 
 const functions = createFunctions({
   http: http({
     routes: [
-      route.get("/health", {
-        handler: () => ({ ok: true, service: config.name }),
+      route.get("/users/:id", {
+        params: schema.object({ id: schema.string() }),
+        handler: (request) => ({ id: request.params.id }),
       }),
     ],
   }),
@@ -44,9 +46,21 @@ const functions = createFunctions({
 export default voke(functions, { config });
 ```
 
+`route.get(...)` is the **Route Builder**. The `params` schema validates the path parameters, so `request.params.id` is typed as `string`. When the input does not match the schema, Voke responds with status 400 and your handler does not run.
+
+[Concepts](/docs/concepts) defines each of these terms and shows how they connect.
+
+## What you get
+
+- **Local development.** `voke dev` runs your entrypoint with hot reload on `http://localhost:3000`.
+- **Typed invocation.** Project code calls a Function by its registry key with `functions.invoke("key", payload)`. The payload and the result are typed from the Function's input and output schemas.
+- **Tests without a server.** In `bun test`, send requests to the Gateway in process with `gateway.request("/path")`.
+- **One-command deploy.** `voke deploy --stage dev` builds one Lambda handler per Function, deploys a CloudFormation stack, and prints the API URL.
+- **Local AWS.** `voke local start` runs a **Local AWS Provider** (the AWS Emulator or Floci) for the DynamoDB tables, SQS queues and other resources that your project declares.
+
 ## Next steps
 
-- Start with [Getting Started](/docs/getting-started).
-- Learn the Function model in [Functions](/docs/guides/functions).
-- Use [Gateway testing](/docs/guides/gateway-testing) for local API and Lambda semantics.
-- Review the [CLI reference](/docs/reference/cli) when wiring scripts.
+- [Getting Started](/docs/getting-started): create, run, test and deploy a project.
+- [Concepts](/docs/concepts): the vocabulary and what each command produces.
+- [HTTP routes](/docs/guides/http-routes): methods, parameters, bodies and responses.
+- [Functions](/docs/guides/functions): invokable Functions and the Function Registry.

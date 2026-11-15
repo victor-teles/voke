@@ -1,0 +1,280 @@
+---
+title: SQS events
+description: Run a Function for each batch of messages on an SQS queue, report failed messages, and test the Function locally.
+---
+
+After reading this page you can declare an SQS queue, attach a Function to it as an **Event Source**,
+report the messages that failed, and test the Function without AWS.
+
+## Declare the queue and the Function
+
+Declare the queue in `resources` in `voke.config.ts` with `sqsQueue()` from
+`@voke/aws/cloudformation`. Then create the Function with `sqs()` from `@voke/aws`, and pass the
+queue's resource key as `queue`:
+
+```ts twoslash
+// @filename: voke.config.ts
+import { aws } from "@voke/aws";
+import { sqsQueue } from "@voke/aws/cloudformation";
+import { defineConfig } from "voke";
+
+export default defineConfig({
+  name: "orders",
+  provider: aws(),
+  resources: {
+    ordersQueue: sqsQueue(),
+  },
+});
+
+// @filename: src/index.ts
+import { sqs } from "@voke/aws";
+import { schema } from "@voke/schema";
+import { createFunctions } from "voke";
+
+const orderMessage = schema.object({
+  orderId: schema.string(),
+  total: schema.number(),
+});
+
+export const functions = createFunctions({
+  processOrder: sqs({
+    queue: "ordersQueue",
+    message: orderMessage,
+    handler: async (batch) => {
+      for (const message of batch.messages) {
+        console.info(`order ${message.body.orderId}: ${message.body.total}`);
+      }
+
+      return batch.ok();
+    },
+  }),
+});
+```
+
+- `queue` is the key of a resource in `resources`. Synthesis fails if no resource has that key, or if
+  the resource is not an `sqsQueue()`.
+- `message` is a Function Contract for one message body. Any
+  [Standard Schema](/docs/guides/schemas) validator works.
+- A project without HTTP routes exports the Function Registry (`export const functions`) from its
+  entrypoint. A project with a Gateway exports the Gateway as usual, and the SQS Function sits in the
+  same registry.
+
+`voke build` generates the Lambda handler for `processOrder`, and `voke synth` creates an
+`AWS::Lambda::EventSourceMapping` from the queue to the Function. You do not write the Lambda
+handler.
+
+## Work with a batch
+
+The handler receives one batch, not the raw AWS event. Voke parses each message body as JSON and
+validates it with `message` before your handler runs.
+
+`batch.messages` is the list of valid messages. Each message has:
+
+| Field               | Value                                             |
+| ------------------- | ------------------------------------------------- |
+| `id`                | The SQS message id.                               |
+| `body`              | The parsed, validated body, typed from `message`. |
+| `attributes`        | The SQS system attributes, as strings.            |
+| `messageAttributes` | The message attributes the sender set.            |
+| `raw`               | The original SQS record.                          |
+| `valid`             | `true`.                                           |
+
+The handler must return a batch result. Voke turns it into Lambda's partial batch response, and
+every Event Source mapping has `ReportBatchItemFailures` turned on. SQS deletes the messages that
+succeeded and makes the failed messages visible again for a retry.
+
+- `batch.ok()` reports success for every message, except the messages that failed validation.
+- `batch.batchResult()` returns a builder. Call `.fail(message)` on it for each message that failed,
+  then return the builder.
+
+```ts twoslash
+import { sqs } from "@voke/aws";
+import { schema } from "@voke/schema";
+
+const chargeOrder = async (orderId: string): Promise<void> => {
+  if (orderId === "") {
+    throw new Error("missing order id");
+  }
+};
+
+// ---cut---
+export const processOrder = sqs({
+  queue: "ordersQueue",
+  message: schema.object({ orderId: schema.string() }),
+  handler: async (batch) => {
+    const result = batch.batchResult();
+
+    for (const message of batch.messages) {
+      try {
+        await chargeOrder(message.body.orderId);
+      } catch {
+        result.fail(message);
+      }
+    }
+
+    return result;
+  },
+});
+```
+
+If the handler throws, Lambda reports the whole batch as failed, and SQS retries every message in it.
+Catch errors per message and call `fail()` when only some messages fail.
+
+## Invalid message bodies
+
+A message whose body is not valid JSON, or does not match `message`, is invalid. By default Voke
+reports each invalid message as a batch item failure and leaves it out of `batch.messages`. Your
+handler sees only valid messages, and `batch.ok()` and `batch.batchResult()` already include the
+invalid ones as failures.
+
+Set `invalidMessageBody: "include"` to receive invalid messages too, for example to log them.
+`batch.messages` then holds both kinds. Check `message.valid` to tell them apart:
+
+```ts twoslash
+import { sqs } from "@voke/aws";
+import { schema } from "@voke/schema";
+
+// ---cut---
+export const processOrder = sqs({
+  queue: "ordersQueue",
+  message: schema.object({ orderId: schema.string() }),
+  invalidMessageBody: "include",
+  handler: (batch) => {
+    for (const message of batch.messages) {
+      if (!message.valid) {
+        console.error(`message ${message.id}: ${message.error.message}`);
+        console.error(message.rawBody);
+        continue;
+      }
+
+      console.info(message.body.orderId);
+    }
+
+    return batch.ok();
+  },
+});
+```
+
+An invalid message has `valid: false`, `rawBody` (the body as received) and `error` (an
+`InvokeError` with code `INVALID_PAYLOAD`). It is still reported as a failure, so SQS delivers it
+again. With no dead-letter queue (see [Limits](#limits)), an invalid message is retried until the
+queue's retention period ends.
+
+## Batch options
+
+`sqs()` accepts three options for the Event Source mapping:
+
+| Option                     | Default | Effect                                                                        |
+| -------------------------- | ------- | ----------------------------------------------------------------------------- |
+| `batchSize`                | `10`    | The largest number of messages in one batch (`BatchSize`).                    |
+| `maxBatchingWindowSeconds` | `0`     | How long Lambda waits to fill a batch before it calls the Function.           |
+| `enabled`                  | `true`  | `false` creates the mapping turned off, so the Function receives no messages. |
+
+To consume more than one queue with one Function, pass `queues` instead of `queue`. Each entry is a
+resource key, or an object with `queue` and its own options:
+
+```ts twoslash
+import { sqs } from "@voke/aws";
+import { schema } from "@voke/schema";
+
+// ---cut---
+export const processOrder = sqs({
+  queues: ["ordersQueue", { queue: "priorityQueue", batchSize: 1 }],
+  message: schema.object({ orderId: schema.string() }),
+  maxBatchingWindowSeconds: 5,
+  handler: (batch) => batch.ok(),
+});
+```
+
+Pass `queue` or `queues`, not both. `sqs()` throws a `VokeConfigError` otherwise.
+
+## Test an SQS Function
+
+`voke dev` does not read messages from queues. Test an SQS Function with
+`functions.sendEvent(name, { messages })`. It runs the same parsing, validation and handler code as
+the deployed Lambda, and returns the batch result:
+
+```ts twoslash
+import { sqs } from "@voke/aws";
+import { schema } from "@voke/schema";
+import { createFunctions } from "voke";
+
+const functions = createFunctions({
+  processOrder: sqs({
+    queue: "ordersQueue",
+    message: schema.object({ orderId: schema.string() }),
+    handler: (batch) => batch.ok(),
+  }),
+});
+
+// ---cut---
+const result = await functions.sendEvent("processOrder", {
+  messages: [
+    { id: "m1", body: { orderId: "ord_1" } },
+    { id: "m2", body: "not json" },
+  ],
+});
+
+console.info(result);
+// { batchItemFailures: [{ itemIdentifier: "m2" }] }
+```
+
+Each message needs only a `body`. An object body is serialized to JSON; a string body is used as it
+is, so you can test bodies that are not valid JSON. Voke fills in the SQS metadata. `id` defaults to
+`msg_1`, `msg_2`, and so on.
+
+See [Testing](/docs/guides/testing) for test setup.
+
+## Queue visibility timeout
+
+The visibility timeout is how long SQS hides a received message from other consumers. If it is
+shorter than the Function's run time, SQS can deliver the same message twice.
+
+When you do not set it, Voke derives it from the Functions that consume the queue: six times the
+Function's timeout plus its `maxBatchingWindowSeconds`, as AWS recommends. With the default 15-second
+timeout and no batching window, the queue gets 90 seconds. When several Functions consume one queue,
+the largest value wins.
+
+To set it yourself, pass `visibilityTimeoutSeconds`:
+
+```ts twoslash
+import { aws } from "@voke/aws";
+import { sqsQueue } from "@voke/aws/cloudformation";
+import { defineConfig } from "voke";
+
+export default defineConfig({
+  name: "orders",
+  provider: aws(),
+  resources: {
+    ordersQueue: sqsQueue({ visibilityTimeoutSeconds: 180 }),
+  },
+});
+```
+
+The value must be at least the timeout of every Function that consumes the queue. A lower value fails
+model validation with a `VokeModelError` that names the Function and the minimum value.
+
+SQS Functions are not behind API Gateway, so the 30-second HTTP limit does not apply. A Function's
+timeout can go up to the Lambda limit of 900 seconds (`synthesis: { timeout }` on the Function). See
+[Functions](/docs/guides/functions).
+
+## Limits
+
+<Callout type="info">
+
+SQS support is intentionally small in v1:
+
+- There is no dead-letter queue or redrive policy. `sqsQueue()` has no option for them, and failed
+  messages are retried until the queue's retention period ends.
+- An `sqs()` Function cannot have HTTP routes or an output schema. Its output is always the batch
+  result. Put routes on a separate Function in the same registry.
+- The Event Source options are only `batchSize`, `maxBatchingWindowSeconds` and `enabled`.
+
+</Callout>
+
+## Next steps
+
+- [Resources and bindings](/docs/guides/resources): send messages to the queue from another Function.
+- [Runtime Variables](/docs/guides/runtime-variables): read secrets in an SQS handler.
+- [Testing](/docs/guides/testing): test Functions and the Gateway.
+- [Deploy](/docs/guides/deploy): deploy the queue and the Function.

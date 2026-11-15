@@ -1,51 +1,167 @@
 ---
 title: Local AWS
-description: Run your project's AWS resources locally on the official AWS Emulator, with Function code in the local Gateway.
+description: Run your project's AWS resources on your machine with a Local AWS Provider, while your Functions run in the local Gateway.
 ---
 
-With `provider: aws()`, Voke's Local AWS Provider is the official AWS Emulator, run in Docker.
+After reading this page you can create your project's tables, queues, and buckets on your machine and run `voke dev` against them, without an AWS account.
+
+A **Local AWS Provider** emulates AWS services in Docker. With `provider: aws()`, the default is the official AWS Emulator. Floci is the alternative.
 
 ```bash
-voke local start       # build the emulator image once, then start it
+voke local start       # start the Local AWS Provider
 voke local bootstrap   # create the project's resources and record their names
 voke dev               # run your Functions locally against those resources
-voke local stop        # stop the emulator; its state is gone
+voke local stop        # stop the Local AWS Provider
 ```
 
 ## What runs where
 
-- **Resources run in the emulator.** `voke local bootstrap` deploys a template with only the resources you declare (tables, queues, buckets, ...) through the emulator's CloudFormation. It writes their generated names to `.voke/local/outputs.json`.
-- **Functions run in the local Gateway.** `voke dev` runs your code with Bun, as usual, and sets `VOKE_RESOURCE_*` bindings from that file. Bootstrap does not create Lambdas, APIs or SQS triggers in the emulator: its Lambda runtime cannot load a Voke bundle yet, and an emulator SQS trigger would consume your messages.
+- **Resources run in the Local AWS Provider.** `voke local bootstrap` deploys a CloudFormation template with the resources you declare (tables, queues, buckets, ...) through the emulator's CloudFormation API. With the AWS Emulator, it then writes the generated resource names to `.voke/local/outputs.json`.
+- **Functions run in the local Gateway.** `voke dev` runs your code with Bun, as usual, and sets the `VOKE_RESOURCE_*` bindings for your resources. Bootstrap does not create Lambdas, APIs, or SQS triggers in the AWS Emulator: its Lambda runtime cannot load a Voke bundle, and an emulator SQS trigger would consume your messages.
 
-## Good to know
+## Run your project locally
 
-- The first `voke local start` builds a local image of about 1.2 GB. `voke local start --rebuild` refreshes it.
-- State is in memory. `voke local stop` and `voke local reset` discard it, so run `voke local bootstrap` again after a restart.
-- Credentials are generated per run and kept in `.voke/local/aws-emulator/`. Voke passes them by file path and never prints them. Your real AWS credentials and profile are removed from local commands and from `voke dev`.
-- The emulator listens on `https://127.0.0.1:9297`, on loopback only. Change the port with `aws({ local: awsEmulator({ port: 9300 }) })`.
-- Telemetry is off. Opt in with `awsEmulator({ telemetry: true })`.
+You need Docker, and the AWS CLI on your `PATH`: `voke local bootstrap` runs `aws cloudformation deploy` against the local endpoint.
 
-## Create every AWS SDK client with `createAwsClientConfig()`
+<Steps>
+<Step>
 
-```ts
-import { createAwsClientConfig } from "@voke/aws";
-import { SQSClient } from "@aws-sdk/client-sqs";
+### Start the Local AWS Provider
 
-const sqs = new SQSClient(createAwsClientConfig());
+```bash
+voke local start
 ```
 
-Locally, it sets an explicit `endpoint`. This matters: SQS queue URLs carry the real AWS host, so a client without an explicit endpoint would send queue calls to real AWS.
+With the AWS Emulator, the first start builds a local Docker image of about 1.2 GB, then starts the container and waits up to 30 seconds until it answers. Later starts reuse the image. The command prints the endpoint and the next step:
 
-## Use Floci instead
+```txt
+aws-emulator endpoint: https://127.0.0.1:9297
+State: /path/to/project/.voke/local/aws-emulator
+Next: voke local bootstrap
+Started the local environment
+```
 
-Floci keeps state between restarts and uses a smaller image:
+</Step>
+<Step>
 
-```ts
+### Create the resources
+
+```bash
+voke local bootstrap
+```
+
+Bootstrap deploys the stack `<name>-local` (the stage is `local` unless you pass `--stage`). With the AWS Emulator it prints each binding, for example `VOKE_RESOURCE_ORDERS_TABLE_NAME=...`, and writes them to `.voke/local/outputs.json`. Running it again with no changes succeeds.
+
+</Step>
+<Step>
+
+### Run the API
+
+```bash
+voke dev
+```
+
+`voke dev` points the AWS SDK at the local endpoint and loads the resource bindings. With the AWS Emulator, if the outputs file is missing or belongs to another stack, `voke dev` prints `Local resources are not provisioned. Run: voke local start && voke local bootstrap` and starts without bindings.
+
+</Step>
+<Step>
+
+### Stop the Local AWS Provider
+
+```bash
+voke local stop
+```
+
+Stop also deletes `.voke/local/outputs.json`. `voke local reset` restarts the Local AWS Provider with empty state.
+
+</Step>
+</Steps>
+
+## Choose a Local AWS Provider
+
+Set the Local AWS Provider with `aws({ local })` in `voke.config.ts`. Both builders come from `@voke/aws/local`.
+
+<Tabs items={["AWS Emulator", "Floci"]}>
+<Tab value="AWS Emulator">
+
+The default. You do not need to set it, but you can pass options:
+
+```ts twoslash
+import { aws } from "@voke/aws";
+import { awsEmulator } from "@voke/aws/local";
+import { defineConfig } from "voke";
+
+export default defineConfig({
+  name: "hello-api",
+  provider: aws({ local: awsEmulator({ port: 9300 }) }),
+});
+```
+
+- It listens on `https://127.0.0.1:9297`, on loopback only. Change the port with `port`.
+- State is in memory. `voke local stop` and `voke local reset` discard it, so run `voke local bootstrap` again after a restart.
+- Credentials are generated per run and kept in `.voke/local/aws-emulator/<port>/`. Voke passes them to the AWS CLI and SDK by file path and never prints them. Your real `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, and `AWS_PROFILE` are removed from local commands and from `voke dev`.
+- Telemetry is off. Opt in with `awsEmulator({ telemetry: true })`.
+- Other options: `version` (a pinned emulator release), `memory` (container limit, default `"2g"`), and `image` (the image tag).
+
+| Flag        | Command            | Effect                              |
+| ----------- | ------------------ | ----------------------------------- |
+| `--rebuild` | `voke local start` | Rebuild the image even if it exists |
+
+</Tab>
+<Tab value="Floci">
+
+Floci keeps state between restarts and uses a smaller image. It runs with Docker Compose.
+
+```ts twoslash
 import { aws } from "@voke/aws";
 import { floci } from "@voke/aws/local";
+import { defineConfig } from "voke";
 
 export default defineConfig({
   name: "hello-api",
   provider: aws({ local: floci() }),
 });
 ```
+
+- It listens on `http://localhost:4566` with fixed test credentials.
+- `voke local start` writes `.voke/local/docker-compose.yml` and runs `docker compose up -d`. State is kept in `.voke/local/data` (persistent storage mode).
+- `voke local stop` runs `docker compose down`. `voke local reset` runs `docker compose down -v`, which removes the state.
+- Resource names are derived from the template's logical IDs, so `voke dev` does not read an outputs file.
+
+| Flag         | Effect                                                         |
+| ------------ | -------------------------------------------------------------- |
+| `--compose`  | Docker Compose file. Default: `.voke/local/docker-compose.yml` |
+| `--data`     | Floci data directory. Default: `.voke/local/data`              |
+| `--hostname` | Floci hostname                                                 |
+| `--image`    | Floci container image. Default: `floci/floci:latest`           |
+| `--port`     | Floci port. Default: `4566`                                    |
+
+</Tab>
+</Tabs>
+
+Every `voke local` command also accepts `--config`, `--entrypoint`, `--name`, `--region`, and `--stage`, plus `--endpoint` (the local endpoint for bootstrap) and `--template` (where bootstrap writes the template, default `.voke/local/cloudformation.json`). See the [CLI reference](/docs/reference/cli).
+
+## Create every AWS SDK client with `createAwsClientConfig()`
+
+```ts twoslash
+import { createAwsClientConfig } from "@voke/aws";
+import { SQSClient } from "@aws-sdk/client-sqs";
+
+const sqs = new SQSClient(createAwsClientConfig());
+```
+
+<Callout type="warn">
+  Locally, `createAwsClientConfig()` sets an explicit `endpoint` from
+  `VOKE_AWS_ENDPOINT_URL` or `AWS_ENDPOINT_URL`. This matters: SQS queue URLs
+  carry the real AWS host, so a client without an explicit endpoint sends queue
+  calls to real AWS.
+</Callout>
+
+When neither variable is set, as in a deployed Lambda, the config has no `endpoint` and only sets the region.
+
+## Next steps
+
+- [Testing](/docs/guides/testing): run tests against local resources.
+- [Resources](/docs/guides/resources): declare the tables, queues, and buckets that bootstrap creates.
+- [Troubleshooting](/docs/guides/troubleshooting): fix "AWS Emulator is not running" and other errors.
+- [Deploy](/docs/guides/deploy): deploy the same project to AWS.

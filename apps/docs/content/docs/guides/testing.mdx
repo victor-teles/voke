@@ -1,0 +1,366 @@
+---
+title: Testing
+description: Choose the right test level for a Voke project, from a single Function call to smoke tests against a deployed stage.
+---
+
+After reading this page you can test a Function, a route, an SQS Function and the whole Gateway with `bun test`, then run the same checks against local AWS resources and a deployed stage.
+
+```ts twoslash
+// ---cut---
+import { expect, test } from "bun:test";
+import { schema } from "@voke/schema";
+import { createFunctions, http, route, voke } from "voke";
+
+const functions = createFunctions({
+  http: http({
+    routes: [
+      route.get("/users/:id", {
+        params: schema.object({ id: schema.string() }),
+        handler: (req) => ({ id: req.params.id, name: "Ada" }),
+      }),
+    ],
+  }),
+});
+
+const gateway = voke(functions, { config: { name: "users-api" } });
+
+test("returns a user", async () => {
+  const response = await gateway.request("/users/usr_1");
+
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ data: { id: "usr_1", name: "Ada" } });
+});
+```
+
+## Choose a test level
+
+Each level tests a different boundary. Use the smallest one that covers the behavior.
+
+| Level                         | Use it for                                                           | Goes through HTTP |
+| ----------------------------- | -------------------------------------------------------------------- | ----------------- |
+| `functions.invoke(...)`       | An invokable Function and its Function Contract                      | No                |
+| `functions.route(...)`        | One Route Builder route, typed, with optional injected auth          | No                |
+| `functions.sendEvent(...)`    | An SQS Function, with a batch of messages                            | No                |
+| `gateway.request(...)`        | Method, path, headers, query, authorizers, and the JSON response     | Yes, in process   |
+| `createTestClient(...)`       | The same requests through a `fetch` client, locally or against a URL | Yes               |
+| `createInvokeTestClient(...)` | A client object around a Function Registry, for worker suites        | No                |
+
+A **Function Contract** is the pair of input and output schemas of a Function. A **Gateway** is what `voke(functions, { config })` returns. See [Concepts](/docs/concepts) for the other terms.
+
+## Invoke a Function
+
+`functions.invoke(...)` validates the input, runs the handler, and validates the output. A local invocation needs an activated Function Registry, so create the Gateway with `voke(functions, { config })` first.
+
+```ts twoslash
+// ---cut---
+import { expect, test } from "bun:test";
+import { schema } from "@voke/schema";
+import { createFunctions, fn, voke } from "voke";
+
+const functions = createFunctions({
+  sendWelcomeEmail: fn({
+    input: schema.object({ email: schema.string(), userId: schema.string() }),
+    output: schema.object({
+      queued: schema.boolean(),
+      userId: schema.string(),
+    }),
+    handler: (payload) => ({ queued: true, userId: payload.userId }),
+  }),
+});
+
+voke(functions, { config: { name: "users-api" } });
+
+test("queues welcome emails", async () => {
+  const result = await functions.invoke("sendWelcomeEmail", {
+    email: "ada@example.com",
+    userId: "usr_1",
+  });
+
+  expect(result.queued).toBe(true);
+});
+```
+
+Without the `voke(...)` call, the invocation fails with the error in [Troubleshooting](/docs/guides/troubleshooting#local-function-invocation-requires-gateway-activation).
+
+## Call a route
+
+`functions.route(method, path, input)` runs one route handler without HTTP serialization. Params, query, headers, body, and the result keep the types of the route.
+
+```ts twoslash
+import { schema } from "@voke/schema";
+import { createFunctions, http, route } from "voke";
+
+const functions = createFunctions({
+  http: http({
+    routes: [
+      route.get("/users/:id", {
+        params: schema.object({ id: schema.string() }),
+        handler: (req) => ({ id: req.params.id, name: "Ada" }),
+      }),
+    ],
+  }),
+});
+
+const request = { params: { id: "usr_1" } };
+const user = await functions.route("GET", "/users/:id", request);
+//    ^?
+```
+
+For a protected route, inject the Route Auth Context instead of running the authorizer. `source` is `"lambda"` for request and Lambda authorizers, and `"jwt"` for JWT claims.
+
+```ts twoslash
+import { createFunctions, http, route } from "voke";
+
+const functions = createFunctions({
+  http: http({
+    routes: [
+      route.get("/me", {
+        handler: (req) => ({ userId: req.auth.context.userId }),
+      }),
+    ],
+  }),
+});
+
+const me = await functions.route("GET", "/me", {
+  auth: { context: { userId: "usr_1" }, source: "lambda" },
+});
+```
+
+See [Authorizers](/docs/guides/authorizers) for how routes are protected.
+
+## Send SQS messages to a Function
+
+`functions.sendEvent(name, { messages })` runs an SQS Function with a batch. Each message `body` is checked against the Function's message schema. The result is the SQS batch response.
+
+```ts twoslash
+// ---cut---
+import { expect, test } from "bun:test";
+import { sqs } from "@voke/aws";
+import { schema } from "@voke/schema";
+import { createFunctions } from "voke";
+
+const processed: string[] = [];
+
+const functions = createFunctions({
+  processOrder: sqs({
+    queue: "ordersQueue",
+    message: schema.object({ orderId: schema.string() }),
+    handler: (batch) => {
+      for (const message of batch.messages) {
+        processed.push(message.body.orderId);
+      }
+
+      return batch.ok();
+    },
+  }),
+});
+
+test("processes an order message", async () => {
+  const result = await functions.sendEvent("processOrder", {
+    messages: [{ body: { orderId: "ord_1" } }],
+  });
+
+  expect(processed).toEqual(["ord_1"]);
+  expect(result).toEqual({ batchItemFailures: [] });
+});
+```
+
+See [SQS events](/docs/guides/sqs-events) for batches and partial failures.
+
+## Send HTTP requests to the Gateway
+
+`gateway.request(path, init)` sends a `Request` through the Gateway in process. It covers routing, request validation, the response envelope, and status codes.
+
+```ts twoslash
+import { schema } from "@voke/schema";
+import { createFunctions, http, route, voke } from "voke";
+
+const functions = createFunctions({
+  http: http({
+    routes: [
+      route.post("/users", {
+        body: schema.object({ email: schema.string() }),
+        handler: (req) => ({ email: req.body.email }),
+      }),
+    ],
+  }),
+});
+const gateway = voke(functions, { config: { name: "users-api" } });
+
+// ---cut---
+const response = await gateway.request("/users", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ email: "ada@example.com" }),
+});
+```
+
+On a route protected by a Lambda authorizer, `gateway.request(...)` runs the request authorizer Function before the handler. A missing identity value returns `401`, a denied result returns `403`, and an invalid authorizer result returns `500`. A JWT authorizer is not checked in process: the route runs without validating the token. When the test only needs the route logic, inject the auth context with `functions.route(...)`.
+
+## Use a fetch client
+
+`createTestClient(target)` from `@voke/testing` is a plain `fetch` client with `get`, `post`, `put`, `patch`, `delete`, and `request` methods. The `json` option sets the body and the `content-type` header. It does not simulate Lambda or API Gateway.
+
+The target is either an object with a `fetch` function, such as your exported Gateway, or a `baseUrl`:
+
+```ts twoslash
+import { createTestClient } from "@voke/testing";
+import { createFunctions, http, route, voke } from "voke";
+
+const functions = createFunctions({
+  http: http({
+    routes: [route.get("/health", { handler: () => ({ ok: true }) })],
+  }),
+});
+const gateway = voke(functions, { config: { name: "users-api" } });
+
+// ---cut---
+const local = createTestClient(gateway);
+const health = await local.get("/health");
+
+const deployed = createTestClient({ baseUrl: "https://api.example.com/prod" });
+const created = await deployed.post("/users", {
+  json: { email: "ada@example.com" },
+});
+// Requests https://api.example.com/prod/users
+```
+
+With `baseUrl`, the client appends the path to the URL, so a stage path such as `/prod` is kept. You can also pass `fetch` together with `baseUrl` to use your own fetch function.
+
+## Use an invoke client
+
+`createInvokeTestClient(functions)` returns an object with the `invoke` method of the Function Registry. It activates the registry for you, so you do not need `voke(...)` first.
+
+```ts twoslash
+import { schema } from "@voke/schema";
+import { createInvokeTestClient } from "@voke/testing";
+import { createFunctions, fn } from "voke";
+
+const functions = createFunctions({
+  sendWelcomeEmail: fn({
+    input: schema.object({ userId: schema.string() }),
+    output: schema.object({ queued: schema.boolean() }),
+    handler: () => ({ queued: true }),
+  }),
+});
+
+// ---cut---
+const client = createInvokeTestClient(functions);
+const result = await client.invoke("sendWelcomeEmail", { userId: "usr_1" });
+```
+
+Prefer `functions.invoke(...)`, `functions.route(...)`, and `gateway.request(...)` in new tests. Use the client when a separate client object makes a worker suite clearer.
+
+## Test against local AWS resources
+
+When your Functions read or write real AWS resources (tables, queues, buckets), run the tests against a Local AWS Provider. Start it and create the resources first, as described in [Local AWS](/docs/guides/local-aws).
+
+### With the AWS Emulator
+
+`voke local bootstrap` writes the names of the created resources to `.voke/local/outputs.json`. `readLocalStackOutputs(expected, cwd?)` from `@voke/aws/local` reads that file and returns the `VOKE_RESOURCE_*` bindings. It returns `undefined` when the file is missing, or when it belongs to another provider, stack, or endpoint.
+
+```ts twoslash
+import { readLocalStackOutputs } from "@voke/aws/local";
+
+const bindings = await readLocalStackOutputs({
+  endpoint: "https://127.0.0.1:9297",
+  provider: "aws-emulator",
+  stack: "orders-api-local",
+});
+
+if (bindings === undefined) {
+  throw new Error("Run voke local start && voke local bootstrap first");
+}
+
+const tableName = bindings.VOKE_RESOURCE_ORDERS_TABLE_NAME;
+```
+
+The stack name is `<name>-<stage>`, and the stage of `voke local` is `local` unless you set another one. Run such tests with the emulator's environment, as `voke dev` does, and create every AWS SDK client with `createAwsClientConfig()`.
+
+### With Floci
+
+`createStackTestContext(options)` from `@voke/aws/testing` prepares the environment, the resource bindings, the stack outputs, and seed commands for a synthesized template.
+
+<Callout type="info">
+  `createStackTestContext` targets Floci. It is synchronous and derives resource
+  names from the template's logical IDs. The AWS Emulator generates names at
+  deploy time, so with the AWS Emulator use `readLocalStackOutputs` instead.
+  Passing `local: awsEmulator()` throws a `TypeError`.
+</Callout>
+
+```ts twoslash
+import {
+  dynamodbTable,
+  sqsQueue,
+  synthesizeCloudFormation,
+} from "@voke/aws/cloudformation";
+import { floci } from "@voke/aws/local";
+import { createStackTestContext } from "@voke/aws/testing";
+
+const template = synthesizeCloudFormation({
+  name: "orders-api",
+  stage: "local",
+  resources: {
+    ordersQueue: sqsQueue(),
+    ordersTable: dynamodbTable({ partitionKey: "id" }),
+  },
+});
+
+const context = createStackTestContext({ local: floci(), template });
+
+context.resource("ordersTable", "name"); // "OrdersTable"
+context.resource("ordersQueue", "url"); // "http://localhost:4566/000000000000/OrdersQueue"
+
+const seedPlan = context.createSeedPlan({
+  dynamodb: { OrdersTable: [{ id: "ord_1", status: "created" }] },
+  sqs: { OrdersQueue: [{ orderId: "ord_1" }] },
+});
+```
+
+`local` defaults to `floci()`. `seedPlan.commands` is a list of AWS CLI commands (`aws dynamodb put-item`, `aws sqs send-message`). Run each one with `seedPlan.environment` to seed Floci before the requests. Seed values for DynamoDB must be strings, numbers, booleans, or `null`.
+
+`context.output(name)` returns a stack output. Pass `outputs` to set or override outputs, for example the URL of a deployed API.
+
+## Smoke test a deployed stage
+
+After `voke deploy --stage <stage>`, Voke writes `.voke/outputs/<stage>.json`. The API URL is under `outputs.ApiUrl`. It has no stage suffix, for example `https://<api-id>.execute-api.<region>.amazonaws.com`.
+
+```json title=".voke/outputs/dev.json"
+{
+  "id": "users-api-dev",
+  "outputs": {
+    "ApiUrl": "https://abc123.execute-api.us-east-1.amazonaws.com"
+  },
+  "region": "us-east-1",
+  "stage": "dev"
+}
+```
+
+Point `createTestClient` at that URL. Skip the test when no URL is set, so the suite still passes locally:
+
+```ts twoslash
+// ---cut---
+import { expect, test } from "bun:test";
+import { createTestClient } from "@voke/testing";
+
+const apiUrl = Bun.env.VOKE_E2E_API_URL;
+const smoke = apiUrl === undefined ? test.skip : test;
+
+smoke("the deployed stage is healthy", async () => {
+  const client = createTestClient({ baseUrl: apiUrl ?? "" });
+  const response = await client.get("/health");
+
+  expect(response.status).toBe(200);
+});
+```
+
+```bash
+VOKE_E2E_API_URL=$(bun -e 'console.log((await Bun.file(".voke/outputs/dev.json").json()).outputs.ApiUrl)') bun test
+```
+
+## Next steps
+
+- [Local AWS](/docs/guides/local-aws): start the Local AWS Provider your tests use.
+- [Deploy](/docs/guides/deploy): create the stage your smoke tests call.
+- [HTTP routes](/docs/guides/http-routes): define the routes you test.
+- [Troubleshooting](/docs/guides/troubleshooting): fix common errors.

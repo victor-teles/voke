@@ -1,0 +1,174 @@
+---
+title: Packages
+description: Find which Voke package exports what you need, and the guide that teaches it.
+---
+
+Voke is split into a provider-neutral core, `voke`, and smaller packages for the AWS Provider, schemas, HTTP responses, tests, remote calls and builds. This page lists what each package is for, its main exports, and where to learn it.
+
+<Callout type="info">
+  The packages are not published yet, and the published names are not final. All
+  packages share one version (now `0.0.0`) and are released together.
+</Callout>
+
+A typical project imports from these packages:
+
+```ts twoslash
+// voke.config.ts
+import { aws } from "@voke/aws";
+import { sqsQueue } from "@voke/aws/cloudformation";
+import { defineConfig } from "voke";
+
+export default defineConfig({
+  name: "orders",
+  provider: aws(),
+  resources: { jobsQueue: sqsQueue() },
+});
+```
+
+```ts twoslash
+// src/index.ts
+import { created } from "@voke/http";
+import { schema } from "@voke/schema";
+import { createFunctions, http, route, voke } from "voke";
+
+const functions = createFunctions({
+  orders: http({
+    routes: [
+      route.post("/orders", {
+        body: schema.object({ item: schema.string() }),
+        handler: (request) => created({ item: request.body.item }),
+      }),
+    ],
+  }),
+});
+
+export default voke(functions, { config: { name: "orders" } });
+```
+
+## voke
+
+The core package: Functions, the Gateway, the config, and the error classes. It does not depend on AWS. It also ships the `voke` command (see [CLI](/docs/reference/cli)).
+
+| Export                                                                                                                                     | Use                                                                                                                               |
+| ------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| `fn`, `http`, `createFunctions`                                                                                                            | Declare Functions and the **Function Registry**.                                                                                  |
+| `route`                                                                                                                                    | The **Route Builder**: `route.get(...)`, `.post(...)`, `.put(...)`, `.patch(...)`, `.delete(...)`, `.head(...)`, `.options(...)`. |
+| `voke`                                                                                                                                     | Create the **Gateway**: `voke(functions, { config })`.                                                                            |
+| `defineConfig`                                                                                                                             | Define `voke.config.ts`.                                                                                                          |
+| `VokeError`, `VokeConfigError`, `VokeModelError`, `VokeDeployError`, `VokeResourceBindingError`, `VokeRuntimeVariableError`, `InvokeError` | Error classes. See [Errors](/docs/reference/errors).                                                                              |
+| `createVariableSource`, `createVariableProvider`                                                                                           | Build provider-neutral Runtime Variable sources and providers.                                                                    |
+| `StandardSchemaV1`, `VokeConfig`, `VokeConfigInput`, `VokeProvider` (types)                                                                | Types for schemas, config and Providers.                                                                                          |
+
+`voke` also exports building blocks for Provider packages, such as `functionRegistryEntries`, `createHandlerExportName`, `runRequestAuthorizer`, `readStandardResult` and `formatValidationIssue`. Application code does not need them.
+
+Learn it in [Functions](/docs/guides/functions), [HTTP routes](/docs/guides/http-routes) and [Concepts](/docs/concepts).
+
+## @voke/aws
+
+The AWS Provider and the AWS-specific authoring helpers.
+
+| Export                                                                           | Use                                                                                                   |
+| -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `aws`                                                                            | The Provider for `voke.config.ts`: `provider: aws({ lambda, local })`.                                |
+| `awsLambda`                                                                      | Per-Function Lambda runtime and architecture, for `synthesis.provider`.                               |
+| `sqs`, `createSqsEventHandler`                                                   | SQS **Event Sources**.                                                                                |
+| `secret`, `parameter`                                                            | **Runtime Variables** from Secrets Manager and SSM Parameter Store.                                   |
+| `createAuthorizers`, `jwtAuthorizer`, `lambdaAuthorizer`, `requestAuthorizer`    | API Gateway authorizers.                                                                              |
+| `bindResource`, `createAwsClientConfig`, `createResourceBindingName`, `toEnvKey` | Read resource bindings and configure AWS SDK clients at runtime.                                      |
+| `createLambdaHandlers`, `createAwsLambdaInvokeTransport`                         | Lambda handlers for the generated entry, and the Lambda Invoke transport for `functions.invoke(...)`. |
+
+Learn it in [Deploy](/docs/guides/deploy), [SQS events](/docs/guides/sqs-events), [Runtime Variables](/docs/guides/runtime-variables) and [Authorizers](/docs/guides/authorizers). See [Config](/docs/reference/config#aws-provider-options) for the `aws()` options.
+
+### @voke/aws/cloudformation
+
+CloudFormation resource builders for `resources` in `voke.config.ts`, and the template synthesizer.
+
+| Export                                                                                    | Use                                                                           |
+| ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `dynamodbTable`, `sqsQueue`, `snsTopic`, `eventBus`, `s3Bucket`, `secret`, `ssmParameter` | Declare infrastructure resources.                                             |
+| `synthesizeCloudFormation`                                                                | Synthesize a CloudFormation template in code. `voke synth` does this for you. |
+
+Learn it in [Resources](/docs/guides/resources).
+
+### @voke/aws/local
+
+The **Local AWS Providers** for `aws({ local })`, and the helpers behind `voke local`.
+
+| Export                                                                                                                                                     | Use                                                       |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `awsEmulator`, `floci`                                                                                                                                     | Select the AWS Emulator (the default) or Floci.           |
+| `createLocalAwsEnvironment`, `createLocalResourceBindings`, `createLocalBootstrapPlan`, `createLocalWorkflow`, `readLocalStackOutputs`, `localOutputsPath` | Lower-level helpers that `voke local` and `voke dev` use. |
+| `LocalProviderError`                                                                                                                                       | Thrown when a Local AWS Provider command fails.           |
+
+Learn it in [Local AWS](/docs/guides/local-aws).
+
+### @voke/aws/testing
+
+| Export                   | Use                                                                                                                                 |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `createStackTestContext` | The environment and resource bindings to test a project against a local stack. It targets Floci; the AWS Emulator is not supported. |
+
+Learn it in [Testing](/docs/guides/testing).
+
+## @voke/schema
+
+Builders for **Function Contracts** that follow the Standard Schema interface.
+
+| Export   | Use                                                                                                                                                                                                 |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schema` | `schema.object`, `schema.string`, `schema.number`, `schema.boolean`, `schema.array`, `schema.enum`, `schema.literal`, `schema.optional`, `schema.null`, `schema.undefined`, `schema.coerce.number`. |
+
+Zod and other Standard Schema validators work in the same places. Learn it in [Schemas](/docs/guides/schemas).
+
+## @voke/http
+
+Response helpers for route handlers. Each returns a `Response` with a JSON body.
+
+| Export                       | Use                                                                                          |
+| ---------------------------- | -------------------------------------------------------------------------------------------- |
+| `ok`, `created`, `noContent` | `200 { data }`, `201 { data }`, `204` with no body.                                          |
+| `error`                      | An error response `{ error: { code?, message, issues?, details? } }`; status 400 by default. |
+| `response`                   | The four helpers above as one object.                                                        |
+
+Learn it in [HTTP routes](/docs/guides/http-routes).
+
+## @voke/testing
+
+Provider-neutral test clients.
+
+| Export                   | Use                                                                                                                         |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| `createTestClient`       | A plain `fetch` client over `{ fetch }` (such as the Gateway) or `{ baseUrl }`. It does not simulate Lambda or API Gateway. |
+| `createInvokeTestClient` | Call `invoke(...)` on a Function Registry in a test, without creating a Gateway first.                                      |
+
+Learn it in [Testing](/docs/guides/testing).
+
+## @voke/remote
+
+Typed **Remote Function Registries**, to call the Functions of another Voke Project.
+
+| Export                                                        | Use                                                                                    |
+| ------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `createRemoteFunctions`                                       | Create a Remote Function Registry from a contract artifact. Generated modules call it. |
+| `generateRemoteModules`, `renderRemoteModule`                 | Fetch contract metadata and write the modules. `voke remote generate` does this.       |
+| `createFunctionContractArtifact`, `mountDevFunctionEndpoints` | Publish contract metadata and the invoke endpoints from the remote project.            |
+| `defineRemoteConfig`, `remoteEnvironment`                     | Resolve `remotes` settings and the environment variables they produce.                 |
+
+Learn it in [Remote Functions](/docs/guides/remote-functions).
+
+## @voke/build
+
+Lambda bundle planning for Provider packages. `@voke/aws` uses it; application code does not import it.
+
+| Export            | Use                                                                                                                           |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `createBuildPlan` | Plan one Node.js ESM bundle per entrypoint, with `build.external` modules left out and a `package.json` that marks it as ESM. |
+| `handlerModule`   | The handler module path of a bundle file, relative to the output directory.                                                   |
+
+See [Config](/docs/reference/config#build) for the build settings.
+
+## Next steps
+
+- [Getting started](/docs/getting-started): create a project that uses these packages.
+- [Concepts](/docs/concepts): the terms used on this page.
+- [Config](/docs/reference/config): every setting in `voke.config.ts`.

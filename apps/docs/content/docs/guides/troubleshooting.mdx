@@ -1,0 +1,163 @@
+---
+title: Troubleshooting
+description: Check your setup with voke doctor and fix the most common Voke errors from their exact messages.
+---
+
+After reading this page you can check your toolchain and project with `voke doctor`, and fix the errors Voke users meet most often. Search this page for the first words of your error message.
+
+## Check your setup with `voke doctor`
+
+Run `voke doctor` in the project directory. It checks the toolchain, the config, the project, and the Provider, and prints one row per check:
+
+```bash
+voke doctor
+```
+
+```txt
+ok    Bun              1.4.4
+ok    Config           /path/to/hello-api/voke.config.ts
+ok    Entrypoint       ./src/index.ts
+ok    Project          1 Function, 6 routes
+ok    Provider         aws
+fail  AWS credentials  AWS did not answer within 10s in us-east-1; check your network and credentials (AWS_PROFILE, SSO login)
+ok    docker           /usr/local/bin/docker
+voke doctor found problems; see the fail rows above.
+```
+
+Each row has a status, the name of the check, and a detail:
+
+- `ok`: the check passed. The detail shows what Voke found.
+- `warn`: something is missing, but commands that do not need it still work.
+- `fail`: commands that need this check will fail. `voke doctor` then exits with code 1 and prints `voke doctor found problems; see the fail rows above.`
+
+Pass `--config <file>` to check another config file.
+
+### What each row checks
+
+| Check             | `ok` detail                                                        | When it is not `ok`                                                                                                                                             |
+| ----------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Bun`             | The Bun version                                                    | `fail` when the version is older than the `voke` package needs (`>=1.4.4`). Run `bun upgrade`.                                                                  |
+| `Config`          | The config path                                                    | `fail` when the file is missing (create a project with `voke create <name>`, or pass `--config`) or when the config is invalid. The detail is the config error. |
+| `Entrypoint`      | The entrypoint path                                                | `fail` when the file does not exist. Set `entrypoint` in `voke.config.ts`.                                                                                      |
+| `Project`         | The number of Functions and routes                                 | `fail` when the entrypoint cannot be imported or declares invalid Functions. The detail is the error.                                                           |
+| `Provider`        | The Provider name                                                  | `warn` when `voke.config.ts` has no `provider`.                                                                                                                 |
+| `AWS credentials` | The account and region, or the region only before the first deploy | `fail` when AWS rejects the credentials or does not answer within 10 seconds.                                                                                   |
+| `docker`          | The path of the `docker` executable                                | `warn` when Docker is not on your `PATH`. Only `voke local` needs it.                                                                                           |
+
+The last two rows come from the AWS Provider. The credentials check calls CloudFormation in the configured region and reports only the account ID and the region. It never prints credential values. Without network access this row fails, as in the output above.
+
+## Common errors
+
+### No provider configured
+
+```txt
+Invalid CLI usage: No provider configured. Add a provider to voke.config.ts, for example:
+
+  import { aws } from "@voke/aws";
+  export default defineConfig({ name: "hello-api", provider: aws() });
+```
+
+Commands that build, synthesize, deploy, or run local AWS need a Provider. Add `provider: aws()` to `voke.config.ts`:
+
+```ts twoslash
+import { aws } from "@voke/aws";
+import { defineConfig } from "voke";
+
+export default defineConfig({
+  name: "hello-api",
+  provider: aws(),
+});
+```
+
+### Unknown flag
+
+```txt
+Invalid CLI usage: Unknown flag --stge for "deploy". Did you mean --stage?
+Usage: voke deploy [--stage dev] [--region us-east-1] [--config voke.config.ts] [--dry-run]
+```
+
+The flag is not one the command reads. When a known flag is close, Voke suggests it. Run `voke <command> --help` for the flags of a command, or see the [CLI reference](/docs/reference/cli). `voke local` also accepts the flags of your Local AWS Provider, such as `--rebuild`.
+
+### A config setting was removed
+
+Voke fails on settings it no longer reads, instead of ignoring them. Every message starts with `Invalid Voke config at <path>:`, and several issues are joined with `;`.
+
+```txt
+Invalid Voke config at local: local AWS settings moved to the provider: aws({ local: floci() }) from "@voke/aws" and "@voke/aws/local"
+```
+
+Move the Local AWS Provider into the AWS Provider: `provider: aws({ local: floci() })`. See [Local AWS](/docs/guides/local-aws).
+
+```txt
+Invalid Voke config at runtime.lambda: "runtime.lambda" moved to the AWS provider; use aws({ lambda: { runtime } })
+```
+
+Set Lambda settings on the Provider: `provider: aws({ lambda: { runtime: "nodejs22.x" } })`.
+
+```txt
+Invalid Voke config at cloudFormation.resources: "cloudFormation.resources" was removed; declare resources at the top level: resources: { ... }
+```
+
+Move the resources to the top-level `resources` setting. The same applies to `cloudFormation.environment`. See [Resources](/docs/guides/resources).
+
+```txt
+Invalid Voke config at functions: Functions are declared in the project entrypoint, not in voke.config.ts. Export them from the entrypoint: export default voke(functions, { config }) or export const functions = createFunctions({ ... })
+```
+
+Remove `functions` from `voke.config.ts`. Declare them in the entrypoint (`src/index.ts` by default) and export the Gateway. See [Functions](/docs/guides/functions).
+
+### AWS credentials were not found
+
+```txt
+AWS credentials were not found or have expired. Configure a profile (AWS_PROFILE), run your SSO login, or set environment credentials, then retry.
+```
+
+`voke deploy`, `voke remove`, and `voke doctor` use the standard AWS credential chain. Set `AWS_PROFILE`, run `aws sso login` for an SSO profile, or set environment credentials, then retry. See [Deploy](/docs/guides/deploy).
+
+### AWS Emulator is not running
+
+```txt
+AWS Emulator is not running (no state in /path/to/project/.voke/local/aws-emulator/9297). Start it with: voke local start
+```
+
+`voke dev` and `voke local bootstrap` need a running AWS Emulator when it is the Local AWS Provider (the default for `aws()`). Run `voke local start`, then `voke local bootstrap`. If the start fails, check that Docker is running. If bootstrap fails, check that the AWS CLI is installed: bootstrap runs `aws cloudformation deploy`.
+
+### Could not import the project entrypoint
+
+```txt
+Could not import the project entrypoint /path/to/project/src/index.ts: <reason>. Voke imports your entrypoint to discover Functions; guard side effects with process.env.VOKE_SYNTH.
+```
+
+Commands such as `voke build`, `voke synth`, and `voke deploy` import your entrypoint to find its Functions. `<reason>` is the original error. Fix that error first, for example a missing module or a top-level call that needs the network. While Voke imports the entrypoint, `process.env.VOKE_SYNTH` is `"1"`. Skip side effects such as servers and connections when it is set:
+
+```ts twoslash
+// ---cut---
+if (process.env.VOKE_SYNTH !== "1") {
+  // Open connections or start background work here.
+}
+```
+
+### The HTTP 30-second limit
+
+```txt
+Invalid Voke model at functions.api.synthesis.timeout: Function "api" timeout 60s exceeds the 30s API Gateway HTTP API integration limit; lower synthesis.timeout to 30 or less, or move the work to an SQS Function
+```
+
+API Gateway HTTP APIs wait at most 30 seconds for a Lambda integration. A Function with routes cannot have a longer timeout. Lower the Function's `synthesis.timeout` to 30 seconds or less. For longer work, send a message to a queue and do the work in an SQS Function. See [SQS events](/docs/guides/sqs-events).
+
+### Local Function invocation requires Gateway activation
+
+```txt
+Local Function invocation requires Gateway activation. Call voke(functions) before invoking local functions.
+```
+
+A local `functions.invoke(...)` needs a Function Registry that a Gateway has activated. In app code, export the Gateway from the entrypoint: `export default voke(functions, { config })`. In tests, call `voke(functions, { config })` before the first invocation, or use `createInvokeTestClient(functions)`. See [Testing](/docs/guides/testing#invoke-a-function).
+
+A Function Registry belongs to one Gateway. Activating it again with a different name, stage, or region fails with `Function Registry is already activated with a different Gateway context`.
+
+## Next steps
+
+- [Errors reference](/docs/reference/errors): error classes and codes.
+- [CLI reference](/docs/reference/cli): commands and flags.
+- [Config reference](/docs/reference/config): settings and defaults.
+- [Local AWS](/docs/guides/local-aws): set up a Local AWS Provider.

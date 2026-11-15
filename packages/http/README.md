@@ -8,4 +8,9 @@ Part of [Voke](https://github.com/victor-teles/voke). Every Voke package is rele
 bun add voke @voke/http
 ```
 
-See the [Voke README](https://github.com/victor-teles/voke#readme) for usage. Licensed under MIT.
+Documentation:
+
+- [HTTP routes](https://github.com/victor-teles/voke/blob/main/apps/docs/content/docs/guides/http-routes.mdx)
+- [Packages reference](https://github.com/victor-teles/voke/blob/main/apps/docs/content/docs/reference/packages.mdx)
+
+Licensed under MIT.

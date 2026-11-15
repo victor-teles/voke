@@ -1,0 +1,297 @@
+---
+title: Schemas and validation
+description: Validate Function payloads, results and HTTP request parts with @voke/schema, Zod, or any Standard Schema validator.
+---
+
+After reading this page you can write the schemas of a Function Contract, choose a validator, and handle validation failures in code and over HTTP.
+
+## Schemas in Voke
+
+Voke validates data at every boundary with a schema:
+
+- `input` and `output` of an invokable Function (its **Function Contract**). See [Functions](/docs/guides/functions).
+- `params`, `body` and `output` of an HTTP route. See [HTTP routes](/docs/guides/http-routes).
+- The message body of an SQS Function. See [SQS events](/docs/guides/sqs-events).
+
+A schema is any validator that implements [Standard Schema](https://standardschema.dev), a shared interface that Zod, Valibot, ArkType and `@voke/schema` implement. Voke reads the TypeScript types from the schema, so the handler's payload and the caller's arguments are typed without extra annotations.
+
+## Use @voke/schema
+
+`@voke/schema` is a small validator with no dependencies. Import `schema` and compose builders:
+
+```ts twoslash
+// @filename: voke.config.ts
+import { aws } from "@voke/aws";
+import { defineConfig } from "voke";
+
+export default defineConfig({ name: "shop-api", provider: aws() });
+// @filename: src/index.ts
+// ---cut---
+import { schema } from "@voke/schema";
+import { createFunctions, fn, voke } from "voke";
+import config from "../voke.config";
+
+const order = schema.object({
+  id: schema.string().min(1),
+  quantity: schema.number().int().min(1).max(100),
+  status: schema.enum(["pending", "paid", "shipped"]),
+  tags: schema.array(schema.string()),
+  note: schema.optional(schema.string().max(280)),
+});
+
+const functions = createFunctions({
+  createOrder: fn({
+    input: order,
+    output: schema.object({
+      id: schema.string(),
+      accepted: schema.literal(true),
+    }),
+    handler: (payload) => ({ id: payload.id, accepted: true as const }),
+  }),
+});
+
+voke(functions, { config });
+
+await functions.invoke("createOrder", {
+  id: "ord_1",
+  quantity: 2,
+  status: "pending",
+  tags: ["gift"],
+});
+```
+
+### Builders
+
+| Builder                    | Accepts                                                                                                           |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `schema.string()`          | A string.                                                                                                         |
+| `schema.number()`          | A finite number. `NaN` and `Infinity` fail.                                                                       |
+| `schema.coerce.number()`   | A finite number, or a non-empty string that converts to one (`"42"` becomes `42`).                                |
+| `schema.boolean()`         | `true` or `false`.                                                                                                |
+| `schema.literal(value)`    | Exactly `value`, a string, number, boolean or `null`.                                                             |
+| `schema.enum([...values])` | One of the listed strings.                                                                                        |
+| `schema.object({ ... })`   | An object with exactly these keys. Missing keys fail with `Required`, extra keys fail with `Unexpected property`. |
+| `schema.array(item)`       | An array whose entries all match `item`.                                                                          |
+| `schema.optional(inner)`   | `undefined`, or a value that matches `inner`. In an object, the key may be left out.                              |
+| `schema.null()`            | `null`.                                                                                                           |
+| `schema.undefined()`       | `undefined`.                                                                                                      |
+
+### Modifiers
+
+Modifiers return a new schema, so you can chain them.
+
+| Modifier  | Applies to                    | Rule                 |
+| --------- | ----------------------------- | -------------------- |
+| `.min(n)` | `string()`                    | Length at least `n`. |
+| `.max(n)` | `string()`                    | Length at most `n`.  |
+| `.min(n)` | `number()`, `coerce.number()` | Value at least `n`.  |
+| `.max(n)` | `number()`, `coerce.number()` | Value at most `n`.   |
+| `.int()`  | `number()`, `coerce.number()` | An integer.          |
+
+Path parameters always arrive as strings. Use `schema.coerce.number()` to receive a number:
+
+```ts twoslash
+import { schema } from "@voke/schema";
+import { createFunctions, http, route } from "voke";
+
+const functions = createFunctions({
+  pages: http({
+    routes: [
+      route.get("/pages/:number", {
+        params: schema.object({ number: schema.coerce.number().int().min(1) }),
+        handler: (request) => ({ next: request.params.number + 1 }),
+      }),
+    ],
+  }),
+});
+```
+
+## Use Zod or another validator
+
+Zod schemas work wherever a `@voke/schema` schema does. Both tabs define the same Function:
+
+<Tabs items={["@voke/schema", "Zod"]}>
+<Tab value="@voke/schema">
+
+```ts twoslash
+// @filename: voke.config.ts
+import { aws } from "@voke/aws";
+import { defineConfig } from "voke";
+
+export default defineConfig({ name: "users-api", provider: aws() });
+// @filename: src/index.ts
+// ---cut---
+import { schema } from "@voke/schema";
+import { createFunctions, fn, voke } from "voke";
+import config from "../voke.config";
+
+const user = schema.object({
+  id: schema.string(),
+  email: schema.string().min(3),
+});
+
+const functions = createFunctions({
+  getUser: fn({
+    input: schema.object({ id: schema.string() }),
+    output: user,
+    handler: (payload) => ({ id: payload.id, email: "ada@example.com" }),
+  }),
+});
+
+voke(functions, { config });
+```
+
+</Tab>
+<Tab value="Zod">
+
+```ts twoslash
+// @filename: voke.config.ts
+import { aws } from "@voke/aws";
+import { defineConfig } from "voke";
+
+export default defineConfig({ name: "users-api", provider: aws() });
+// @filename: src/index.ts
+// ---cut---
+import { z } from "zod";
+import { createFunctions, fn, voke } from "voke";
+import config from "../voke.config";
+
+const user = z.object({
+  id: z.string(),
+  email: z.string().min(3),
+});
+
+const functions = createFunctions({
+  getUser: fn({
+    input: z.object({ id: z.string() }),
+    output: user,
+    handler: (payload) => ({ id: payload.id, email: "ada@example.com" }),
+  }),
+});
+
+voke(functions, { config });
+```
+
+</Tab>
+</Tabs>
+
+Any other validator that implements Standard Schema works the same way, for example Valibot or ArkType. Install it in your project and pass its schemas to `input`, `output`, `params` or `body`. You can mix validators in one project.
+
+## Validation failures
+
+### In functions.invoke
+
+When the payload fails the `input` schema, `functions.invoke(...)` rejects with an `InvokeError` with code `INVALID_PAYLOAD`. When the handler's result fails the `output` schema, the code is `INVALID_RESULT`. `error.issues` lists each problem with a `message` and a `path`:
+
+```ts twoslash
+// @filename: voke.config.ts
+import { aws } from "@voke/aws";
+import { defineConfig } from "voke";
+
+export default defineConfig({ name: "users-api", provider: aws() });
+// @filename: src/index.ts
+// ---cut---
+import { schema } from "@voke/schema";
+import { createFunctions, fn, InvokeError, voke } from "voke";
+import config from "../voke.config";
+
+const user = schema.object({ id: schema.string() });
+
+const functions = createFunctions({
+  getUser: fn({ input: user, output: user, handler: (payload) => payload }),
+});
+
+voke(functions, { config });
+
+try {
+  // Read from an untrusted source, so the type does not match the contract.
+  const payload: unknown = JSON.parse('{ "id": 1 }');
+  await functions.invoke("getUser", payload as { id: string });
+} catch (error) {
+  if (error instanceof InvokeError && error.code === "INVALID_PAYLOAD") {
+    console.log(error.message);
+    // Invalid payload for getUser: id: Expected string
+    console.log(error.issues);
+    // [{ message: "Expected string", path: ["id"] }]
+  }
+}
+```
+
+The message starts with `Invalid payload for` and the Function's deployed name, then lists each issue as `path: message`. Voke turns every path into a list of plain keys, whatever the validator reported.
+
+### Over HTTP
+
+When a route's `params` or `body` fails its schema, the client gets status `400`. The message names the request part, and each issue path starts with that part:
+
+```txt
+HTTP/1.1 400 Bad Request
+content-type: application/json
+
+{
+  "error": {
+    "message": "Invalid body",
+    "issues": [{ "message": "Expected string", "path": ["body", "name"] }]
+  }
+}
+```
+
+The handler does not run. When the handler's return value fails the route's `output` schema, the status is `500` and the message is `Invalid result`. See [HTTP routes](/docs/guides/http-routes#errors) for every error response.
+
+## Write your own validator
+
+You can write a validator by hand when no library fits. A Standard Schema validator is an object with a `"~standard"` property:
+
+- `version`: always `1`.
+- `vendor`: a name for your validator.
+- `validate(value)`: returns `{ value }` with the parsed value on success, or `{ issues }` on failure. It may also return a promise of either.
+
+Each issue has a `message` and an optional `path`, a list of keys from the root of the value to the failing field. Type the schema with `StandardSchemaV1<Input, Output>` from `voke` so Voke can infer the payload type:
+
+```ts twoslash
+// @filename: voke.config.ts
+import { aws } from "@voke/aws";
+import { defineConfig } from "voke";
+
+export default defineConfig({ name: "orders-api", provider: aws() });
+// @filename: src/index.ts
+// ---cut---
+import { createFunctions, fn, voke } from "voke";
+import type { StandardSchemaV1 } from "voke";
+import config from "../voke.config";
+
+interface OrderId {
+  id: string;
+}
+
+const orderId: StandardSchemaV1<OrderId, OrderId> = {
+  "~standard": {
+    version: 1,
+    vendor: "my-app",
+    validate: (value) => {
+      const id = (value as { id?: unknown } | null)?.id;
+
+      return typeof id === "string" && id.startsWith("ord_")
+        ? { value: { id } }
+        : { issues: [{ message: "Expected an order id", path: ["id"] }] };
+    },
+  },
+};
+
+const functions = createFunctions({
+  getOrder: fn({
+    input: orderId,
+    output: orderId,
+    handler: (payload) => payload,
+  }),
+});
+
+voke(functions, { config });
+```
+
+Prefer `@voke/schema` or a library for everyday schemas. Write your own only for rules that a library cannot express.
+
+## Next steps
+
+- [Functions](/docs/guides/functions)
+- [HTTP routes](/docs/guides/http-routes)
+- [Errors reference](/docs/reference/errors)
