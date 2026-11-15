@@ -3,9 +3,11 @@ import {
   InvokeError,
   readStandardResult,
   VokeConfigError,
+  VokeModelError,
 } from "voke";
 import type {
   EventFunctionDefinition,
+  EventSourceDefinition,
   FunctionSynthesisConfig,
   InvokeContext,
   RuntimeVariableCatalog,
@@ -15,6 +17,13 @@ import type {
   ValidationIssue,
 } from "voke";
 
+import { resourceProvider, toLogicalId } from "./cloudformation-template";
+import type {
+  AwsEventSourceAdapter,
+  AwsEventSourceContext,
+  VokeIssue,
+} from "./event-sources";
+
 type AnyStandardSchema = StandardSchemaV1<unknown, unknown>;
 
 export interface SqsEventSourceOptions {
@@ -23,9 +32,10 @@ export interface SqsEventSourceOptions {
   maxBatchingWindowSeconds?: number;
 }
 
-export interface SqsEventSourceDefinition {
-  readonly options: SqsEventSourceOptions;
-  readonly queue: string;
+/** An SQS Event Source as `sqs()` stores it: the queue resource key plus the trigger settings, defaults applied. */
+export interface SqsEventSourceDefinition extends EventSourceDefinition {
+  readonly properties: Required<SqsEventSourceOptions>;
+  readonly resource: string;
   readonly source: "sqs";
 }
 
@@ -124,7 +134,12 @@ export interface SqsMessageBatchSchema<
   TBodySchema extends AnyStandardSchema = AnyStandardSchema,
   TInvalidMessageBody extends SqsInvalidMessageBodyMode = "fail",
 > extends StandardSchemaV1<
-  SqsEventInvocationInput<StandardSchemaInput<TBodySchema>>,
+  // A Function that keeps invalid messages is tested with bodies of any shape.
+  SqsEventInvocationInput<
+    TInvalidMessageBody extends "include"
+      ? unknown
+      : StandardSchemaInput<TBodySchema>
+  >,
   TInvalidMessageBody extends "include"
     ? SqsMessageBatchIncludeInvalid<StandardSchemaOutput<TBodySchema>>
     : SqsMessageBatch<StandardSchemaOutput<TBodySchema>>
@@ -318,12 +333,19 @@ const parseSqsMessageBatch = async <
   } as StandardSchemaOutput<typeof schema>;
 };
 
+// The defaults are the values Lambda applies when the mapping leaves them out; storing them keeps
+// the model free of `undefined` and the Dev Function Summary explicit.
 const sqsEventSource = (
   queue: string,
   options: SqsEventSourceOptions = {}
 ): SqsEventSourceDefinition => ({
-  options,
-  queue,
+  // oxlint-disable-next-line sort-keys -- the Dev Function Summary prints properties in this order.
+  properties: {
+    batchSize: options.batchSize ?? 10,
+    maxBatchingWindowSeconds: options.maxBatchingWindowSeconds ?? 0,
+    enabled: options.enabled ?? true,
+  },
+  resource: queue,
   source: "sqs",
 });
 
@@ -386,7 +408,8 @@ export const sqs = <
 ): EventFunctionDefinition<
   string,
   SqsMessageBatchSchema<TMessageSchema, TInvalidMessageBody>,
-  TVariables
+  TVariables,
+  SqsBatchResult
 > => {
   if (definition.queue !== undefined && definition.queues !== undefined) {
     throw new VokeConfigError("Pass either queue or queues to sqs(), not both");
@@ -424,7 +447,8 @@ export const sqs = <
   }) as unknown as EventFunctionDefinition<
     string,
     SqsMessageBatchSchema<TMessageSchema, TInvalidMessageBody>,
-    TVariables
+    TVariables,
+    SqsBatchResult
   >;
 };
 
@@ -450,3 +474,71 @@ export const createSqsEventHandler =
       options.function as never,
       sqsInvocationFromAwsEvent(event) as never
     );
+
+const queueKindIssue = ({
+  eventSource,
+  eventSourceIndex,
+  functionKey,
+  model,
+}: AwsEventSourceContext): VokeIssue | undefined => {
+  const queue = eventSource.resource ?? "";
+  const resource = model.resources[queue];
+  const path = `functions.${functionKey}.eventSources.${eventSourceIndex}.resource`;
+
+  if (resource === undefined) {
+    return {
+      message: `Function "${functionKey}" SQS event source references resource "${queue}", but no matching resource is defined.`,
+      path,
+    };
+  }
+
+  const { cloudFormationType } = resourceProvider(resource);
+
+  return cloudFormationType === "AWS::SQS::Queue"
+    ? undefined
+    : {
+        message: `Function "${functionKey}" SQS event source references resource "${queue}", but it is an ${JSON.stringify(cloudFormationType)} resource instead of an "AWS::SQS::Queue".`,
+        path,
+      };
+};
+
+/** How an SQS Event Source runs on Lambda and synthesizes to an event source mapping. */
+export const sqsEventSourceAdapter: AwsEventSourceAdapter = {
+  source: "sqs",
+  synthesize: (context) => {
+    const issue = queueKindIssue(context);
+
+    if (issue !== undefined) {
+      throw VokeModelError.validation([issue]);
+    }
+
+    const { eventSource, lambdaLogicalId } = context;
+    const queueLogicalId = toLogicalId(eventSource.resource ?? "");
+    const { batchSize, enabled, maxBatchingWindowSeconds } =
+      eventSource.properties;
+
+    return {
+      resources: {
+        [`${lambdaLogicalId}${queueLogicalId}EventSourceMapping`]: {
+          Properties: {
+            BatchSize: batchSize ?? 10,
+            Enabled: enabled ?? true,
+            EventSourceArn: { "Fn::GetAtt": [queueLogicalId, "Arn"] },
+            FunctionName: { Ref: lambdaLogicalId },
+            FunctionResponseTypes: ["ReportBatchItemFailures"],
+            MaximumBatchingWindowInSeconds: maxBatchingWindowSeconds ?? 0,
+          },
+          Type: "AWS::Lambda::EventSourceMapping",
+        },
+      },
+    };
+  },
+  toInvocation: (event) => sqsInvocationFromAwsEvent(event as SqsAwsEvent),
+  // The handler already returns Lambda's SQS batch response shape.
+  toResponse: (result) => result,
+  validate: (context) => {
+    const issue = queueKindIssue(context);
+
+    return issue === undefined ? [] : [issue];
+  },
+};

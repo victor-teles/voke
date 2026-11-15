@@ -1,12 +1,13 @@
 import { sqs } from "@voke/aws";
+import type { SqsMessageBatch } from "@voke/aws";
 import { sqsQueue } from "@voke/aws/cloudformation";
 
 import { fn, createFunctions } from "../src/invoke";
-import type { SqsMessageBatch, StandardSchemaV1 } from "../src/invoke";
+import type { StandardSchemaV1 } from "../src/invoke";
 import { createInternalModel } from "../src/model";
 import type {
   VokeModel,
-  VokeModelSqsEventSource,
+  VokeModelEventSource,
   VokeModelValue,
 } from "../src/model";
 
@@ -70,8 +71,10 @@ const eventSourceModel = createInternalModel({
     ordersQueue: sqsQueue(),
   },
 });
-const eventSource: VokeModelSqsEventSource | undefined =
+const eventSource: VokeModelEventSource | undefined =
   eventSourceModel.functions.processOrder?.eventSources[0];
+const _eventSourceType: string | undefined = eventSource?.type;
+const _eventSourceResource: string | undefined = eventSource?.resource;
 
 // @ts-expect-error model values are serializable and do not support functions.
 const invalidValue: VokeModelValue = () => "nope";

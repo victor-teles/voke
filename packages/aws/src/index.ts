@@ -1,3 +1,4 @@
+import { VokeModelError } from "voke";
 import type { VokeModel, VokeProvider } from "voke";
 
 import { createAwsBuildPlan } from "./build";
@@ -5,6 +6,11 @@ import { synthesizeCloudFormationFromModel } from "./cloudformation-synthesis";
 import { deployAwsStack, removeAwsStack } from "./deploy";
 import { createDeployAwsClients } from "./deploy-clients";
 import { createAwsDiagnostics } from "./diagnostics";
+import {
+  findAwsEventSourceAdapter,
+  unsupportedEventSourceMessage,
+} from "./event-sources";
+import type { VokeIssue } from "./event-sources";
 import { awsRouteAuth } from "./lambda";
 import {
   defineAwsLambdaSettings,
@@ -91,22 +97,36 @@ export {
 } from "./sqs";
 
 const validateAwsModel = (model: VokeModel): void => {
-  for (const [functionName, definition] of Object.entries(model.functions)) {
-    for (const eventSource of definition.eventSources) {
-      if (eventSource.type !== "sqs") {
+  const issues: VokeIssue[] = [];
+
+  for (const [functionKey, definition] of Object.entries(model.functions)) {
+    for (const [
+      eventSourceIndex,
+      eventSource,
+    ] of definition.eventSources.entries()) {
+      const adapter = findAwsEventSourceAdapter(eventSource.type);
+
+      if (adapter === undefined) {
+        issues.push({
+          message: unsupportedEventSourceMessage(functionKey, eventSource.type),
+          path: `functions.${functionKey}.eventSources.${eventSourceIndex}.type`,
+        });
         continue;
       }
 
-      const resource = model.resources[eventSource.queue];
-      const cloudFormationType =
-        resource?.provider?.aws?.properties.cloudFormationType;
-
-      if (resource !== undefined && cloudFormationType !== "AWS::SQS::Queue") {
-        throw new Error(
-          `Function "${functionName}" SQS event source references resource "${eventSource.queue}", but it is an ${JSON.stringify(cloudFormationType)} resource instead of an "AWS::SQS::Queue".`
-        );
-      }
+      issues.push(
+        ...adapter.validate({
+          eventSource,
+          eventSourceIndex,
+          functionKey,
+          model,
+        })
+      );
     }
+  }
+
+  if (issues.length > 0) {
+    throw VokeModelError.validation(issues);
   }
 
   validateAwsLambdaModel(model);

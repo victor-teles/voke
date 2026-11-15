@@ -103,14 +103,12 @@ export interface VokeModelFunction {
   bindings: VokeModelBinding[];
 }
 
-export type VokeModelEventSource = VokeModelSqsEventSource;
-
-export interface VokeModelSqsEventSource {
-  type: "sqs";
-  queue: string;
-  batchSize?: number;
-  maxBatchingWindowSeconds?: number;
-  enabled?: boolean;
+/** One Event Source of a Function. The Provider that authored the source validates and synthesizes it. */
+export interface VokeModelEventSource {
+  type: string;
+  /** The Voke resource key the source reads from, when it has one. */
+  resource?: string;
+  properties: VokeModelRecord;
 }
 
 export interface VokeModelBinding {
@@ -359,6 +357,12 @@ const assertFunctionSynthesis = (
   }
 };
 
+const missingEventSourceResourceMessage = (
+  source: string,
+  resource: string
+): string =>
+  `"${source}" Event Source references resource "${resource}", but no matching resource is defined.`;
+
 const validateModel = (model: VokeModel): void => {
   const issues: VokeIssue[] = [];
 
@@ -400,18 +404,17 @@ const validateModel = (model: VokeModel): void => {
     }
 
     for (const [eventSourceIndex, eventSource] of fn.eventSources.entries()) {
-      if (eventSource.type !== "sqs") {
-        continue;
-      }
-
-      const resource = model.resources[eventSource.queue];
-
-      if (resource === undefined) {
+      if (
+        eventSource.resource !== undefined &&
+        model.resources[eventSource.resource] === undefined
+      ) {
         issues.push({
-          message: `Function "${functionName}" SQS event source references resource "${eventSource.queue}", but no matching resource is defined.`,
-          path: `functions.${functionName}.eventSources.${eventSourceIndex}.queue`,
+          message: missingEventSourceResourceMessage(
+            eventSource.type,
+            eventSource.resource
+          ),
+          path: `functions.${functionName}.eventSources.${eventSourceIndex}.resource`,
         });
-        continue;
       }
     }
   }
@@ -538,26 +541,26 @@ export const createInternalModel = (input: VokeModelInput): VokeModel => {
     for (const [eventSourceIndex, eventSource] of (
       definition.events ?? []
     ).entries()) {
-      if (eventSource.source !== "sqs") {
-        continue;
-      }
-
-      const resource = resources[eventSource.queue];
-
-      if (resource === undefined) {
+      if (
+        eventSource.resource !== undefined &&
+        resources[eventSource.resource] === undefined
+      ) {
         eventSourceIssues.push({
-          message: `SQS event source references resource "${eventSource.queue}", but no matching resource is defined.`,
-          path: `functions.${name}.events.${eventSourceIndex}.queue`,
+          message: missingEventSourceResourceMessage(
+            eventSource.source,
+            eventSource.resource
+          ),
+          path: `functions.${name}.events.${eventSourceIndex}.resource`,
         });
         continue;
       }
 
       eventSources.push({
-        batchSize: eventSource.options.batchSize,
-        enabled: eventSource.options.enabled,
-        maxBatchingWindowSeconds: eventSource.options.maxBatchingWindowSeconds,
-        queue: eventSource.queue,
-        type: "sqs",
+        properties: { ...eventSource.properties },
+        ...(eventSource.resource === undefined
+          ? {}
+          : { resource: eventSource.resource }),
+        type: eventSource.source,
       });
     }
 

@@ -11,6 +11,7 @@ import type {
   RequestAuthorizerFunctionDefinition,
 } from "voke";
 
+import { requireAwsEventSourceAdapter } from "./event-sources";
 import { createAwsLambdaHandler } from "./lambda";
 import type {
   AwsLambdaContext,
@@ -18,8 +19,6 @@ import type {
   HonoLikeApp,
 } from "./lambda";
 import { createAwsRuntimeVariableProvider } from "./runtime-variables";
-import { createSqsEventHandler } from "./sqs";
-import type { SqsAwsEvent } from "./sqs";
 
 /** The module namespace of a project entrypoint. */
 export interface LambdaProjectModule {
@@ -191,12 +190,19 @@ const handlerFor = (
       return http;
     }
     case "event": {
-      const handle = createSqsEventHandler({
-        function: key,
-        functions: functions as never,
-      });
+      // createFunctions guarantees every Event Source of a Function shares one source.
+      const adapter = requireAwsEventSourceAdapter(
+        definition.events?.[0]?.source ?? "",
+        key
+      );
 
-      return async (event) => await handle(event as SqsAwsEvent);
+      return async (event) =>
+        adapter.toResponse(
+          await functions.sendEvent(
+            key as never,
+            adapter.toInvocation(event) as never
+          )
+        );
     }
     case "authorizer": {
       return createAuthorizerHandler(

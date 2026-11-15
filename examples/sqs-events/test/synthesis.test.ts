@@ -8,6 +8,6 @@ test("synthesis fails clearly when the ordersQueue resource is not declared", ()
   expect(() =>
     synthesizeCloudFormation({ functions, name: "sqs-events" })
   ).toThrow(
-    'functions.processOrder.events.0.queue: SQS event source references resource "ordersQueue", but no matching resource is defined.'
+    'functions.processOrder.events.0.resource: "sqs" Event Source references resource "ordersQueue", but no matching resource is defined.'
   );
 });

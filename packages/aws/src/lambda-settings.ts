@@ -183,17 +183,23 @@ export const explicitVisibilityTimeout = (
   return typeof value === "number" ? value : undefined;
 };
 
+// Only SQS Event Sources read from a queue; the queue is their resource key.
+const sqsQueueKeys = (definition: VokeModelFunction): string[] =>
+  definition.eventSources
+    .filter((eventSource) => eventSource.type === "sqs")
+    .map((eventSource) => eventSource.resource ?? "");
+
 const visibilityTimeoutIssues = (model: VokeModel): VokeIssue[] =>
   Object.entries(model.functions).flatMap(([name, definition]) =>
-    definition.eventSources.flatMap((eventSource) => {
-      const visibility = explicitVisibilityTimeout(model, eventSource.queue);
+    sqsQueueKeys(definition).flatMap((queue) => {
+      const visibility = explicitVisibilityTimeout(model, queue);
 
       return visibility === undefined || visibility >= definition.timeout
         ? []
         : [
             {
               message: `queue visibility timeout ${visibility}s is lower than Function "${name}" timeout ${definition.timeout}s; set sqsQueue({ visibilityTimeoutSeconds }) to at least ${definition.timeout}, or leave it unset so Voke derives it`,
-              path: `resources.${eventSource.queue}.properties.VisibilityTimeout`,
+              path: `resources.${queue}.properties.VisibilityTimeout`,
             },
           ];
     })
@@ -242,12 +248,18 @@ export const derivedVisibilityTimeout = (
 ): number | undefined => {
   const needed = Object.values(model.functions).flatMap((definition) =>
     definition.eventSources
-      .filter((eventSource) => eventSource.queue === queue)
-      .map(
+      .filter(
         (eventSource) =>
-          visibilityTimeoutFactor * definition.timeout +
-          (eventSource.maxBatchingWindowSeconds ?? 0)
+          eventSource.type === "sqs" && eventSource.resource === queue
       )
+      .map((eventSource) => {
+        const window = eventSource.properties.maxBatchingWindowSeconds;
+
+        return (
+          visibilityTimeoutFactor * definition.timeout +
+          (typeof window === "number" ? window : 0)
+        );
+      })
   );
 
   return needed.length === 0 ? undefined : Math.max(...needed);

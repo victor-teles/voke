@@ -78,5 +78,5 @@ test("the full model is still validated, so a bad queue reference fails locally 
       name: "local-api",
       provider: aws(),
     })
-  ).toThrow('SQS event source references resource "missingQueue"');
+  ).toThrow('"sqs" Event Source references resource "missingQueue"');
 });

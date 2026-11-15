@@ -10,7 +10,10 @@ import type {
 import type { VokeEnv } from "./context";
 import { VokeConfigError } from "./errors";
 import { json, jsonError } from "./http";
-import type { VokeModelProviderExtensionRecord } from "./model";
+import type {
+  VokeModelProviderExtensionRecord,
+  VokeModelRecord,
+} from "./model";
 import type { VokeProvider } from "./provider";
 import { Voke } from "./route-builder";
 import { readEnv, sleep } from "./runtime-env";
@@ -98,19 +101,18 @@ export interface AsyncInvokeResult {
   requestId?: string;
 }
 
-export interface SqsEventSourceOptions {
-  batchSize?: number;
-  enabled?: boolean;
-  maxBatchingWindowSeconds?: number;
+/**
+ * One trigger of an Event Source Function. Provider packages author it through their own
+ * authoring helpers; core knows no source by name.
+ */
+export interface EventSourceDefinition {
+  /** The Event Source type, named by the Provider package that authored it. */
+  readonly source: string;
+  /** The Voke resource key the source reads from, when it has one. */
+  readonly resource?: string;
+  /** Source settings. Voke copies them to the model untouched; the Provider validates them. */
+  readonly properties: VokeModelRecord;
 }
-
-export interface SqsEventSourceDefinition {
-  readonly options: SqsEventSourceOptions;
-  readonly queue: string;
-  readonly source: "sqs";
-}
-
-export type EventSourceDefinition = SqsEventSourceDefinition;
 
 export interface FunctionSynthesisConfig {
   entrypoint?: string;
@@ -128,117 +130,6 @@ export interface FunctionSynthesisConfig {
 }
 
 type AnyStandardSchema = StandardSchemaV1<unknown, unknown>;
-
-export interface SqsMessageAttribute {
-  binaryListValues?: string[];
-  binaryValue?: string;
-  dataType: string;
-  stringListValues?: string[];
-  stringValue?: string;
-}
-
-export interface SqsRecord {
-  attributes: Record<string, string>;
-  awsRegion: string;
-  body: string;
-  eventSource: "aws:sqs";
-  eventSourceARN: string;
-  md5OfBody: string;
-  messageAttributes: Record<string, SqsMessageAttribute>;
-  messageId: string;
-  receiptHandle: string;
-}
-
-export interface SqsAwsEvent {
-  Records: SqsRecord[];
-}
-
-export interface SqsBatchItemFailure {
-  itemIdentifier: string;
-}
-
-export interface SqsBatchResult {
-  batchItemFailures: SqsBatchItemFailure[];
-}
-
-export interface SqsValidMessage<TBody> {
-  attributes: Record<string, string>;
-  body: TBody;
-  id: string;
-  messageAttributes: Record<string, SqsMessageAttribute>;
-  raw: SqsRecord;
-  valid: true;
-}
-
-export interface SqsInvalidMessage {
-  attributes: Record<string, string>;
-  error: InvokeError;
-  id: string;
-  messageAttributes: Record<string, SqsMessageAttribute>;
-  raw: SqsRecord;
-  rawBody: string;
-  valid: false;
-}
-
-export interface SqsBatchResultBuilder extends SqsBatchResult {
-  fail(message: Pick<SqsInvalidMessage | SqsValidMessage<unknown>, "id">): void;
-}
-
-export interface SqsMessageBatch<TMessage> {
-  batchResult(): SqsBatchResultBuilder;
-  messages: SqsValidMessage<TMessage>[];
-  ok(): SqsBatchResult;
-  source: "sqs";
-}
-
-export interface SqsMessageBatchIncludeInvalid<TMessage> {
-  batchResult(): SqsBatchResultBuilder;
-  messages: (SqsInvalidMessage | SqsValidMessage<TMessage>)[];
-  ok(): SqsBatchResult;
-  source: "sqs";
-}
-
-export type SqsInvalidMessageBodyMode = "fail" | "include";
-
-type SqsEventInvocationBody<TBody, TInvalidMessageBody> =
-  TInvalidMessageBody extends "include" ? TBody | unknown : TBody;
-
-export interface SqsMessageBatchOptions<
-  TInvalidMessageBody extends SqsInvalidMessageBodyMode =
-    SqsInvalidMessageBodyMode,
-> {
-  invalidMessageBody?: TInvalidMessageBody;
-}
-
-export interface SqsEventInvocationMessage<TBody> {
-  attributes?: Record<string, string>;
-  body: TBody;
-  id?: string;
-  messageAttributes?: Record<string, SqsMessageAttribute>;
-  raw?: SqsRecord;
-}
-
-export interface SqsEventInvocationInput<TBody = unknown> {
-  messages: SqsEventInvocationMessage<TBody>[];
-  source?: "sqs";
-}
-
-export type EventInvocationInput<TBody = unknown> =
-  SqsEventInvocationInput<TBody>;
-
-export interface SqsMessageBatchSchema<
-  TBodySchema extends AnyStandardSchema = AnyStandardSchema,
-  TInvalidMessageBody extends SqsInvalidMessageBodyMode = "fail",
-> extends StandardSchemaV1<
-  SqsEventInvocationInput<StandardSchemaInput<TBodySchema>>,
-  TInvalidMessageBody extends "include"
-    ? SqsMessageBatchIncludeInvalid<StandardSchemaOutput<TBodySchema>>
-    : SqsMessageBatch<StandardSchemaOutput<TBodySchema>>
-> {
-  readonly body: TBodySchema;
-  readonly invalidMessageBody: TInvalidMessageBody;
-  readonly source: "sqs";
-}
 
 type FunctionKind = "authorizer" | "event" | "invokable" | "route";
 export type RouteAuthorizerReference = "none" | string;
@@ -485,10 +376,11 @@ export type FunctionHandler<
 export type EventFunctionHandler<
   TPayload,
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+  TResult = unknown,
 > = (
   payload: TPayload,
   context: InvokeContext<TVariables>
-) => SqsBatchResult | Promise<SqsBatchResult>;
+) => TResult | Promise<TResult>;
 
 export interface BaseFunctionDefinition<
   TKey extends string = string,
@@ -537,11 +429,13 @@ export type EventFunctionDefinition<
   TKey extends string = string,
   TInputSchema extends AnyStandardSchema = AnyStandardSchema,
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+  TResult = unknown,
 > = BaseFunctionDefinition<TKey, "event", TVariables> & {
   readonly events: readonly EventSourceDefinition[];
   readonly handler: EventFunctionHandler<
     StandardSchemaOutput<TInputSchema>,
-    TVariables
+    TVariables,
+    TResult
   >;
   readonly input: TInputSchema;
 };
@@ -629,44 +523,6 @@ export interface HttpFunctionDefinitionInput<
   readonly variables?: TVariables;
 }
 
-type EventFunctionDefinitionInput<
-  TInputSchema extends AnyStandardSchema,
-  TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
-> = Omit<FunctionDefinitionInputBase, "routes"> & {
-  readonly events: readonly EventSourceDefinition[];
-  readonly handler: EventFunctionHandler<
-    StandardSchemaOutput<TInputSchema>,
-    TVariables
-  >;
-  readonly input: TInputSchema;
-  readonly variables?: TVariables;
-};
-
-type SqsQueueInput =
-  | string
-  | ({ readonly queue: string } & SqsEventSourceOptions);
-
-type SqsQueueListInput = SqsQueueInput | readonly SqsQueueInput[];
-
-export interface SqsFunctionDefinitionInput<
-  TMessageSchema extends AnyStandardSchema,
-  TInvalidMessageBody extends SqsInvalidMessageBodyMode = "fail",
-  TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
->
-  extends Omit<FunctionDefinitionInputBase, "routes">, SqsEventSourceOptions {
-  readonly handler: EventFunctionHandler<
-    StandardSchemaOutput<
-      SqsMessageBatchSchema<TMessageSchema, TInvalidMessageBody>
-    >,
-    TVariables
-  >;
-  readonly invalidMessageBody?: TInvalidMessageBody;
-  readonly message: TMessageSchema;
-  readonly queue?: string;
-  readonly queues?: SqsQueueListInput;
-  readonly variables?: TVariables;
-}
-
 export type FunctionRegistryInput = Record<string, AnyFunctionDefinition>;
 
 type FunctionDefinitionWithKey<
@@ -707,14 +563,25 @@ type FunctionDefinitionWithKey<
     : RequestAuthorizerFunctionDefinition<TKey>
   : TDefinition extends {
         readonly events: readonly EventSourceDefinition[];
+        readonly handler: (...args: never[]) => infer THandlerResult;
         readonly input: infer TInputSchema;
         readonly kind: "event";
         readonly variables?: infer TVariables;
       }
     ? TInputSchema extends AnyStandardSchema
       ? TVariables extends RuntimeVariableCatalog
-        ? EventFunctionDefinition<TKey, TInputSchema, TVariables>
-        : EventFunctionDefinition<TKey, TInputSchema, Record<never, never>>
+        ? EventFunctionDefinition<
+            TKey,
+            TInputSchema,
+            TVariables,
+            Awaited<THandlerResult>
+          >
+        : EventFunctionDefinition<
+            TKey,
+            TInputSchema,
+            Record<never, never>,
+            Awaited<THandlerResult>
+          >
       : never
     : TDefinition extends {
           readonly input: infer TInputSchema;
@@ -872,53 +739,35 @@ type InvokeResult<TResult, TOptions> = TOptions extends { mode: "async" }
 
 type EventFunctionKey<TRegistry> = {
   [TKey in keyof TRegistry]: TRegistry[TKey] extends {
-    readonly events: readonly EventSourceDefinition[];
-    readonly handler: unknown;
-    readonly input: SqsLikeMessageBatchSchema;
+    readonly input: AnyStandardSchema;
+    readonly kind: "event";
   }
     ? TKey
     : never;
 }[keyof TRegistry];
 
-type SqsLikeMessageBatchSchema<
-  TBodySchema extends AnyStandardSchema = AnyStandardSchema,
-  TInvalidMessageBody extends SqsInvalidMessageBodyMode =
-    SqsInvalidMessageBodyMode,
-> = AnyStandardSchema & {
-  readonly body: TBodySchema;
-  readonly invalidMessageBody: TInvalidMessageBody;
-  readonly source: "sqs";
-};
-
 type EventFunctionInput<TFunction> = TFunction extends {
   readonly input: infer TInputSchema;
 }
-  ? TInputSchema extends SqsLikeMessageBatchSchema<
-      infer TBodySchema,
-      infer TInvalidMessageBody
-    >
-    ? SqsEventInvocationInput<
-        SqsEventInvocationBody<
-          StandardSchemaInput<TBodySchema>,
-          TInvalidMessageBody
-        >
-      >
-    : never
+  ? StandardSchemaInput<TInputSchema>
   : never;
 
+type EventFunctionResult<TFunction> = TFunction extends {
+  readonly handler: (...args: never[]) => infer THandlerResult;
+}
+  ? Awaited<THandlerResult>
+  : unknown;
+
+/**
+ * Event Invocation: delivers an event to an Event Source Function. The event shape is the
+ * Function's input schema input; the result is whatever its handler returns.
+ */
 export type FunctionRegistrySendEvent<TRegistry> = <
   TKey extends EventFunctionKey<TRegistry>,
 >(
   functionName: TKey,
   event: EventFunctionInput<TRegistry[TKey]>
-) => Promise<SqsBatchResult>;
-
-export interface SqsEventHandlerOptions<
-  TRegistry extends FunctionRegistryInput = FunctionRegistryInput,
-> {
-  function: Parameters<FunctionRegistry<TRegistry>["sendEvent"]>[0];
-  functions: FunctionRegistry<TRegistry>;
-}
+) => Promise<EventFunctionResult<TRegistry[TKey]>>;
 
 export interface FunctionRegistryInvoke<TRegistry> {
   <
@@ -1812,11 +1661,15 @@ export const invokeRegistryFunction = async (
   return await invokeFunction(definition, payload, options);
 };
 
+// createFunctions guarantees at least one Event Source, all of one source type.
+const eventSourceType = (definition: EventFunctionDefinition): string =>
+  definition.events[0]?.source ?? "event";
+
 const sendEventToFunction = async (
   definition: EventFunctionDefinition | undefined,
-  event: EventInvocationInput,
+  event: unknown,
   options: InvokeOptions = {}
-): Promise<SqsBatchResult> => {
+): Promise<unknown> => {
   if (definition === undefined) {
     throw new InvokeError("Cannot send an event to an undefined function", {
       code: "MISSING_FUNCTION",
@@ -1828,11 +1681,10 @@ const sendEventToFunction = async (
     definition.input,
     event as never,
     (message, cause) =>
-      new InvokeError(`Invalid SQS event for ${functionName}: ${message}`, {
-        cause,
-        code: "INVALID_PAYLOAD",
-        functionName,
-      })
+      new InvokeError(
+        `Invalid "${eventSourceType(definition)}" event for ${functionName}: ${message}`,
+        { cause, code: "INVALID_PAYLOAD", functionName }
+      )
   );
 
   const context = createInvokeContext(definition, options);
@@ -1862,15 +1714,6 @@ export function fn<
   >
 ): InvokableFunctionDefinition<string, undefined, TOutputSchema, TVariables>;
 export function fn<
-  const TInputSchema extends SqsMessageBatchSchema<
-    AnyStandardSchema,
-    SqsInvalidMessageBodyMode
-  >,
-  const TVariables extends RuntimeVariableCatalog = Record<never, never>,
->(
-  definition: EventFunctionDefinitionInput<TInputSchema, TVariables>
-): EventFunctionDefinition<string, TInputSchema, TVariables>;
-export function fn<
   const TRoutes extends readonly AnyRouteDefinition[],
   const TVariables extends RuntimeVariableCatalog = Record<never, never>,
 >(
@@ -1885,37 +1728,10 @@ export function fn(
         AnyStandardSchema
       >
     | InvokableZeroInputFunctionDefinitionInput<AnyStandardSchema>
-    | (EventFunctionDefinitionInput<
-        SqsMessageBatchSchema<AnyStandardSchema, SqsInvalidMessageBodyMode>
-      > & {
-        readonly output?: AnyStandardSchema;
-        readonly routes?: readonly AnyRouteDefinition[];
-      })
     | RouteFunctionDefinitionInput
 ): AnyFunctionDefinition {
   if (definition.name !== undefined && definition.name.trim() === "") {
     throw new Error("Function definition name must not be empty");
-  }
-
-  if ("events" in definition) {
-    if (definition.routes !== undefined && definition.routes.length > 0) {
-      throw new VokeConfigError(
-        "Event Source Functions cannot define HTTP routes in v1."
-      );
-    }
-
-    if (definition.output !== undefined) {
-      throw new VokeConfigError(
-        "Event Source Functions cannot define an output schema because Voke owns the event response contract."
-      );
-    }
-
-    return {
-      ...definition,
-      key: "",
-      kind: "event",
-      routes: [],
-    };
   }
 
   if ("handler" in definition) {
@@ -2083,9 +1899,11 @@ const colorize = (value: string, ...codes: string[]): string =>
 const formatEventSourceSummary = (eventSource: EventSourceDefinition): string =>
   [
     colorize(eventSource.source.toUpperCase(), color.green),
-    colorize(eventSource.queue, color.bold),
+    colorize(eventSource.resource ?? "-", color.bold),
     colorize(
-      `batchSize=${eventSource.options.batchSize ?? "-"} maxBatchingWindowSeconds=${eventSource.options.maxBatchingWindowSeconds ?? "-"} enabled=${eventSource.options.enabled ?? true}`,
+      Object.entries(eventSource.properties)
+        .map(([name, value]) => `${name}=${String(value)}`)
+        .join(" "),
       color.dim
     ),
   ].join(" ");
@@ -2184,6 +2002,45 @@ export const formatDevFunctionSummary = (
   return [formatDevHeader(), ...sections].join("\n\n").trimEnd();
 };
 
+// Provider packages build Event Source Functions directly, so every rule that keeps their
+// Function Contract unambiguous is checked here, where every definition passes.
+const assertEventFunctionShape = (
+  key: string,
+  definition: AnyFunctionDefinition
+): void => {
+  if (definition.kind !== "event") {
+    return;
+  }
+
+  if (definition.routes !== undefined && definition.routes.length > 0) {
+    throw new VokeConfigError(
+      "Event Source Functions cannot define HTTP routes in v1."
+    );
+  }
+
+  if (definition.output !== undefined) {
+    throw new VokeConfigError(
+      "Event Source Functions cannot define an output schema because Voke owns the event response contract."
+    );
+  }
+
+  const [first, ...rest] = definition.events ?? [];
+
+  if (first === undefined) {
+    throw new VokeConfigError(
+      `Function "${key}" is an Event Source Function without an Event Source.`
+    );
+  }
+
+  const other = rest.find((event) => event.source !== first.source);
+
+  if (other !== undefined) {
+    throw new VokeConfigError(
+      `Function "${key}" mixes Event Sources "${first.source}" and "${other.source}"; a Function's Event Sources must share one source.`
+    );
+  }
+};
+
 export const createFunctions = <const TRegistry extends FunctionRegistryInput>(
   registry: TRegistry
 ): FunctionRegistry<TRegistry> => {
@@ -2193,6 +2050,8 @@ export const createFunctions = <const TRegistry extends FunctionRegistryInput>(
     if (reservedFunctionRegistryKeys.has(key)) {
       throw new VokeConfigError(`Function Registry key "${key}" is reserved`);
     }
+
+    assertEventFunctionShape(key, definition);
 
     functions[key] = {
       ...definition,
@@ -2231,7 +2090,7 @@ export const createFunctions = <const TRegistry extends FunctionRegistryInput>(
   });
   Object.defineProperty(functions, "sendEvent", {
     enumerable: false,
-    value: ((functionName: string, event: EventInvocationInput) => {
+    value: ((functionName: string, event: unknown) => {
       const definition = functions[functionName];
 
       if (definition?.kind !== "event") {

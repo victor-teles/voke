@@ -238,6 +238,8 @@ _Avoid_: AWS secret name, parameter path, resource key
 - **HTTP Helpers** belong to a specialized package rather than the root `voke` package.
 - A **Function** can have HTTP route handlers, an invokable handler, or both.
 - A **Function** can have one or more **Event Sources**.
+- A **Function**'s **Event Sources** share one source type.
+- **Event Source** types are authored through Provider packages; the root `voke` package names none.
 - A Function with **Event Sources** does not mix HTTP routes or invokable handlers in v1.
 - An **SQS Event Source** is attached to a **Function**.
 - An **SQS Event Source** is authored through the **AWS Provider** package rather than the root `voke` package.
@@ -434,8 +436,8 @@ _Avoid_: AWS secret name, parameter path, resource key
 > **Dev:** "Should tests call an SQS Function handler directly?"
 > **Domain expert:** "No, tests use **Event Invocation** through the **Function Registry** so SQS normalization and validation stay in the path."
 >
-> **Dev:** "Does `functions.sendEvent(...)` require a source for SQS?"
-> **Domain expert:** "No, SQS is the default Event Invocation source in v1, though callers may state `source: \"sqs\"` explicitly."
+> **Dev:** "Does `functions.sendEvent(...)` default to SQS?"
+> **Domain expert:** "No, the event shape and the result of an **Event Invocation** are defined by the Function's **Event Source**; for an SQS Function that is a batch of messages, and callers may still state `source: \"sqs\"` explicitly."
 >
 > **Dev:** "Do local SQS tests have to build full AWS records?"
 > **Domain expert:** "No, local **Event Invocation** accepts minimal messages with a body and lets Voke synthesize SQS metadata."
@@ -589,6 +591,6 @@ _Avoid_: AWS secret name, parameter path, resource key
 - `sqs()` uses `invalidMessageBody: "fail" | "include"` to control invalid body handling.
 - `sqs()` treats SQS message bodies as JSON in v1, validated with its `message` schema.
 - Event Source Functions are tested through `functions.sendEvent(...)`, not `functions.invoke(...)` or direct handler calls.
-- `functions.sendEvent(...)` defaults to SQS in v1 and also accepts an explicit `source: "sqs"`.
+- The event shape and the result of an **Event Invocation** are defined by the Function's **Event Source**; `functions.sendEvent(...)` has no default source.
 - Local SQS **Event Invocation** accepts minimal message inputs and synthesizes provider metadata when omitted.
 - Voke owns the deployed SQS Lambda adapter rather than requiring users to write AWS event glue.

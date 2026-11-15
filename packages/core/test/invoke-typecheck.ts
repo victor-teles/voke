@@ -1,9 +1,10 @@
 import { requestAuthorizer, sqs } from "@voke/aws";
+import type { SqsBatchResult } from "@voke/aws";
 
 import { fn, createFunctions, http } from "../src/invoke";
 import type {
   AsyncInvokeResult,
-  SqsBatchResult,
+  EventFunctionDefinition,
   StandardSchemaV1,
 } from "../src/invoke";
 import { createVariableSource } from "../src/variables";
@@ -166,6 +167,43 @@ void functions.sendEvent("processOrder", {
 
 // @ts-expect-error event message body shape is inferred from the sqs() message schema.
 void functions.sendEvent("processOrder", { messages: [{ body: {} }] });
+
+// A Function that keeps invalid messages accepts bodies of any shape.
+const _includeInvalidResult: Promise<SqsBatchResult> = functions.sendEvent(
+  "processOrderWithInvalidMessages",
+  { messages: [{ body: "not json" }] }
+);
+
+// An Event Source authored by any Provider package: the event shape comes from its input schema,
+// and the Event Invocation resolves to whatever its handler returns.
+const customEventFunction: EventFunctionDefinition<
+  string,
+  StandardSchemaV1<{ ticks: number }>,
+  Record<never, never>,
+  { done: boolean }
+> = {
+  events: [{ properties: {}, source: "custom" }],
+  handler: (event) => ({ done: event.ticks > 0 }),
+  input: schema<{ ticks: number }>(),
+  key: "",
+  kind: "event",
+};
+const customFunctions = createFunctions({ tick: customEventFunction });
+const _customResult: Promise<{ done: boolean }> = customFunctions.sendEvent(
+  "tick",
+  { ticks: 1 }
+);
+
+// @ts-expect-error the event shape comes from the Function's input schema.
+void customFunctions.sendEvent("tick", { ticks: "1" });
+
+// @ts-expect-error the result is the handler's, not an SQS batch result.
+const _customAsSqs: Promise<SqsBatchResult> = customFunctions.sendEvent(
+  "tick",
+  {
+    ticks: 1,
+  }
+);
 
 // @ts-expect-error invokable functions are not event source functions.
 void functions.sendEvent("getUser", { messages: [{ body: { id: "usr_1" } }] });

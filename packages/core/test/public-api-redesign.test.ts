@@ -469,28 +469,28 @@ test("defines SQS Functions with single and multiple queue event sources", async
 
   expect(functions.processOrder.events).toEqual([
     {
-      options: {
+      properties: {
         batchSize: 5,
-        enabled: undefined,
-        maxBatchingWindowSeconds: undefined,
+        enabled: true,
+        maxBatchingWindowSeconds: 0,
       },
-      queue: "ordersQueue",
+      resource: "ordersQueue",
       source: "sqs",
     },
   ]);
   expect(functions.reindexOrders.events).toEqual([
     {
-      options: {
+      properties: {
         batchSize: 10,
-        enabled: undefined,
-        maxBatchingWindowSeconds: undefined,
+        enabled: true,
+        maxBatchingWindowSeconds: 0,
       },
-      queue: "ordersQueue",
+      resource: "ordersQueue",
       source: "sqs",
     },
     {
-      options: { batchSize: 1, enabled: false, maxBatchingWindowSeconds: 3 },
-      queue: "priorityQueue",
+      properties: { batchSize: 1, enabled: false, maxBatchingWindowSeconds: 3 },
+      resource: "priorityQueue",
       source: "sqs",
     },
   ]);

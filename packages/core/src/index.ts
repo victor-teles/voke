@@ -27,6 +27,8 @@ export {
   type RequestAuthorizerOutcome,
   type AnyFunctionDefinition,
   type EventFunctionDefinition,
+  type EventFunctionHandler,
+  type EventSourceDefinition,
   type FunctionSynthesisConfig,
   type FunctionRegistry,
   type FunctionRegistryInput,
@@ -87,6 +89,7 @@ export type { VokeEnv } from "./context";
 export {
   createInternalModel as createVokeModel,
   type VokeModel,
+  type VokeModelEventSource,
   type VokeModelFunction,
   type VokeModelHttpAuthorizer,
   type VokeModelProviderExtensionRecord,

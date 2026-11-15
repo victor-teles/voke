@@ -8,6 +8,17 @@ import type {
   VokeModelResource,
 } from "voke";
 
+import { resourceProvider, toLogicalId } from "./cloudformation-template";
+import type {
+  AwsCloudFormationResourceProvider,
+  AwsResourceBindingValue,
+  AwsResourcePolicyResource,
+  CloudFormationOutput,
+  CloudFormationResource,
+  CloudFormationTemplate,
+  CloudFormationValue,
+} from "./cloudformation-template";
+import { requireAwsEventSourceAdapter } from "./event-sources";
 import {
   defaultAwsLambdaSettings,
   derivedVisibilityTimeout,
@@ -17,31 +28,12 @@ import {
 import type { AwsLambdaSettings } from "./lambda-settings";
 import { createResourceBindingName } from "./resources";
 
-export type CloudFormationValue =
-  | string
-  | number
-  | boolean
-  | null
-  | CloudFormationValue[]
-  | { [key: string]: CloudFormationValue };
-
-export interface CloudFormationTemplate {
-  AWSTemplateFormatVersion: "2010-09-09";
-  Description: string;
-  Resources: Record<string, CloudFormationResource>;
-  Outputs: Record<string, CloudFormationOutput>;
-}
-
-export interface CloudFormationResource {
-  Type: string;
-  Properties: Record<string, CloudFormationValue>;
-  Metadata?: Record<string, CloudFormationValue>;
-}
-
-export interface CloudFormationOutput {
-  Description: string;
-  Value: CloudFormationValue;
-}
+export type {
+  CloudFormationOutput,
+  CloudFormationResource,
+  CloudFormationTemplate,
+  CloudFormationValue,
+} from "./cloudformation-template";
 
 export interface StackResourceDefinition {
   cloudFormationType: string;
@@ -73,27 +65,6 @@ export interface StackResourceDefinition {
   };
   properties: Record<string, CloudFormationValue>;
 }
-
-type AwsResourceBindingValue = "ref" | "getAttArn" | "getAttId";
-
-type AwsResourcePolicyResource =
-  | "ref"
-  | "getAttArn"
-  | "getAttId"
-  | "parameterArn"
-  | "s3ArnWithObjects";
-
-interface AwsCloudFormationResourceProvider {
-  cloudFormationType: string;
-  bindingValue: AwsResourceBindingValue;
-  policyResource: AwsResourcePolicyResource;
-  outputName: string;
-}
-
-type VokeModelSqsEventSource = Extract<
-  VokeModel["functions"][string]["eventSources"][number],
-  { type: "sqs" }
->;
 
 const awsCloudFormationResource = (definition: {
   actions: string[];
@@ -261,17 +232,6 @@ export const ssmParameter = (options: {
     },
   });
 
-const toLogicalId = (value: string): string => {
-  const words = value
-    .replaceAll(/([a-z0-9])([A-Z])/gu, "$1 $2")
-    .split(/[^A-Za-z0-9]+/u)
-    .filter(Boolean);
-
-  return words
-    .map((word) => `${word[0]?.toUpperCase() ?? ""}${word.slice(1)}`)
-    .join("");
-};
-
 const authorizerLogicalId = (name: string): string =>
   `${toLogicalId(name)}Authorizer`;
 
@@ -365,22 +325,6 @@ const toResourcePolicyStatements = (
   }
 
   return statements;
-};
-
-const resourceProvider = (
-  resource: VokeModelResource
-): AwsCloudFormationResourceProvider => {
-  const extension = resource.provider?.aws;
-
-  if (extension !== undefined) {
-    if (extension.type !== "cloudformation.resource") {
-      throw new Error("AWS resource provider metadata is required");
-    }
-
-    return extension.properties as unknown as AwsCloudFormationResourceProvider;
-  }
-
-  throw new Error("AWS resource provider metadata is required");
 };
 
 const secretArn = (secretId: string): CloudFormationValue => {
@@ -511,66 +455,6 @@ const primaryFunctionName = "http";
 
 const functionLogicalId = (name: string, apiFunctionName: string): string =>
   name === apiFunctionName ? "Function" : `${toLogicalId(name)}Function`;
-
-const eventSourceMappingLogicalId = (
-  functionId: string,
-  queueId: string
-): string => `${functionId}${queueId}EventSourceMapping`;
-
-const toSqsEventSourceMappingResource = (options: {
-  eventSource: VokeModelSqsEventSource;
-  eventSourceIndex: number;
-  functionName: string;
-  lambdaLogicalId: string;
-  model: VokeModel;
-}): [string, CloudFormationResource] => {
-  const {
-    eventSource,
-    eventSourceIndex,
-    functionName,
-    lambdaLogicalId,
-    model,
-  } = options;
-  const resource = model.resources[eventSource.queue];
-
-  if (resource === undefined) {
-    throw VokeModelError.validation([
-      {
-        message: `Function "${functionName}" SQS event source references resource "${eventSource.queue}", but no matching resource is defined.`,
-        path: `functions.${functionName}.eventSources.${eventSourceIndex}.queue`,
-      },
-    ]);
-  }
-
-  const provider = resourceProvider(resource);
-
-  if (provider.cloudFormationType !== "AWS::SQS::Queue") {
-    throw VokeModelError.validation([
-      {
-        message: `Function "${functionName}" SQS event source references resource "${eventSource.queue}", but it is an ${JSON.stringify(provider.cloudFormationType)} resource instead of an "AWS::SQS::Queue".`,
-        path: `functions.${functionName}.eventSources.${eventSourceIndex}.queue`,
-      },
-    ]);
-  }
-
-  const queueLogicalId = toLogicalId(eventSource.queue);
-
-  return [
-    eventSourceMappingLogicalId(lambdaLogicalId, queueLogicalId),
-    {
-      Properties: {
-        BatchSize: eventSource.batchSize ?? 10,
-        Enabled: eventSource.enabled ?? true,
-        EventSourceArn: { "Fn::GetAtt": [queueLogicalId, "Arn"] },
-        FunctionName: { Ref: lambdaLogicalId },
-        FunctionResponseTypes: ["ReportBatchItemFailures"],
-        MaximumBatchingWindowInSeconds:
-          eventSource.maxBatchingWindowSeconds ?? 0,
-      },
-      Type: "AWS::Lambda::EventSourceMapping",
-    },
-  ];
-};
 
 const toAuthorizerFunctionArn = (
   authorizer: Extract<VokeModelHttpAuthorizer, { type: "lambda" }>,
@@ -1082,20 +966,18 @@ export const synthesizeCloudFormationFromModel = (
       eventSourceIndex,
       eventSource,
     ] of definition.eventSources.entries()) {
-      if (eventSource.type !== "sqs") {
-        continue;
-      }
+      const adapter = requireAwsEventSourceAdapter(eventSource.type, name);
 
-      const [mappingLogicalId, mappingResource] =
-        toSqsEventSourceMappingResource({
+      Object.assign(
+        templateResources,
+        adapter.synthesize({
           eventSource,
           eventSourceIndex,
-          functionName: name,
+          functionKey: name,
           lambdaLogicalId: logicalId,
           model,
-        });
-
-      templateResources[mappingLogicalId] = mappingResource;
+        }).resources
+      );
     }
   }
   if (apiRoutes.length > 0) {
