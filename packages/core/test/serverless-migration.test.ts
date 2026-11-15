@@ -669,7 +669,7 @@ test("creates a measurable migration report and Voke skeleton files", () => {
   expect(migration.report.unsupported).toEqual([
     "plugin serverless-webpack maps to Voke Bun build but requires bundler option review",
     "sqs event on fulfillOrder requires manual implementation. Queue source cannot be resolved to a migrated Voke SQS queue resource.",
-    "schedule event on scheduledReport requires manual implementation. Scheduled triggers require EventBridge rule infrastructure that must be reviewed before migration.",
+    "schedule event on scheduledReport requires manual implementation. Rewrite it with `schedule()` from `@voke/aws`; review the expression and time zone.",
   ]);
   expect(migration.report.manualSteps).toContain(
     "Move one Serverless function at a time by routing migrated HTTP paths to Voke while the original service keeps the remaining functions."
@@ -727,13 +727,13 @@ test("reports expanded event coverage and unknown fields deterministically", () 
   ]);
   expect(migration.report.unsupported).toEqual([
     "plugin serverless-esbuild maps to Voke Bun build but requires bundler option review",
-    "sns event on apiHandler requires manual implementation. SNS subscriptions and publish/subscribe permissions are inventory-only in this migration phase.",
+    "sns event on apiHandler requires manual implementation. Rewrite it with `sns()` from `@voke/aws` and declare the topic with `snsTopic()`; review the filter policy.",
     "sqs event on apiHandler requires manual implementation. Queue source OrdersQueue is not generated as a Voke SQS queue resource.",
-    "s3 event on apiHandler requires manual implementation. S3 notifications require bucket notification wiring and permissions that Voke does not generate in this migration phase.",
-    "schedule event on apiHandler requires manual implementation. Scheduled triggers require EventBridge rule infrastructure that must be reviewed before migration.",
-    "stream event on apiHandler requires manual implementation. Stream event source mappings need batching, starting position, and source permissions reviewed manually.",
+    "s3 event on apiHandler requires manual implementation. Rewrite it with `s3()` from `@voke/aws`; the bucket must be a Voke resource declared with `s3Bucket()`.",
+    "schedule event on apiHandler requires manual implementation. Rewrite it with `schedule()` from `@voke/aws`; review the expression and time zone.",
+    "stream event on apiHandler requires manual implementation. Rewrite it with kinesis() or dynamodbStream() from @voke/aws, then review the starting position, batching and retry settings.",
     "Unsupported Serverless event kafka on function apiHandler: kafka is not an automatic Voke migration target. Recreate the trigger, permissions, batching, and failure behavior manually before cutting over.",
-    "stream event on kinesisWorker requires manual implementation. Stream event source mappings need batching, starting position, and source permissions reviewed manually.",
+    "stream event on kinesisWorker requires manual implementation. Rewrite it with kinesis() or dynamodbStream() from @voke/aws, then review the starting position, batching and retry settings.",
   ]);
   expect(migration.report.unknownFields).toEqual([
     {
@@ -1086,14 +1086,16 @@ test("reports Serverless Framework plugin compatibility deterministically", () =
     },
     {
       manualSteps: [
-        "Move Step Functions definitions and IAM permissions manually; Voke does not synthesize state machines in the stable local/dev/build/synth scope.",
+        "Rewrite Lambda-centric workflows as durable() Functions from @voke/aws: steps, waits and callbacks become TypeScript in the Function's handler.",
+        "Declare state machines you keep as raw CloudFormation resources in voke.config.ts, with their IAM roles and permissions.",
       ],
       name: "serverless-step-functions",
       notes: [
-        "State machines are application workflow infrastructure and are not converted automatically.",
+        "Voke does not synthesize Step Functions state machines; AWS Lambda durable functions are its orchestration model.",
       ],
       status: "manual",
-      summary: "Step Functions definitions require manual migration.",
+      summary:
+        "Step Functions workflows move to durable Functions or raw CloudFormation resources.",
     },
     {
       manualSteps: [

@@ -331,6 +331,25 @@ const executeAndFollow = async (
   return deployed?.outputs ?? {};
 };
 
+/**
+ * Voke names every Lambda, and CloudFormation cannot replace a named resource, so a planned
+ * Function replacement would fail mid-deploy. Adding or removing DurableConfig is the usual cause:
+ * Lambda enables durable execution only when it creates a function.
+ */
+const namedFunctionReplacements = (
+  description: ChangeSetDescription
+): string[] =>
+  description.changes
+    .filter(
+      (change) =>
+        change.resourceType === "AWS::Lambda::Function" &&
+        change.replacement === "True"
+    )
+    .map(
+      (change) =>
+        `Function ${change.logicalId} must be replaced, which CloudFormation cannot do for a named Lambda. Lambda sets durable execution only when it creates a function, so adding or removing durable(...) needs a new Function: give it a new registry key or name, deploy, then remove the old one.`
+    );
+
 /** Plans and (unless dry-run) applies one stack through a change set. */
 const deployStack = async (
   runtime: Runtime,
@@ -362,10 +381,22 @@ const deployStack = async (
     );
   }
 
+  const replacements = namedFunctionReplacements(description);
+
   if (deployment.dryRun) {
+    for (const message of replacements) {
+      runtime.output(`Warning: ${message}`);
+    }
+
     await discardPreview(runtime, stackName, id, description, type);
 
     return { outputs: currentOutputs, status: "dry-run" };
+  }
+
+  if (replacements.length > 0) {
+    await runtime.clients.deleteChangeSet(id);
+
+    throw new VokeDeployError(replacements.join("\n"));
   }
 
   const outputs = await executeAndFollow(

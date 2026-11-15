@@ -11,9 +11,11 @@ import {
   cliUsageMessage,
   formatCommandHelp,
   formatHelp,
+  formatPluginHelp,
   isHelpRequest,
   missingProviderMessage,
   parseFlags,
+  pluginCommandSpecs,
 } from "./cli-spec";
 import type { ParsedFlags } from "./cli-spec";
 import { defineConfig, loadVokeConfig } from "./config";
@@ -21,8 +23,10 @@ import type { VokeConfig } from "./config";
 import { createDevPlan } from "./dev";
 import { runDoctor } from "./doctor";
 import { VokeConfigError, VokeError } from "./errors";
+import { functionRegistryEntries } from "./invoke";
 import type { FunctionRegistry, FunctionRegistryInput } from "./invoke";
 import { createInternalModel } from "./model";
+import type { VokePlugin } from "./plugin";
 import { loadProject } from "./project";
 import type { BuildPlan, ProviderDeployResult } from "./provider";
 import { generateRemoteModules } from "./remote";
@@ -200,6 +204,15 @@ const assertProviderConfigured = (config: VokeConfig): void => {
   }
 };
 
+/** The config file `loadConfigFromFlags` reads, when it exists. */
+const configPathFromFlags = async (
+  flags: ParsedFlags
+): Promise<string | undefined> => {
+  const configPath = flags.values.config ?? "voke.config.ts";
+
+  return (await Bun.file(configPath).exists()) ? configPath : undefined;
+};
+
 const loadConfigFromFlags = async (flags: ParsedFlags): Promise<VokeConfig> => {
   const configPath = flags.values.config ?? "voke.config.ts";
 
@@ -261,6 +274,8 @@ export const synth = async (options: {
 export const build = async (
   config: VokeConfig,
   options: {
+    /** The config file the config was loaded from; the deployed handlers import it. */
+    configPath?: string;
     /** The project entrypoint that declares the Functions. Defaults to `config.entrypoint`. */
     entrypoint?: string;
     functions: FunctionRegistry | FunctionRegistryInput;
@@ -284,6 +299,9 @@ export const build = async (
         ? config.build
         : { ...config.build, outdir: options.outdir },
     config,
+    ...(options.configPath === undefined
+      ? {}
+      : { configPath: options.configPath }),
     entrypoint: options.entrypoint ?? config.entrypoint,
     functions: options.functions,
   });
@@ -390,6 +408,8 @@ const writeDeployOutputs = async (
 /** Builds the project through its Provider and deploys it to the stage. */
 export const deployProject = async (options: {
   config: VokeConfig;
+  /** The config file the config was loaded from; the deployed handlers import it. */
+  configPath?: string;
   cwd?: string;
   dryRun?: boolean;
   entrypoint?: string;
@@ -417,6 +437,7 @@ export const deployProject = async (options: {
 
   output(`Building ${config.name} (${options.stage})`);
   const plan = await build(config, {
+    configPath: options.configPath,
     entrypoint: options.entrypoint,
     functions: options.functions,
     run: options.run,
@@ -630,6 +651,7 @@ const commandHandlers: Record<string, CommandHandler> = {
     const entrypoint = flags.positional[0] ?? flags.values.entrypoint;
     const project = await loadProject({ config, entrypoint });
     const plan = await build(config, {
+      configPath: await configPathFromFlags(flags),
       entrypoint: entrypoint ?? config.entrypoint,
       functions: project.functions,
       outdir: flags.positional[1] ?? flags.values.outdir,
@@ -669,6 +691,7 @@ const commandHandlers: Record<string, CommandHandler> = {
 
     await deployProject({
       config,
+      configPath: await configPathFromFlags(flags),
       dryRun: isFlagSet(flags, "dry-run"),
       functions: project.functions,
       output: options.output,
@@ -784,13 +807,31 @@ const withUsage = (error: unknown, command: string): unknown =>
     ? new CliUsageError(cliUsageMessage(error.message, command))
     : error;
 
-const printTopLevel = (
+// Help lists Plugin commands when ./voke.config.ts loads; a config that fails to load never
+// breaks help, which then lists the built-in commands only.
+const helpPlugins = async (): Promise<readonly VokePlugin[]> => {
+  const path = resolve(readEnv("PWD") ?? ".", "voke.config.ts");
+
+  try {
+    if (!(await Bun.file(path).exists())) {
+      return [];
+    }
+
+    const config = await loadVokeConfig({ path });
+
+    return config.plugins;
+  } catch {
+    return [];
+  }
+};
+
+const printTopLevel = async (
   command: string | undefined,
   args: string[],
   output: CliOutput
-): boolean => {
+): Promise<boolean> => {
   if (command === undefined || command === "--help" || command === "-h") {
-    output(formatHelp());
+    output(formatHelp(await helpPlugins()));
     return true;
   }
 
@@ -800,11 +841,107 @@ const printTopLevel = (
   }
 
   if (command === "help") {
-    output(args[0] === undefined ? formatHelp() : formatCommandHelp(args[0]));
+    output(
+      args[0] === undefined
+        ? formatHelp(await helpPlugins())
+        : formatCommandHelp(args[0])
+    );
     return true;
   }
 
   return false;
+};
+
+const unknownCommandError = (command: string | undefined): CliUsageError =>
+  new CliUsageError(
+    cliUsageMessage(`Unknown command: ${command}`, command ?? "")
+  );
+
+/** `--config <path>` or `--config=<path>` from raw arguments, before the command is known. */
+const configFlagValue = (args: readonly string[]): string | undefined => {
+  for (const [index, arg] of args.entries()) {
+    if (arg === "--config") {
+      return args[index + 1];
+    }
+
+    if (arg.startsWith("--config=")) {
+      return arg.slice("--config=".length);
+    }
+  }
+
+  return undefined;
+};
+
+// `voke <plugin> <command>`: built-in commands win, so this runs only for an unknown command name.
+const runPluginCommand = async (
+  name: string,
+  args: string[],
+  options: CliOptions
+): Promise<void> => {
+  const output = outputOf(options);
+  const configPath = configFlagValue(args) ?? "voke.config.ts";
+
+  if (!(await Bun.file(configPath).exists())) {
+    throw unknownCommandError(name);
+  }
+
+  const config = await loadVokeConfig({ path: configPath });
+  const plugin = config.plugins.find(
+    (candidate) => candidate.name === name && candidate.cli !== undefined
+  );
+
+  if (plugin === undefined) {
+    throw unknownCommandError(name);
+  }
+
+  const [subcommand, ...rest] = args;
+
+  // `voke docs`, `voke docs --help` and `voke docs --config x` print the Plugin's commands.
+  if (subcommand === undefined || subcommand.startsWith("-")) {
+    output(formatPluginHelp(plugin));
+    return;
+  }
+
+  const command = plugin.cli?.commands[subcommand];
+
+  if (command === undefined) {
+    throw new CliUsageError(
+      `Invalid CLI usage: Unknown command: ${name} ${subcommand}\nRun \`voke ${name} --help\` to see its commands.`
+    );
+  }
+
+  const key = `${name} ${subcommand}`;
+  const specs = pluginCommandSpecs(plugin, subcommand, command);
+
+  if (isHelpRequest(rest)) {
+    output(formatCommandHelp(key, specs));
+    return;
+  }
+
+  try {
+    const flags = parseFlags(key, rest, specs);
+    const cwd = readEnv("PWD") ?? ".";
+
+    assertKnownFlags(key, flags, [], specs);
+    printRunDetails([name, ...args], options);
+    await command.run({
+      config,
+      cwd,
+      flags: flags.values,
+      loadFunctions: async () => {
+        const project = await loadProject({ config, cwd });
+
+        return functionRegistryEntries(project.functions);
+      },
+      output,
+      positional: flags.positional,
+    });
+  } catch (error) {
+    throw error instanceof CliUsageError &&
+      !error.message.startsWith("Invalid CLI usage:")
+      ? new CliUsageError(cliUsageMessage(error.message, key, specs))
+      : error;
+  }
 };
 
 export const runCli = async (
@@ -814,16 +951,19 @@ export const runCli = async (
   const [command, ...args] = argv;
   const output = outputOf(options);
 
-  if (printTopLevel(command, args, output)) {
+  if (await printTopLevel(command, args, output)) {
     return;
   }
 
   const handler = command === undefined ? undefined : commandHandlers[command];
 
-  if (command === undefined || handler === undefined) {
-    throw new CliUsageError(
-      cliUsageMessage(`Unknown command: ${command}`, command ?? "")
-    );
+  if (command === undefined) {
+    throw unknownCommandError(command);
+  }
+
+  if (handler === undefined) {
+    await runPluginCommand(command, args, options);
+    return;
   }
 
   if (isHelpRequest(args)) {

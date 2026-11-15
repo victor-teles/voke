@@ -9,6 +9,7 @@ import {
   secret,
   sqs,
 } from "@voke/aws";
+import type { SqsMessageBatch } from "@voke/aws";
 import {
   dynamodbTable,
   secret as cloudFormationSecret,
@@ -19,7 +20,7 @@ import {
 import { defineConfig } from "../src/config";
 import { VokeConfigError } from "../src/errors";
 import { fn, createFunctions, http } from "../src/invoke";
-import type { SqsMessageBatch, StandardSchemaV1 } from "../src/invoke";
+import type { EventFunctionDefinition, StandardSchemaV1 } from "../src/invoke";
 import { createInternalModel } from "../src/model";
 import { route, Voke } from "../src/route-builder";
 
@@ -697,19 +698,41 @@ test("models SQS event sources attached to Function definitions", () => {
   expect(model.functions.processOrders?.invokable).toBe(false);
   expect(model.functions.processOrders?.eventSources).toEqual([
     {
-      batchSize: 10,
-      enabled: undefined,
-      maxBatchingWindowSeconds: undefined,
-      queue: "ordersQueue",
+      properties: {
+        batchSize: 10,
+        enabled: true,
+        maxBatchingWindowSeconds: 0,
+      },
+      resource: "ordersQueue",
       type: "sqs",
     },
     {
-      batchSize: 5,
-      enabled: false,
-      maxBatchingWindowSeconds: 30,
-      queue: "priorityQueue",
+      properties: {
+        batchSize: 5,
+        enabled: false,
+        maxBatchingWindowSeconds: 30,
+      },
+      resource: "priorityQueue",
       type: "sqs",
     },
+  ]);
+});
+
+test("copies an Event Source of any type to the model untouched when no Provider is configured", () => {
+  const nightly: EventFunctionDefinition = {
+    events: [{ properties: { cron: "0 3 * * *" }, source: "custom" }],
+    handler: () => "done",
+    input: schema<unknown>(),
+    key: "",
+    kind: "event",
+  };
+  const model = createInternalModel({
+    functions: createFunctions({ nightly }),
+    name: "custom-events",
+  });
+
+  expect(model.functions.nightly?.eventSources).toEqual([
+    { properties: { cron: "0 3 * * *" }, type: "custom" },
   ]);
 });
 
@@ -737,7 +760,9 @@ test("rejects SQS event source references to missing resources", () => {
     expect(error).toMatchObject({
       issues: [
         {
-          path: "functions.processOrders.events.0.queue",
+          message:
+            '"sqs" Event Source references resource "missingQueue", but no matching resource is defined.',
+          path: "functions.processOrders.events.0.resource",
         },
       ],
     });

@@ -1,4 +1,4 @@
-import { createVokeModel, VokeModelError } from "voke";
+import { createVokeModel, VokeConfigError, VokeModelError } from "voke";
 import type {
   VokeConfigInput,
   VokeCorsConfig,
@@ -8,6 +8,28 @@ import type {
   VokeModelResource,
 } from "voke";
 
+import { resourceProvider, toLogicalId } from "./cloudformation-template";
+import type {
+  AwsCloudFormationResourceProvider,
+  AwsResourceBindingValue,
+  AwsResourcePolicyResource,
+  CloudFormationOutput,
+  CloudFormationResource,
+  CloudFormationTemplate,
+  CloudFormationValue,
+} from "./cloudformation-template";
+import {
+  durableConfig,
+  durableExecutionRoleStatements,
+  durableInvokeAccess,
+  durableVersionResources,
+} from "./durable-synthesis";
+import type { DynamodbStreamViewType } from "./dynamodb-stream";
+import { requireAwsEventSourceAdapter } from "./event-sources";
+import type {
+  AwsEventSourceAdapter,
+  AwsEventSourceSynthesisContext,
+} from "./event-sources";
 import {
   defaultAwsLambdaSettings,
   derivedVisibilityTimeout,
@@ -15,33 +37,15 @@ import {
   resolveFunctionLambdaSettings,
 } from "./lambda-settings";
 import type { AwsLambdaSettings } from "./lambda-settings";
+import { pluginPolicyStatements } from "./plugin-records";
 import { createResourceBindingName } from "./resources";
 
-export type CloudFormationValue =
-  | string
-  | number
-  | boolean
-  | null
-  | CloudFormationValue[]
-  | { [key: string]: CloudFormationValue };
-
-export interface CloudFormationTemplate {
-  AWSTemplateFormatVersion: "2010-09-09";
-  Description: string;
-  Resources: Record<string, CloudFormationResource>;
-  Outputs: Record<string, CloudFormationOutput>;
-}
-
-export interface CloudFormationResource {
-  Type: string;
-  Properties: Record<string, CloudFormationValue>;
-  Metadata?: Record<string, CloudFormationValue>;
-}
-
-export interface CloudFormationOutput {
-  Description: string;
-  Value: CloudFormationValue;
-}
+export type {
+  CloudFormationOutput,
+  CloudFormationResource,
+  CloudFormationTemplate,
+  CloudFormationValue,
+} from "./cloudformation-template";
 
 export interface StackResourceDefinition {
   cloudFormationType: string;
@@ -73,27 +77,6 @@ export interface StackResourceDefinition {
   };
   properties: Record<string, CloudFormationValue>;
 }
-
-type AwsResourceBindingValue = "ref" | "getAttArn" | "getAttId";
-
-type AwsResourcePolicyResource =
-  | "ref"
-  | "getAttArn"
-  | "getAttId"
-  | "parameterArn"
-  | "s3ArnWithObjects";
-
-interface AwsCloudFormationResourceProvider {
-  cloudFormationType: string;
-  bindingValue: AwsResourceBindingValue;
-  policyResource: AwsResourcePolicyResource;
-  outputName: string;
-}
-
-type VokeModelSqsEventSource = Extract<
-  VokeModel["functions"][string]["eventSources"][number],
-  { type: "sqs" }
->;
 
 const awsCloudFormationResource = (definition: {
   actions: string[];
@@ -128,6 +111,14 @@ export const dynamodbTable = (
     partitionKey?: string;
     sortKey?: string;
     billingMode?: "PAY_PER_REQUEST" | "PROVISIONED";
+    /** Turns on the table's stream with this view type, so `dynamodbStream()` can consume it. */
+    stream?: DynamodbStreamViewType;
+    /**
+     * Turns on time to live: DynamoDB deletes an item some time after the epoch-seconds value
+     * in this attribute has passed. Deletion runs in the background, so reads can still see
+     * expired items.
+     */
+    ttlAttribute?: string;
   } = {}
 ): StackResourceDefinition => {
   const partitionKey = options.partitionKey ?? "id";
@@ -159,6 +150,72 @@ export const dynamodbTable = (
       AttributeDefinitions: attributes,
       BillingMode: options.billingMode ?? "PAY_PER_REQUEST",
       KeySchema: keySchema,
+      ...(options.stream === undefined
+        ? {}
+        : { StreamSpecification: { StreamViewType: options.stream } }),
+      ...(options.ttlAttribute === undefined
+        ? {}
+        : {
+            TimeToLiveSpecification: {
+              AttributeName: options.ttlAttribute,
+              Enabled: true,
+            },
+          }),
+    },
+  });
+};
+
+export interface KinesisStreamOptions {
+  /** How long records stay readable, in hours, 24 to 8760. Kinesis defaults to 24. */
+  retentionHours?: number;
+  /** Switches the stream from on-demand to provisioned capacity with this many shards. */
+  shardCount?: number;
+}
+
+const maxKinesisRetentionHours = 8760;
+const minKinesisRetentionHours = 24;
+
+export const kinesisStream = (
+  options: KinesisStreamOptions = {}
+): StackResourceDefinition => {
+  const { retentionHours, shardCount } = options;
+
+  if (
+    shardCount !== undefined &&
+    (!Number.isInteger(shardCount) || shardCount < 1)
+  ) {
+    throw new VokeConfigError(
+      `kinesisStream() shardCount must be a positive integer, got ${shardCount}`
+    );
+  }
+
+  if (
+    retentionHours !== undefined &&
+    (!Number.isInteger(retentionHours) ||
+      retentionHours < minKinesisRetentionHours ||
+      retentionHours > maxKinesisRetentionHours)
+  ) {
+    throw new VokeConfigError(
+      `kinesisStream() retentionHours must be an integer from ${minKinesisRetentionHours} to ${maxKinesisRetentionHours}, got ${retentionHours}`
+    );
+  }
+
+  return awsCloudFormationResource({
+    // What a producing Function needs; consuming Functions get read access on their own role.
+    actions: ["kinesis:PutRecord", "kinesis:PutRecords"],
+    bindingAttribute: "name",
+    bindingValue: "ref",
+    cloudFormationType: "AWS::Kinesis::Stream",
+    outputName: "Name",
+    policyResource: "getAttArn",
+    properties: {
+      ...(retentionHours === undefined
+        ? {}
+        : { RetentionPeriodHours: retentionHours }),
+      ...(shardCount === undefined ? {} : { ShardCount: shardCount }),
+      StreamModeDetails: {
+        StreamMode: shardCount === undefined ? "ON_DEMAND" : "PROVISIONED",
+      },
     },
   });
 };
@@ -261,17 +318,6 @@ export const ssmParameter = (options: {
     },
   });
 
-const toLogicalId = (value: string): string => {
-  const words = value
-    .replaceAll(/([a-z0-9])([A-Z])/gu, "$1 $2")
-    .split(/[^A-Za-z0-9]+/u)
-    .filter(Boolean);
-
-  return words
-    .map((word) => `${word[0]?.toUpperCase() ?? ""}${word.slice(1)}`)
-    .join("");
-};
-
 const authorizerLogicalId = (name: string): string =>
   `${toLogicalId(name)}Authorizer`;
 
@@ -367,22 +413,6 @@ const toResourcePolicyStatements = (
   return statements;
 };
 
-const resourceProvider = (
-  resource: VokeModelResource
-): AwsCloudFormationResourceProvider => {
-  const extension = resource.provider?.aws;
-
-  if (extension !== undefined) {
-    if (extension.type !== "cloudformation.resource") {
-      throw new Error("AWS resource provider metadata is required");
-    }
-
-    return extension.properties as unknown as AwsCloudFormationResourceProvider;
-  }
-
-  throw new Error("AWS resource provider metadata is required");
-};
-
 const secretArn = (secretId: string): CloudFormationValue => {
   if (secretId.startsWith("arn:")) {
     return secretId;
@@ -462,6 +492,25 @@ const toRuntimeVariablePolicyStatements = (
   return statements;
 };
 
+/** The statements each of a Function's Event Sources adds to that Function's role only. */
+const toEventSourcePolicyStatements = (
+  functionKey: string,
+  definition: VokeModel["functions"][string],
+  model: VokeModel
+): CloudFormationValue[] =>
+  definition.eventSources.flatMap(
+    (eventSource, eventSourceIndex) =>
+      requireAwsEventSourceAdapter(
+        eventSource.type,
+        functionKey
+      ).roleStatements?.({
+        eventSource,
+        eventSourceIndex,
+        functionKey,
+        model,
+      }) ?? []
+  );
+
 const functionRoleLogicalId = (
   functionName: string,
   apiFunctionName: string
@@ -511,66 +560,6 @@ const primaryFunctionName = "http";
 
 const functionLogicalId = (name: string, apiFunctionName: string): string =>
   name === apiFunctionName ? "Function" : `${toLogicalId(name)}Function`;
-
-const eventSourceMappingLogicalId = (
-  functionId: string,
-  queueId: string
-): string => `${functionId}${queueId}EventSourceMapping`;
-
-const toSqsEventSourceMappingResource = (options: {
-  eventSource: VokeModelSqsEventSource;
-  eventSourceIndex: number;
-  functionName: string;
-  lambdaLogicalId: string;
-  model: VokeModel;
-}): [string, CloudFormationResource] => {
-  const {
-    eventSource,
-    eventSourceIndex,
-    functionName,
-    lambdaLogicalId,
-    model,
-  } = options;
-  const resource = model.resources[eventSource.queue];
-
-  if (resource === undefined) {
-    throw VokeModelError.validation([
-      {
-        message: `Function "${functionName}" SQS event source references resource "${eventSource.queue}", but no matching resource is defined.`,
-        path: `functions.${functionName}.eventSources.${eventSourceIndex}.queue`,
-      },
-    ]);
-  }
-
-  const provider = resourceProvider(resource);
-
-  if (provider.cloudFormationType !== "AWS::SQS::Queue") {
-    throw VokeModelError.validation([
-      {
-        message: `Function "${functionName}" SQS event source references resource "${eventSource.queue}", but it is an ${JSON.stringify(provider.cloudFormationType)} resource instead of an "AWS::SQS::Queue".`,
-        path: `functions.${functionName}.eventSources.${eventSourceIndex}.queue`,
-      },
-    ]);
-  }
-
-  const queueLogicalId = toLogicalId(eventSource.queue);
-
-  return [
-    eventSourceMappingLogicalId(lambdaLogicalId, queueLogicalId),
-    {
-      Properties: {
-        BatchSize: eventSource.batchSize ?? 10,
-        Enabled: eventSource.enabled ?? true,
-        EventSourceArn: { "Fn::GetAtt": [queueLogicalId, "Arn"] },
-        FunctionName: { Ref: lambdaLogicalId },
-        FunctionResponseTypes: ["ReportBatchItemFailures"],
-        MaximumBatchingWindowInSeconds:
-          eventSource.maxBatchingWindowSeconds ?? 0,
-      },
-      Type: "AWS::Lambda::EventSourceMapping",
-    },
-  ];
-};
 
 const toAuthorizerFunctionArn = (
   authorizer: Extract<VokeModelHttpAuthorizer, { type: "lambda" }>,
@@ -917,6 +906,30 @@ const withDerivedVisibilityTimeout = (
     : { ...resource.properties, VisibilityTimeout: derived };
 };
 
+/** Lets an Event Source's adapter change the properties of the resource it references. */
+const patchEventSourceResource = (
+  adapter: AwsEventSourceAdapter,
+  context: AwsEventSourceSynthesisContext,
+  templateResources: Record<string, CloudFormationResource>
+): void => {
+  const resourceKey = context.eventSource.resource;
+
+  if (adapter.resourceProperties === undefined || resourceKey === undefined) {
+    return;
+  }
+
+  const resource = templateResources[toLogicalId(resourceKey)];
+
+  if (resource === undefined) {
+    throw new Error(`Missing resource model for Event Source: ${resourceKey}`);
+  }
+
+  resource.Properties = adapter.resourceProperties(
+    context,
+    resource.Properties
+  );
+};
+
 export interface SynthesisArtifact {
   bucket: string;
   key: string;
@@ -972,6 +985,10 @@ export const synthesizeCloudFormationFromModel = (
   const templateResources: Record<string, CloudFormationResource> = {};
   const outputs: Record<string, CloudFormationOutput> = {};
   const policyStatements: CloudFormationValue[] = [];
+  const stackEventSources = new Map<
+    AwsEventSourceAdapter,
+    AwsEventSourceSynthesisContext[]
+  >();
 
   for (const [name, resource] of Object.entries(model.resources)) {
     const logicalId = toLogicalId(name);
@@ -991,6 +1008,10 @@ export const synthesizeCloudFormationFromModel = (
       ...toResourcePolicyStatements(logicalId, resource, provider)
     );
   }
+
+  const durableAccess = durableInvokeAccess(model);
+  // Plugin awsPolicy() statements reach every Function role, like resource statements.
+  policyStatements.push(...pluginPolicyStatements(model));
 
   for (const [name, definition] of Object.entries(model.functions).toSorted(
     ([leftName], [rightName]) => {
@@ -1015,6 +1036,9 @@ export const synthesizeCloudFormationFromModel = (
         definition.variables,
         model.resources
       ),
+      ...toEventSourcePolicyStatements(name, definition, model),
+      ...durableAccess.statements,
+      ...durableExecutionRoleStatements(definition),
     ]);
     const environmentVariables: Record<string, CloudFormationValue> = {
       ...definition.environment,
@@ -1034,6 +1058,9 @@ export const synthesizeCloudFormationFromModel = (
         resourceProvider(resource).bindingValue
       );
     }
+
+    Object.assign(environmentVariables, durableAccess.environment);
+    const functionDurableConfig = durableConfig(definition);
 
     templateResources[logicalId] = {
       Metadata: {
@@ -1056,6 +1083,9 @@ export const synthesizeCloudFormationFromModel = (
                 S3Bucket: options.artifact.bucket,
                 S3Key: options.artifact.key,
               },
+        ...(functionDurableConfig === undefined
+          ? {}
+          : { DurableConfig: functionDurableConfig }),
         Environment: {
           Variables: environmentVariables,
         },
@@ -1069,6 +1099,14 @@ export const synthesizeCloudFormationFromModel = (
       },
       Type: "AWS::Lambda::Function",
     };
+
+    if (functionDurableConfig !== undefined) {
+      // Durable Functions are invoked through a published version, never unqualified.
+      Object.assign(
+        templateResources,
+        durableVersionResources(logicalId, templateResources[logicalId])
+      );
+    }
     // An explicit log group gives the logs a retention period and removes them with the stack.
     templateResources[logGroupLogicalId] = {
       Properties: {
@@ -1082,20 +1120,33 @@ export const synthesizeCloudFormationFromModel = (
       eventSourceIndex,
       eventSource,
     ] of definition.eventSources.entries()) {
-      if (eventSource.type !== "sqs") {
-        continue;
-      }
+      const adapter = requireAwsEventSourceAdapter(eventSource.type, name);
+      const eventSourceContext: AwsEventSourceSynthesisContext = {
+        eventSource,
+        eventSourceIndex,
+        functionKey: name,
+        lambdaLogicalId: logicalId,
+        model,
+      };
 
-      const [mappingLogicalId, mappingResource] =
-        toSqsEventSourceMappingResource({
-          eventSource,
-          eventSourceIndex,
-          functionName: name,
-          lambdaLogicalId: logicalId,
-          model,
-        });
-
-      templateResources[mappingLogicalId] = mappingResource;
+      Object.assign(
+        templateResources,
+        adapter.synthesize(eventSourceContext).resources
+      );
+      patchEventSourceResource(adapter, eventSourceContext, templateResources);
+      stackEventSources.set(adapter, [
+        ...(stackEventSources.get(adapter) ?? []),
+        eventSourceContext,
+      ]);
+    }
+  }
+  // Stack-level resources, such as one role shared by every Event Source of a type.
+  for (const [adapter, contexts] of stackEventSources) {
+    if (adapter.synthesizeStack !== undefined) {
+      Object.assign(
+        templateResources,
+        adapter.synthesizeStack(contexts).resources
+      );
     }
   }
   if (apiRoutes.length > 0) {

@@ -1,0 +1,128 @@
+---
+title: Scheduled Functions
+description: Run a Function on a rate or cron schedule in a time zone with EventBridge Scheduler, and test it locally.
+---
+
+After reading this page you can run a Function on a recurring schedule, choose its time zone, turn
+the schedule off, and test the Function without AWS.
+
+## Declare a scheduled Function
+
+Create the Function with `schedule()` from `@voke/aws` and a `rate(...)` or `cron(...)` expression.
+A schedule needs no resource in `voke.config.ts`:
+
+```ts twoslash
+import { schedule } from "@voke/aws";
+import { createFunctions } from "voke";
+
+export const functions = createFunctions({
+  nightlyCleanup: schedule({
+    expression: "cron(0 3 * * ? *)",
+    timezone: "America/Sao_Paulo",
+    handler: async (event) => {
+      console.info(
+        `cleanup due at ${event.scheduledTime}, attempt ${event.attempt}`
+      );
+    },
+  }),
+});
+```
+
+| Option       | Default  | Effect                                                                                         |
+| ------------ | -------- | ---------------------------------------------------------------------------------------------- |
+| `expression` | Required | `rate(5 minutes)`, `rate(1 day)`, or a six-field `cron(minutes hours day month weekday year)`. |
+| `timezone`   | `"UTC"`  | The IANA time zone the expression is evaluated in. Daylight saving time is applied.            |
+| `enabled`    | `true`   | `false` creates the schedule turned off.                                                       |
+
+`schedule()` throws a `VokeConfigError` for an expression that does not start with `rate(` or
+`cron(`, and for a time zone that is not an IANA name. One-time `at(...)` schedules are not supported
+yet. See
+[schedule types](https://docs.aws.amazon.com/scheduler/latest/UserGuide/schedule-types.html) for the
+expression syntax.
+
+## Handle a scheduled event
+
+The handler receives:
+
+| Field           | Value                                                                           |
+| --------------- | ------------------------------------------------------------------------------- |
+| `scheduledTime` | When the schedule was due, ISO 8601 in UTC, for example `2024-03-01T06:00:00Z`. |
+| `attempt`       | `1` for the first attempt, higher when EventBridge Scheduler retries.           |
+| `executionId`   | The id EventBridge Scheduler gives the attempt.                                 |
+| `raw`           | The payload as the schedule sent it.                                            |
+
+The handler returns nothing. If it throws, the invocation fails and Lambda retries it. Make the job
+safe to run twice: use `scheduledTime` to tell runs apart.
+
+The schedule sends a Voke payload, not EventBridge Scheduler's default one. An invocation that does
+not carry it, for example a test event from the Lambda console, fails with an `InvokeError` with code
+`INVALID_PAYLOAD`.
+
+## Test a scheduled Function
+
+Test a scheduled Function with `functions.sendEvent(name, {})`. It runs the same code as the deployed
+Lambda:
+
+```ts twoslash
+import { schedule } from "@voke/aws";
+import { createFunctions } from "voke";
+
+const functions = createFunctions({
+  nightlyCleanup: schedule({
+    expression: "cron(0 3 * * ? *)",
+    handler: (event) => {
+      console.info(event.scheduledTime, event.attempt);
+    },
+  }),
+});
+
+// ---cut---
+await functions.sendEvent("nightlyCleanup", {});
+await functions.sendEvent("nightlyCleanup", {
+  scheduledTime: "2024-03-01T03:00:00Z",
+});
+// 2024-03-01T03:00:00Z 1
+```
+
+`scheduledTime` defaults to now, `attempt` to `1` and `executionId` to `exec_1`. `voke dev` does not
+run schedules.
+
+See [Testing](/docs/guides/testing) for test setup.
+
+## What gets deployed
+
+Voke uses [EventBridge Scheduler](https://docs.aws.amazon.com/scheduler/latest/UserGuide/what-is-scheduler.html),
+which AWS recommends over the legacy EventBridge scheduled rules: it supports time zones and has a much
+higher quota. `voke synth` adds:
+
+- one `AWS::Scheduler::Schedule` per scheduled Function, in the account's default schedule group,
+  with no flexible time window;
+- one `AWS::IAM::Role`, `VokeSchedulerRole`, for the whole stack. EventBridge Scheduler assumes it,
+  only for schedules in this account, and it may invoke exactly the scheduled Functions. No
+  `AWS::Lambda::Permission` is needed.
+
+The identity that runs `voke deploy` needs permission to manage EventBridge Scheduler schedules
+(`scheduler:CreateSchedule`, `scheduler:UpdateSchedule`, `scheduler:DeleteSchedule`,
+`scheduler:GetSchedule`) and `iam:PassRole` on the Scheduler role, in addition to the permissions
+every Voke deploy needs. See [Deploy](/docs/guides/deploy).
+
+`voke local bootstrap` creates no schedule: the local stack holds resources only, and a schedule is
+not a resource. See [Local AWS](/docs/guides/local-aws).
+
+## Limits
+
+<Callout type="info">
+
+Schedule support is intentionally small in v1:
+
+- One schedule per Function, and only recurring `rate(...)` and `cron(...)` expressions.
+- There is no static input per schedule, flexible time window, retry policy or dead-letter queue.
+- A `schedule()` Function cannot have HTTP routes or an output schema.
+
+</Callout>
+
+## Next steps
+
+- [EventBridge events](/docs/guides/eventbridge-events): react to events instead of time.
+- [Runtime Variables](/docs/guides/runtime-variables): read secrets in a scheduled handler.
+- [Deploy](/docs/guides/deploy): deploy the schedule and the Function.

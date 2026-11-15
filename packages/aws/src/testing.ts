@@ -1,4 +1,16 @@
+import type {
+  DurableOperation,
+  TestResult,
+} from "@aws/durable-execution-sdk-js-testing";
+import { VokeConfigError } from "voke";
+import type { FunctionRegistry } from "voke";
+
 import type { CloudFormationTemplate } from "./cloudformation-synthesis";
+import {
+  recordLocalDurableExecutions,
+  setupLocalDurableEnvironment,
+  teardownLocalDurableEnvironment,
+} from "./durable-local";
 import {
   createLocalAwsEnvironment,
   createLocalResourceBindings,
@@ -183,5 +195,62 @@ export const createStackTestContext = (
       return value;
     },
     template: options.template,
+  };
+};
+
+/** The result of one durable Function run through `runDurable`. */
+export interface DurableRun<TResult = unknown> {
+  /** The SDK testing runner's view of the execution: status, history events, invocations. */
+  execution: TestResult<unknown>;
+  /** Every durable operation the execution recorded, in order. */
+  operations: DurableOperation[];
+  /** The Function's validated output. */
+  result: TResult;
+}
+
+/**
+ * Makes local durable runs skip time: waits and step retry delays complete at once. Call it in
+ * `beforeAll`. It installs a fake clock, so `Date` and timers in the test file are faked too.
+ */
+export const setupDurableTests = async (): Promise<void> => {
+  await setupLocalDurableEnvironment();
+};
+
+/** Stops the local durable environment and restores real timers. Call it in `afterAll`. */
+export const teardownDurableTests = async (): Promise<void> => {
+  await teardownLocalDurableEnvironment();
+};
+
+type LocalInvoke = (
+  key: string,
+  payload: unknown,
+  options: { runtime: "local" }
+) => Promise<unknown>;
+
+/**
+ * Invokes a durable Function locally through `functions.invoke`, so payload and result are
+ * validated, and returns its result with the operations the execution recorded.
+ */
+export const runDurable = async <TResult = unknown>(
+  functions: Pick<FunctionRegistry, "invoke">,
+  key: string,
+  payload?: unknown
+): Promise<DurableRun<TResult>> => {
+  const invoke = functions.invoke as unknown as LocalInvoke;
+  const { executions, result } = await recordLocalDurableExecutions(
+    async () => await invoke(key, payload, { runtime: "local" })
+  );
+  const run = executions.at(-1);
+
+  if (run === undefined) {
+    throw new VokeConfigError(
+      `runDurable: Function "${key}" is not a durable Function; declare it with durable() from "@voke/aws".`
+    );
+  }
+
+  return {
+    execution: run.execution,
+    operations: run.operations,
+    result: result as TResult,
   };
 };

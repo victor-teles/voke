@@ -1,0 +1,239 @@
+---
+title: Plugins
+description: Add a Plugin to voke.config.ts, or write one that wraps every Function, adds Gateway middleware, contributes deployed routes and resources, and adds voke commands.
+---
+
+After reading this page you can add a **Plugin** to a project, write a Plugin that runs code around every Function, contributes routes, resources and permissions to the deployment, and adds a `voke` command, and test it.
+
+## Use a Plugin
+
+A Plugin is declared once, in `plugins` in `voke.config.ts`, next to the Provider. A Plugin package exports a factory function that returns the Plugin:
+
+```ts twoslash
+// @filename: request-log.ts
+import type { VokePlugin } from "voke";
+
+export const requestLog = (): VokePlugin => ({
+  name: "request-log",
+  runtime: {
+    setup: () => ({
+      wrap: async (execution, next) => {
+        console.info(`${execution.kind} ${execution.functionKey}`);
+
+        return await next();
+      },
+    }),
+  },
+});
+
+// @filename: voke.config.ts
+import { aws } from "@voke/aws";
+import { defineConfig } from "voke";
+
+import { requestLog } from "./request-log";
+
+export default defineConfig({
+  name: "orders",
+  plugins: [requestLog()],
+  provider: aws(),
+});
+```
+
+`voke()` has no `plugins` option. The Gateway reads the Plugins from the config you pass to it, `voke(functions, { config })`, so `voke dev`, your tests and the deployed Functions run the same Plugins.
+
+## What a Plugin can do
+
+A Plugin is a plain object with a `name` (lowercase letters, digits and `-`) and up to three optional parts:
+
+| Part            | What it adds                                                                                          | When it runs                   |
+| --------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------ |
+| `runtime`       | A **Function Wrap** around every handler call, and Gateway middleware.                                | When the Gateway is composed.  |
+| `contributions` | Routes served and deployed as **Plugin Functions**, resources, environment variables, IAM statements. | When the config is normalized. |
+| `cli`           | `voke <plugin> <command>` commands.                                                                   | When you run the command.      |
+
+## Wrap every Function
+
+`runtime.setup({ config, dev, functions })` runs once per Gateway and returns the Plugin's hooks. `functions` lists every Function of the Gateway, the project's and then the Plugin Functions. `dev` is `true` only under `voke dev`.
+
+`wrap(execution, next)` runs around the handler of every invokable Function, route, Event Source Function and Request Authorizer Function. `execution.kind` is `"invokable"`, `"route"`, `"event"` or `"authorizer"`; `execution.input` is what the handler receives, after the input schema; `execution.route` is the route, such as `"GET /users/:id"`, for a route. `next()` runs the handler and resolves to its result before the output schema checks it:
+
+```ts twoslash
+import type { VokePlugin } from "voke";
+
+export const timing = (): VokePlugin => ({
+  name: "timing",
+  runtime: {
+    setup: ({ dev }) => ({
+      wrap: async (execution, next) => {
+        const started = performance.now();
+
+        try {
+          return await next();
+        } finally {
+          if (dev) {
+            const ms = (performance.now() - started).toFixed(1);
+            console.info(`${execution.functionKey} took ${ms} ms`);
+          }
+        }
+      },
+    }),
+  },
+});
+```
+
+The rules:
+
+- The first Plugin in `plugins` is the outermost wrap.
+- A wrap can return without calling `next()`. Voke then checks its value against the output schema like a handler result.
+- `next()` takes no arguments: a wrap cannot change the handler input. Calling `next()` twice rejects with an error that names the Plugin, so a handler never runs twice by accident.
+- Input and output validation happen outside the wrap.
+- A wrap counts toward the invocation timeout of `functions.invoke(...)`.
+- Wraps apply to the Functions of a Gateway created with a config that declares the Plugin. A handler you call directly, or a registry you test with `createInvokeTestClient(functions)`, runs without Plugins.
+- A [Durable Function](/docs/guides/durable-functions) is replayed: Lambda invokes it again after each wait or retry, and the wrap runs again on every replay. Keep side effects in a wrap idempotent, or put them inside a durable `step`.
+
+## Add Gateway middleware
+
+`setup` can also return Hono `middleware`. Plugin middleware runs after CORS and before the Gateway's own `voke(functions, { middleware })`, in `plugins` order:
+
+```ts twoslash
+import type { VokePlugin } from "voke";
+
+export const poweredBy = (): VokePlugin => ({
+  name: "powered-by",
+  runtime: {
+    setup: () => ({
+      middleware: [
+        async (c, next) => {
+          await next();
+          c.header("x-powered-by", "voke");
+        },
+      ],
+    }),
+  },
+});
+```
+
+## Contribute routes, resources and permissions
+
+`contributions` is static data that the factory creates, like the options of `aws()`:
+
+```ts twoslash
+import { awsPolicy } from "@voke/aws";
+import { sqsQueue } from "@voke/aws/cloudformation";
+import { http, route } from "voke";
+import type { VokePlugin } from "voke";
+
+export const audit = (options: { bucketArn: string }): VokePlugin => ({
+  name: "audit",
+  contributions: {
+    environment: { AUDIT_ENABLED: "true" },
+    functions: {
+      status: http({
+        routes: [route.get("/audit/status", { handler: () => ({ ok: true }) })],
+      }),
+    },
+    provider: awsPolicy({
+      statements: [
+        { actions: ["s3:PutObject"], resources: [`${options.bucketArn}/*`] },
+      ],
+    }),
+    resources: { auditQueue: sqsQueue() },
+  },
+});
+```
+
+- `functions` adds **Plugin Functions**. They are route-backed Functions from `http()`: the Gateway serves them, and `voke synth` and `voke deploy` deploy them with their API routes, like your own. The registry key is `<plugin>-<name>`, here `audit-status`; the deployed Lambda is `<name>-<stage>-audit-status`. A Plugin Function is not part of your typed Function Registry: reach it with `gateway.request("/audit/status")`, not `functions.route(...)`. A route that duplicates one of yours, or a Function key that equals one of yours, is a config error.
+- `resources` and `environment` join the config's own. A key that your config or another Plugin already uses with a different value is a `VokeConfigError` at `plugins.<name>.contributions.resources.<key>`.
+- `provider` holds one **Provider Extension Record** per Provider name. The AWS Provider reads `awsPolicy({ statements })` from `@voke/aws`: each statement allows `actions` on `resources` for every Function role. A resource you contribute needs no statement; its access comes with it.
+
+## Add a command
+
+`cli` adds `voke <plugin> <command>`. Each command declares its usage, description and flags; Voke parses the flags, rejects unknown ones, and prints help:
+
+```ts twoslash
+import type { VokePlugin } from "voke";
+
+export const routes = (): VokePlugin => ({
+  name: "routes",
+  cli: {
+    description: "Inspect the project's HTTP routes.",
+    commands: {
+      list: {
+        description: "Print every HTTP route.",
+        usage: "voke routes list [--json]",
+        flags: { json: { boolean: true, description: "Print JSON" } },
+        run: async ({ flags, loadFunctions, output }) => {
+          const functions = await loadFunctions();
+          const routes = functions.flatMap(([, definition]) =>
+            (definition.routes ?? []).map(
+              (route) => `${route.method} ${route.path}`
+            )
+          );
+
+          output(
+            flags.json === "true" ? JSON.stringify(routes) : routes.join("\n")
+          );
+        },
+      },
+    },
+  },
+});
+```
+
+`voke routes`, `voke routes --help` and `voke routes list --help` print help, and `voke --help` lists Plugin commands under "Plugin commands:". `loadFunctions()` imports the project entrypoint and returns every Function, Plugin Functions included. Every command also accepts `--config`.
+
+Built-in commands win: a Plugin with `cli` cannot be named like a built-in command (`build`, `deploy`, `dev`, ...) or `help`. The config is imported by the deployed Functions too, so a command's dependencies end up in the Lambda bundle. Load command-only dependencies with `await import(...)` inside `run`.
+
+## Test a Plugin
+
+Pass the Plugin in the config of a test Gateway and send requests or invoke Functions:
+
+```ts twoslash
+import { expect, test } from "bun:test";
+import { schema } from "@voke/schema";
+import { createFunctions, fn, voke } from "voke";
+import type { VokePlugin } from "voke";
+
+const calls: string[] = [];
+const recorder: VokePlugin = {
+  name: "recorder",
+  runtime: {
+    setup: () => ({
+      wrap: async (execution, next) => {
+        calls.push(execution.functionKey);
+
+        return await next();
+      },
+    }),
+  },
+};
+
+test("the recorder wraps every Function", async () => {
+  const functions = createFunctions({
+    greet: fn({ handler: () => "hi", output: schema.string() }),
+  });
+
+  voke(functions, { config: { name: "test", plugins: [recorder] } });
+
+  await expect(functions.invoke("greet")).resolves.toBe("hi");
+  expect(calls).toEqual(["greet"]);
+});
+```
+
+## Limits
+
+A Plugin cannot, in this version:
+
+- replace or wrap the Provider, or edit the synthesized template;
+- change a Function Contract or the input a handler receives;
+- observe input or output validation failures;
+- contribute invokable, Event Source or authorizer Functions;
+- add flags to built-in commands;
+- read the stage or the project name when it builds its contributions.
+
+## Next steps
+
+- [HTTP routes](/docs/guides/http-routes)
+- [Testing](/docs/guides/testing)
+- [Configuration reference](/docs/reference/config)
+- [CLI reference](/docs/reference/cli)

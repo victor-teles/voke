@@ -11,6 +11,8 @@
       "@voke/aws/*": ["../aws/src/*.ts"],
       "@voke/build": ["../build/src/index.ts"],
       "@voke/http": ["../http/src/index.ts"],
+      "@voke/openapi": ["../openapi/src/index.ts"],
+      "@voke/idempotency": ["../idempotency/src/index.ts"],
       "@voke/remote": ["../remote/src/index.ts"],
       "@voke/schema": ["../schema/src/index.ts"],
       "@voke/testing": ["../testing/src/index.ts"]

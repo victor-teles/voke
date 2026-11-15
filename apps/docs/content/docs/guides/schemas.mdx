@@ -237,6 +237,27 @@ content-type: application/json
 
 The handler does not run. When the handler's return value fails the route's `output` schema, the status is `500` and the message is `Invalid result`. See [HTTP routes](/docs/guides/http-routes#errors) for every error response.
 
+## JSON Schema
+
+Voke describes contracts as JSON Schema in two places: the [OpenAPI document](/docs/guides/openapi) of your routes, and the contract metadata of [Remote Functions](/docs/guides/remote-functions). It reads the JSON Schema through [Standard JSON Schema](https://standardschema.dev/json-schema), the companion of Standard Schema, and asks for draft 2020-12.
+
+`@voke/schema` and Zod implement it. Each `@voke/schema` builder produces this JSON Schema:
+
+| Builder                                    | JSON Schema                                                                                  |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| `schema.string()`, `.min(n)`, `.max(n)`    | `{ "type": "string" }` with `minLength`, `maxLength`                                         |
+| `schema.number()`, `.int()`, `.min`/`.max` | `{ "type": "number" }`, or `"integer"`, with `minimum`, `maximum`                            |
+| `schema.coerce.number()`                   | Output: a number. Input: `anyOf` a number or a string, since it also accepts numeric strings |
+| `schema.boolean()`, `schema.null()`        | `{ "type": "boolean" }`, `{ "type": "null" }`                                                |
+| `schema.literal(value)`                    | `{ "const": value }` with its type                                                           |
+| `schema.enum([...])`                       | `{ "type": "string", "enum": [...] }`                                                        |
+| `schema.array(item)`                       | `{ "type": "array", "items": ... }`                                                          |
+| `schema.object(shape)`                     | `properties`, `required` without optional keys, and `"additionalProperties": false`          |
+| `schema.optional(inner)`                   | The inner schema; the object leaves the key out of `required`                                |
+| `schema.undefined()`                       | None: JSON has no `undefined`, so the schema has no JSON Schema                              |
+
+`@voke/schema` supports the targets `draft-2020-12` and `draft-07` and throws for any other. A validator without Standard JSON Schema still validates; only the generated descriptions treat its values as "any value". Valibot and ArkType can work if their schemas expose Standard JSON Schema; Voke tests Zod and `@voke/schema`.
+
 ## Write your own validator
 
 You can write a validator by hand when no library fits. A Standard Schema validator is an object with a `"~standard"` property:

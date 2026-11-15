@@ -1,5 +1,6 @@
 import type { VokeBuildConfig, VokeConfig } from "./config";
 import type {
+  AnyFunctionDefinition,
   FunctionRegistry,
   FunctionRegistryInput,
   InvokeTransport,
@@ -25,8 +26,32 @@ export interface ProviderRuntimeCapability {
   variables?: () => readonly RuntimeVariableProvider[];
 }
 
+/** Where the Provider invokes a Function it routes through its transport. */
+export interface ProviderInvokeTarget {
+  /** The name the transport invokes, such as a qualified deployed name. */
+  functionName: string;
+}
+
 export interface ProviderInvokeCapability {
+  /**
+   * Whether the Function accepts `executionName`. A routed invocation passes the name to the
+   * transport; an in-process run of an accepting Function ignores it. Any other Function rejects
+   * it with `INVALID_OPTIONS`.
+   */
+  acceptsExecutionName?: (input: {
+    definition: AnyFunctionDefinition;
+    key: string;
+  }) => boolean;
   transport?: () => InvokeTransport;
+  /**
+   * Returns a target when this Function must be invoked through `transport()` instead of
+   * in-process; undefined keeps the default path. Not consulted when the caller sets
+   * `runtime` explicitly.
+   */
+  target?: (input: {
+    definition: AnyFunctionDefinition;
+    key: string;
+  }) => ProviderInvokeTarget | undefined;
 }
 
 export interface BuildPlanOutput {
@@ -101,6 +126,8 @@ export interface ProviderDeployCapability {
 export interface ProviderBuildInput {
   build: VokeBuildConfig;
   config: VokeConfig;
+  /** The config file the CLI loaded; absent when the config came from flags. */
+  configPath?: string;
   /** The project entrypoint that declares the Functions. */
   entrypoint: string;
   functions: FunctionRegistry | FunctionRegistryInput;

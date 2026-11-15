@@ -15,6 +15,7 @@ import {
   removeAwsStack,
 } from "../src/deploy";
 import type {
+  ChangeSetChange,
   ChangeSetInput,
   DeployAwsClients,
   StackDescription,
@@ -35,6 +36,8 @@ interface Scenario {
   /** Stacks whose deletion fails on a resource. */
   deleteFailsOn?: Map<string, { logicalId: string; reason: string }>;
   credentialFailure?: boolean;
+  /** Stacks whose change set plans these changes instead of adding the HTTP Function. */
+  changes?: Map<string, ChangeSetChange[]>;
 }
 
 const outputsFor = (stack: string): Record<string, string> =>
@@ -140,7 +143,7 @@ const createFakeClients = (scenario: Scenario = {}) => {
       }
 
       return await Promise.resolve({
-        changes: [
+        changes: scenario.changes?.get(changeSet.stackName) ?? [
           {
             action: "Add",
             logicalId: "Function",
@@ -488,4 +491,57 @@ test("remove deletes the stack and reports resources that failed to delete", asy
   ).rejects.toThrow(
     "Could not delete stack shop-dev: UploadsBucket (AWS::S3::Bucket) failed: The bucket you tried to delete is not empty"
   );
+});
+
+const replacingFunction = (): Map<string, ChangeSetChange[]> =>
+  new Map([
+    [
+      "shop-dev",
+      [
+        {
+          action: "Modify",
+          logicalId: "FulfilOrderFunction",
+          replacement: "True",
+          resourceType: "AWS::Lambda::Function",
+        },
+        {
+          action: "Modify",
+          logicalId: "FulfilOrderFunctionRole",
+          replacement: "False",
+          resourceType: "AWS::IAM::Role",
+        },
+      ],
+    ],
+  ]);
+
+test("a change set that replaces a named Lambda fails before executing and is deleted", async () => {
+  const fake = createFakeClients({ changes: replacingFunction() });
+  fake.stacks.set("shop-dev", { outputs: {}, status: "UPDATE_COMPLETE" });
+
+  const failure = await deploy(fake).catch((error: unknown) => error);
+
+  expect(failure).toBeInstanceOf(VokeDeployError);
+  expect((failure as Error).message).toContain(
+    "Function FulfilOrderFunction must be replaced"
+  );
+  expect((failure as Error).message).toContain("durable");
+  expect(fake.calls).toContain("deleteChangeSet:shop-dev");
+  expect(fake.calls).not.toContain("executeChangeSet:shop-dev");
+});
+
+test("a dry run warns about a named Lambda replacement instead of failing", async () => {
+  const fake = createFakeClients({ changes: replacingFunction() });
+  fake.stacks.set("shop-dev", { outputs: {}, status: "UPDATE_COMPLETE" });
+
+  const { lines, result } = await deploy(fake, { dryRun: true });
+
+  expect(result.status).toBe("dry-run");
+  expect(
+    lines.some(
+      (line) =>
+        line.startsWith("Warning:") &&
+        line.includes("Function FulfilOrderFunction must be replaced")
+    )
+  ).toBe(true);
+  expect(fake.calls).not.toContain("executeChangeSet:shop-dev");
 });

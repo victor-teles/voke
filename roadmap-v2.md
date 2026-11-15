@@ -37,7 +37,7 @@ The roadmap below should extend this core without turning Voke into YAML Serverl
 - Keep `voke.config.ts` as project metadata and infrastructure config, not the place where handlers are composed.
 - Make local tests exercise the same normalization, validation, auth, and adapter paths as deployed runtime.
 - Keep AWS-specific power in domain subpaths when it would bloat the root package.
-- Favor built-in boring defaults over plugin ecosystems for critical runtime behavior.
+- Favor built-in boring defaults for critical runtime behavior; integrations extend Voke through the typed Plugin contract (ADR 0015) instead of a plugin ecosystem.
 - Treat docs, examples, and migration guidance as part of the feature.
 
 ## Phase 1: Stage-Aware Config, Parameters, and Secrets
@@ -124,7 +124,7 @@ Deliverables:
 - Add a typed error response convention that maps known Voke errors, validation errors, and user-thrown HTTP errors to stable responses.
 - Add a request/response interceptor API scoped to HTTP Functions, with explicit ordering and typed context.
 - Add route-level and Function-level defaults for response serialization.
-- Add OpenAPI export from route contracts after request/response shape metadata is complete.
+- Add OpenAPI export from route contracts after request/response shape metadata is complete, as the first Plugin (`.factory/plans/020-openapi-and-scalar-plugin.md`). Delivered: `@voke/openapi` with a Scalar API reference page and `voke openapi generate` (ADR 0016); response status codes and error shapes remain.
 
 Acceptance tests:
 
@@ -335,25 +335,23 @@ Why Voke needs it:
 
 Voke should avoid premature workflow DSL design, but it should leave a path for typed orchestration around Functions.
 
-Deliverables:
+Outcome (decided 2026-11-14, ADR 0014): AWS Lambda durable functions are the supported orchestration model. A `durable(...)` Function from `@voke/aws` is ordinary TypeScript with checkpointed `step`, `wait` and callbacks, tested locally through the AWS durable execution testing runner and deployed as a durable Lambda behind a `live` alias. Step Functions gets no builder or DSL; state machines stay reachable as raw CloudFormation resources. The `workflow(...)` exploration is dropped.
 
-- Add Step Functions migration reporting first.
-- Add typed `workflow(...)` exploration only after EventBridge and direct Function invocation are stable.
-- Add helpers for idempotency keys, retries, and dead-letter destinations before introducing a full workflow DSL.
-- Add ADR comparing Step Functions synthesis, EventBridge choreography, and userland orchestration.
+Delivered:
 
-Acceptance tests:
+- `durable(...)`, `runDurable` / `setupDurableTests` test helpers, synthesis (DurableConfig, retained versions, `live` alias, checkpoint and invoke grants), a deploy guard for Functions that would need replacement, and `executionName` for idempotent starts.
+- The `serverless-step-functions` migration entry points at `durable(...)` and raw CloudFormation resources.
+- `examples/durable-workflow` and the Durable Functions guide.
 
-- Compatibility report tests for Step Functions plugin configs.
-- ADR-backed prototype before public API.
+Follow-ups:
 
-Docs and examples:
-
-- Add an orchestration decision guide.
+- Prove the deployed path on real AWS (deploy, wait, redeploy while an execution is paused).
+- `voke executions` (list, inspect, stop), callback helpers, pruning retained versions, KMS keys for execution state.
+- Idempotency helpers should treat `executionName` as the idempotent start for Durable Functions. Done in `@voke/idempotency` (plan 021, ADR 0017): it writes no record for a Durable Function start, and its guide points at `executionName`.
 
 ## Explicit Non-Goals
 
-- Do not introduce a broad plugin API before first-party runtime behavior is stable.
+- Plugins extend Voke through the typed Plugin contract (ADR 0015); critical runtime behavior stays first-party.
 - Do not move Function composition into `voke.config.ts`.
 - Do not make Pulumi, Terraform, CDK, or Serverless Framework a required runtime dependency.
 - Do not expose every AWS knob on the root package.

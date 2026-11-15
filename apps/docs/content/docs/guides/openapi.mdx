@@ -1,0 +1,171 @@
+---
+title: OpenAPI and API reference
+description: Generate an OpenAPI 3.1 document from your route contracts, browse it on a Scalar API reference page, and write it to a file in CI.
+---
+
+After reading this page you can add the `openapi()` Plugin to a project, browse your HTTP API at `/docs` under `voke dev`, describe routes with `meta`, publish the reference from the deployed API, and write the **OpenAPI Document** to a file with `voke openapi generate`.
+
+## Add the Plugin
+
+Install `@voke/openapi` and add `openapi()` to `plugins` in `voke.config.ts`:
+
+```bash
+bun add @voke/openapi
+```
+
+```ts twoslash
+import { aws } from "@voke/aws";
+import { openapi } from "@voke/openapi";
+import { defineConfig } from "voke";
+
+export default defineConfig({
+  name: "orders",
+  plugins: [openapi({ title: "Orders API", version: "1.0.0" })],
+  provider: aws(),
+});
+```
+
+Run `voke dev` and open:
+
+- `http://localhost:3000/openapi.json`: the OpenAPI 3.1 document of every route of the Gateway.
+- `http://localhost:3000/docs`: the **API Reference Page**, which renders that document with [Scalar](https://scalar.com).
+
+Both are served under `voke dev` only. Nothing is deployed, and `voke deploy` does not change. Under `voke dev` they answer before your routes, so if your API has its own `/docs` route, set `uiPath` to another path.
+
+## Describe routes
+
+Voke builds the document from what your routes already declare: the method, the path, the schemas, the authorizer. Add `meta` to a route for the text a reader needs:
+
+```ts twoslash
+import { schema } from "@voke/schema";
+import { createFunctions, http, route } from "voke";
+
+const order = schema.object({ id: schema.string(), total: schema.number() });
+
+export const functions = createFunctions({
+  orders: http({
+    routes: [
+      route.get("/orders/:id", {
+        meta: {
+          summary: "Get an order",
+          description: "Reads one order by its id.",
+          tags: ["orders"],
+        },
+        params: schema.object({ id: schema.string() }),
+        output: order,
+        handler: (request) => ({ id: request.params.id, total: 42 }),
+      }),
+      route.get("/orders/internal/stats", {
+        meta: { hidden: true },
+        handler: () => ({ count: 1 }),
+      }),
+    ],
+  }),
+});
+```
+
+`meta.hidden: true` leaves a route out of the document. Without `meta.tags`, a route is tagged with its Function Registry key (`orders` here). Without `meta.operationId`, the operation id is built from the key, the method and the path: `ordersGetOrdersById`. Two routes with the same operation id are a `VokeConfigError` that names the second route.
+
+## What each part becomes
+
+| Route contract                              | In the document                                                                                                   |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Path `/orders/:id`, trailing `*`            | `/orders/{id}`, `{proxy}`; each is a required `path` parameter, a string unless `params` says more                |
+| `params`, `query`, `headers`                | One parameter per property of the object schema; `required` comes from the schema                                 |
+| `body`                                      | A required `application/json` request body                                                                        |
+| `output`                                    | The `200` response: `{ "data": <output> }`, the envelope the Gateway sends. Without `output`, `data` is any value |
+| Any of `body`, `params`, `query`, `headers` | A `400` response with the `Error` schema                                                                          |
+| Every route                                 | A `500` response with the `Error` schema                                                                          |
+| An authorizer                               | `security` with its name, a `401` and a `403` response, and a security scheme (below)                             |
+| `authorizer: "none"`, no authorizer         | `security: []`: a public route                                                                                    |
+
+The `Error` schema is the `{ "error": { "message", "code", "details", "issues" } }` body of [HTTP errors](/docs/guides/http-routes#errors). Schemas are read from your validators as described in [JSON Schema](/docs/guides/schemas#json-schema); a schema with no JSON Schema documents its value as any value.
+
+[Authorizers](/docs/guides/authorizers) become security schemes:
+
+| Authorizer         | Security scheme                                                                                                                                |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `jwtAuthorizer`    | `{ "type": "http", "scheme": "bearer", "bearerFormat": "JWT" }`, with the issuer in the description                                            |
+| `lambdaAuthorizer` | `{ "type": "apiKey" }` in the header or query parameter of its first `$request.header.<name>` or `$request.querystring.<name>` identity source |
+
+## Publish the reference from the deployed API
+
+An API description tells an attacker every route and field, so the deployed API does not serve it unless you ask. `expose: true` adds the **Plugin Function** `openapi-docs`, which serves both routes locally and is deployed with your Functions:
+
+```ts twoslash
+import { aws } from "@voke/aws";
+import { openapi } from "@voke/openapi";
+import { defineConfig } from "voke";
+
+export default defineConfig({
+  name: "orders",
+  plugins: [openapi({ expose: true })],
+  provider: aws(),
+});
+```
+
+Both routes are public (`authorizer: "none"`), even when your Functions have a Default HTTP Authorizer. The document lists the request's origin as its server, unless you set `servers`.
+
+## Options
+
+| Option           | Default            | Meaning                                                                      |
+| ---------------- | ------------------ | ---------------------------------------------------------------------------- |
+| `title`          | the project name   | `info.title`, and the page title.                                            |
+| `version`        | `"0.0.0"`          | `info.version`: the version of your API.                                     |
+| `description`    | none               | `info.description`.                                                          |
+| `servers`        | the request origin | Server URLs, such as `["https://api.example.com"]`.                          |
+| `documentPath`   | `"/openapi.json"`  | Where the document is served.                                                |
+| `uiPath`         | `"/docs"`          | Where the page is served; `false` serves the document only.                  |
+| `expose`         | `false`            | Serve both from the deployed API through the public Function `openapi-docs`. |
+| `scalar.version` | `"1.78.1"`         | The `@scalar/api-reference` version the page loads.                          |
+
+`documentPath` and `uiPath` must start with `/`, have no parameters, and differ. An invalid option is a `VokeConfigError` at `plugins.openapi.<option>`.
+
+## Write the document in CI
+
+`voke openapi generate` imports your project and writes the document, for client generators, contract tests or a docs site:
+
+```bash
+voke openapi generate --out openapi.json --server https://api.example.com
+# Wrote openapi.json (6 operations)
+```
+
+| Flag       | Default        | Meaning                                     |
+| ---------- | -------------- | ------------------------------------------- |
+| `--out`    | `openapi.json` | The file to write, relative to the project. |
+| `--server` | `servers`      | A server URL to list in the document.       |
+
+The file is two-space JSON with a trailing newline, and the same routes always give the same file, so you can commit it and review its diff. To build the document in code, call `createOpenApiDocument`:
+
+```ts twoslash
+import { createOpenApiDocument } from "@voke/openapi";
+import { createFunctions, functionRegistryEntries, http, route } from "voke";
+
+const functions = createFunctions({
+  http: http({ routes: [route.get("/health", { handler: () => "ok" })] }),
+});
+
+const document = createOpenApiDocument({
+  functions: functionRegistryEntries(functions),
+  name: "orders",
+});
+
+console.info(Object.keys(document.paths));
+// ["/health"]
+```
+
+## Limits
+
+- Every route documents its success as `200`. A handler that returns its own `Response`, such as `created(...)` (`201`) or `error(...)`, is still documented as `200`; say so in `meta.description`.
+- `401` and `403` are documented without a body: API Gateway answers them with its own body.
+- A recursive Zod schema refers to `$defs`, which the document does not carry over; such a schema does not resolve in the reference.
+- The page loads Scalar from `cdn.jsdelivr.net`, so the browser needs network access to it. No Scalar code enters your Functions.
+- Optional or regular-expression path parameters (`/users/:id?`) are a `VokeConfigError`, as they are for API Gateway.
+- Event Source Functions and invokable Functions are not HTTP routes and are not in the document. For invokable Functions, see [Remote Functions](/docs/guides/remote-functions).
+
+## Next steps
+
+- [HTTP routes](/docs/guides/http-routes)
+- [Schemas and validation](/docs/guides/schemas)
+- [Plugins](/docs/guides/plugins)
+- [CLI reference](/docs/reference/cli)

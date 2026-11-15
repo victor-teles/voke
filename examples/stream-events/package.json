@@ -1,0 +1,25 @@
+{
+  "name": "@voke/stream-events",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "voke build",
+    "deploy": "voke deploy",
+    "remove": "voke remove",
+    "test": "bun test",
+    "typecheck": "bunx tsgo --project tsconfig.json --noEmit",
+    "clean": "rm -rf dist coverage"
+  },
+  "dependencies": {
+    "@voke/aws": "workspace:*",
+    "@voke/schema": "workspace:*",
+    "hono": "^4.0.0",
+    "voke": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@typescript/native-preview": "^7.0.0-dev.20260516.1"
+  }
+}

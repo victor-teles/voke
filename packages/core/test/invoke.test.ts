@@ -552,38 +552,84 @@ test("sends SQS events to event source functions with minimal messages", async (
   expect(result).toEqual({ batchItemFailures: [] });
 });
 
-test("rejects SQS event source functions mixed with HTTP routes or invokable output", () => {
-  // fn() guards the generic Function shape; take a real SQS event source and batch schema
-  // from sqs() and try to combine them with routes or an output contract.
-  const { events, input } = sqs({
+test("createFunctions rejects Event Source Functions mixed with HTTP routes or an output schema", () => {
+  // Provider packages build Event Source Functions directly, so createFunctions owns these rules.
+  const processOrder = sqs({
     handler: (batch) => batch.ok(),
     message: userInputSchema,
     queue: "ordersQueue",
   });
 
   expect(() =>
-    fn({
-      events,
-      handler: (event: { ok: () => unknown }) => event.ok(),
-      input,
-      routes: [
-        {
-          handler: () => ({ ok: true }),
-          method: "GET",
-          middleware: [],
-          path: "/orders",
-        },
-      ],
-    } as never)
-  ).toThrow(VokeConfigError);
+    createFunctions({
+      processOrder: {
+        ...processOrder,
+        routes: [
+          {
+            handler: () => ({ ok: true }),
+            method: "GET",
+            middleware: [],
+            path: "/orders",
+          },
+        ],
+      } as never,
+    })
+  ).toThrow("Event Source Functions cannot define HTTP routes in v1.");
   expect(() =>
-    fn({
-      events,
-      handler: (event: { ok: () => unknown }) => event.ok(),
-      input,
-      output: userOutputSchema,
-    } as never)
+    createFunctions({
+      processOrder: { ...processOrder, output: userOutputSchema } as never,
+    })
+  ).toThrow(
+    "Event Source Functions cannot define an output schema because Voke owns the event response contract."
+  );
+});
+
+test("createFunctions rejects a Function whose Event Sources have different sources", () => {
+  const processOrder = sqs({
+    handler: (batch) => batch.ok(),
+    message: userInputSchema,
+    queue: "ordersQueue",
+  });
+
+  expect(() =>
+    createFunctions({
+      processOrder: {
+        ...processOrder,
+        events: [
+          ...processOrder.events,
+          { properties: {}, resource: "ordersTopic", source: "sns" },
+        ],
+      },
+    })
+  ).toThrow(
+    'Function "processOrder" mixes Event Sources "sqs" and "sns"; a Function\'s Event Sources must share one source.'
+  );
+});
+
+test("createFunctions rejects an Event Source Function without an Event Source", () => {
+  const processOrder = sqs({
+    handler: (batch) => batch.ok(),
+    message: userInputSchema,
+    queue: "ordersQueue",
+  });
+
+  expect(() =>
+    createFunctions({ processOrder: { ...processOrder, events: [] } })
   ).toThrow(VokeConfigError);
+});
+
+test("rejects an invalid event with a message that names its Event Source", async () => {
+  const functions = createFunctions({
+    processOrder: sqs({
+      handler: (batch) => batch.ok(),
+      message: userInputSchema,
+      queue: "ordersQueue",
+    }),
+  });
+
+  await expect(
+    functions.sendEvent("processOrder", { messages: "nope" } as never)
+  ).rejects.toThrow('Invalid "sqs" event for processOrder');
 });
 
 test("automatically reports invalid SQS message bodies as per-message failures", async () => {

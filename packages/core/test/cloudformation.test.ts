@@ -11,6 +11,7 @@ import {
   secret as runtimeSecret,
   sqs,
 } from "@voke/aws";
+import type { SqsMessageBatch } from "@voke/aws";
 import {
   dynamodbTable,
   eventBus,
@@ -25,7 +26,7 @@ import {
 import { defineConfig } from "../src/config";
 import { VokeModelError } from "../src/errors";
 import { createFunctions, fn, http } from "../src/invoke";
-import type { SqsMessageBatch, StandardSchemaV1 } from "../src/invoke";
+import type { StandardSchemaV1 } from "../src/invoke";
 import { createInternalModel } from "../src/model";
 import type { VokeModel } from "../src/model";
 import { Voke } from "../src/route-builder";
@@ -744,7 +745,8 @@ test("rejects invalid SQS event source mappings from direct model synthesis", ()
 
   model.functions.processOrders.eventSources = [
     {
-      queue: "missingQueue",
+      properties: {},
+      resource: "missingQueue",
       type: "sqs",
     },
   ];

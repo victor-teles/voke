@@ -22,6 +22,8 @@ export interface ChangeSetInput {
 export interface ChangeSetChange {
   action: string;
   logicalId: string;
+  /** CloudFormation's `Replacement` for a Modify: "True", "False" or "Conditional". */
+  replacement?: string;
   resourceType: string;
 }
 
@@ -178,6 +180,9 @@ export const createDeployAwsClients = async (
           changes: (result.Changes ?? []).map((change) => ({
             action: change.ResourceChange?.Action ?? "",
             logicalId: change.ResourceChange?.LogicalResourceId ?? "",
+            ...(change.ResourceChange?.Replacement === undefined
+              ? {}
+              : { replacement: change.ResourceChange.Replacement }),
             resourceType: change.ResourceChange?.ResourceType ?? "",
           })),
           executionStatus: result.ExecutionStatus,

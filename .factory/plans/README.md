@@ -9,6 +9,15 @@ when done.
 Plans 011–013 were added on 2026-11-14 at commit `95a9ec6`, after an audit of the documentation
 (the docs site in `apps/docs`, `README.md` and `docs/`). They stack on plan 007 (PR #59).
 
+Plans 014–021 were added on 2026-11-14 at commit `4015c46`. They plan the Lambda ecosystem
+features the owner asked for: more Event Sources, durable functions, a Plugin contract, and the
+first two integrations (OpenAPI with Scalar, idempotency). They have their own table below.
+
+**Base branch.** `origin/main` stops at PR #52. PRs #53–#62 were merged into each other's
+branches instead of `main`, so the newest code and this index exist only on
+`origin/feature/docs-site-platform` (`4015c46`). Plans 014–021 are written against that commit.
+Land the stack on `main` (or keep stacking on its tip) before starting them.
+
 ## Headline finding
 
 Voke cannot put working code on AWS today. Four independent defects each block it:
@@ -63,6 +72,23 @@ workflow behind the Provider before 007 adds the emulator.
 Documentation plans: 011 → 012 → 013. 011 is a code fix that the documentation depends on; 012
 builds the site machinery; 013 rewrites the content on top of both.
 
+### Lambda ecosystem features (plans 014–021)
+
+| Plan | Title                                                                                                                                | Priority | Effort | Depends on     | Status                                       |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------ | -------- | ------ | -------------- | -------------------------------------------- |
+| 014  | A Provider package can add an Event Source without changing core                                                                     | P1       | M      | —              | DONE (PR #63)                                |
+| 015  | A Function can be triggered by an SNS topic, an EventBridge rule or a schedule                                                       | P1       | L      | 014            | DONE                                         |
+| 016  | A Function can consume a Kinesis stream or a DynamoDB table stream in typed batches                                                  | P2       | L      | 014 (015)      | DONE                                         |
+| 017  | A Function can react to objects created or deleted in an S3 bucket                                                                   | P2       | M      | 014, 015 (016) | DONE (S3 key encoding unconfirmed, ADR 0013) |
+| 018  | A Function declared with `durable(...)` runs as an AWS Lambda durable function, locally and when deployed                            | P1       | L      | (014)          | DONE (real-AWS proof not run)                |
+| 019  | A Plugin declared in `voke.config.ts` can wrap every Function, extend the Gateway, contribute to the deployment and add CLI commands | P1       | L      | (014, 018)     | DONE                                         |
+| 020  | `@voke/openapi` generates an OpenAPI 3.1 document from route contracts and serves it with a Scalar API reference page                | P1       | L      | 019            | DONE                                         |
+| 021  | `@voke/idempotency` makes a retried handler run once, backed by a DynamoDB table the Plugin provisions                               | P2       | M      | 019 (014, 018) | DONE                                         |
+
+Three tracks: Event Sources (014 → 015 → 016 → 017), durable functions (018), and Plugins
+(019 → 020 → 021). The tracks have no hard dependency on each other, but they edit the same
+files, so run them one at a time. Recommended order: 014 → 015 → 018 → 019 → 020 → 016 → 017 → 021. That puts every P1 plan first.
+
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJECTED (with one-line rationale — finding fixed independently or approach abandoned)
 
 ## Dependency notes
@@ -89,6 +115,24 @@ Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJE
   build the site.
 - 013 requires 011 (the schema guide shows Zod and Valibot) and 012 (checked samples, link
   checking, registered MDX components). It must leave 012's legacy sample allowlist empty.
+- 014 comes first in the Event Source track. Core is SQS-only today (`EventSourceDefinition`,
+  `VokeModelEventSource`, the `"event"` case of `handlerFor`, synthesis). 014 opens that contract
+  and moves SQS onto an internal adapter in `@voke/aws`; 015–017 only add adapters.
+- 017 requires 015 because the S3 Event Source is built on the EventBridge rule code. A classic
+  bucket notification would create a CloudFormation cycle (role → bucket → Lambda → role),
+  because every Function role's policy references every resource.
+- 016 and 017 both edit the `@voke/aws` adapter table and resource builders; do not run them at
+  the same time.
+- 018 has no hard prerequisite. It edits `handlerFor` and the Function loop in synthesis like
+  014, and it adds an `invoke` option to `activateFunctionRegistry` that 019 extends, so it runs
+  after 014 and before 019.
+- 019 comes first in the Plugin track. Its `wrap` hook covers the durable path with no extra
+  code, because 018 routes the deployed durable handler through `functions.invoke`.
+- 020 requires 019 (Plugin Functions, `runtime.setup`, CLI commands). It also changes how the
+  Function Contract Artifact reads JSON Schema, which changes artifact fingerprints once.
+- 021 requires 019 (resource contributions, the wrap hook). It runs after 014 and 018 so its
+  batch form matches the final SQS types and it can defer to `executionName` for Durable
+  Functions.
 
 ## Owner decisions
 
@@ -119,6 +163,15 @@ Decided on 2026-11-14 after the documentation audit:
 | Hosting is not decided: the site URL is one variable, CI builds the site, nothing deploys                       | 012        |
 | Include checked code samples, type hovers (Twoslash), site polish and `llms.txt`                                | 012        |
 
+Decided on 2026-11-14 for the Lambda ecosystem features:
+
+| Decision                                                                                                                                                                                                                                                          | Applied in                           |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| Durable functions are the supported orchestration model; Step Functions gets no builder or DSL and stays a raw CloudFormation escape hatch                                                                                                                        | 018 (supersedes roadmap v2 phase 10) |
+| The Plugin contract covers runtime and deploy time: Function wraps, Gateway middleware, resources, environment, Provider records, Functions and CLI commands. This reverses the roadmap v2 non-goal "no broad plugin API" and widens ADR 0007's HTTP escape hatch | 019 (new ADR, roadmap revision)      |
+| First integrations: OpenAPI with Scalar, and idempotency. Typed publishers and observability are not planned yet                                                                                                                                                  | 020, 021                             |
+| Event Sources to add: SNS, EventBridge, Schedule, Kinesis, DynamoDB Streams, S3                                                                                                                                                                                   | 015, 016, 017                        |
+
 Defaults the plans adopted (reversible; each plan states it): Lambda adapters exported from the
 `@voke/aws` index; deployed names `${name}-${stage}-${key}`; deployed authorizer results trusted
 through a Provider runtime hook; deploy as a Provider capability with a neutral `VokeDeployError`;
@@ -140,6 +193,23 @@ Still open:
 | Where the docs site is hosted, and its public URL                                        | 012, 013    | `NEXT_PUBLIC_SITE_URL`; README links use repo paths  |
 | A logo or brand for the docs site                                                        | 012         | Placeholder "V" icon in the theme color              |
 | `zod` as a `devDependency` of `packages/core` for the interop test                       | 011         | Yes; a specification-shaped fake if refused          |
+
+Still open for plans 014–021 (each plan states its default and how to reverse it):
+
+| Decision                                                                                                              | Needed by     | Default in the plan                                                                            |
+| --------------------------------------------------------------------------------------------------------------------- | ------------- | ---------------------------------------------------------------------------------------------- |
+| Add `@aws/durable-execution-sdk-js` (bundled) and `@aws/durable-execution-sdk-js-testing` (local only) to `@voke/aws` | 018           | Yes                                                                                            |
+| `executionTimeout` on `durable(...)`                                                                                  | 018           | Required, no default                                                                           |
+| Authorize a real-AWS smoke deploy of a durable Function                                                               | 018, step 8   | Not run without explicit approval                                                              |
+| Schedule engine                                                                                                       | 015           | EventBridge Scheduler with one shared invoke role per stack, not `AWS::Events::Rule` schedules |
+| One source per Function for the new Event Sources (one topic, rule, schedule, stream or bucket)                       | 015, 016, 017 | Yes, singular only                                                                             |
+| Stream defaults: `startingPosition`, retry limit                                                                      | 016           | `"trimHorizon"`; no retry limit, so a bad record stalls its shard instead of being dropped     |
+| Plugin Functions limited to route-backed Functions in v1                                                              | 019           | Yes                                                                                            |
+| Plugin resources and IAM statements reach every Function role                                                         | 019, 021      | Yes, until least-privilege linking exists                                                      |
+| OpenAPI document and Scalar page when deployed                                                                        | 020           | Served under `voke dev` only unless `expose: true`; exposed routes are public                  |
+| Function Contract Artifact fingerprints change once (shared JSON Schema reader)                                       | 020           | Accepted; consumers run `voke remote generate` once                                            |
+| Idempotency key                                                                                                       | 021           | Required; no automatic key from the message id                                                 |
+| Add `@aws-sdk/client-dynamodb` for `@voke/idempotency`                                                                | 021           | Yes                                                                                            |
 
 ## Product stance (ADR 0007)
 
@@ -190,11 +260,29 @@ Ordered by how much they would add to "easy to use and deploy" once 001–006 la
 - **Local event delivery.** After plan 007, queues live in the emulator but nothing delivers
   their messages to local Functions. A `voke dev` poller that feeds `functions.sendEvent` would
   make SQS flows work locally end to end. The same idea extends to schedules and EventBridge.
+  Plans 015–017 add SNS, EventBridge, Schedule, stream and S3 sources, which are testable
+  locally only through `functions.sendEvent` until this exists.
 - **Full local deploy.** AWS Emulator 1.0.367 can run simple Lambda handlers, but its JavaScript
   runtime lacks `Request`/`Response` and several `node:` modules, so a Voke bundle does not load
   there. When that changes, point the plan 004 pipeline at the emulator endpoint. The Floci
   bootstrap still deploys the 501 placeholder (`packages/core/src/local-provider.ts:109-126`).
+- **Typed publishers.** Send to a queue, topic or event bus with the schema the consuming
+  Function declares. Deferred from the 014–021 round by owner choice.
+- **Observability Plugin.** Structured logger, metrics and tracing on plan 019's wrap hook
+  (roadmap v2 phase 8). Deferred from the 014–021 round by owner choice.
+- **Durable execution tooling.** `voke executions` (list, inspect, stop), callback helpers, and
+  pruning of retained Lambda versions. Plan 018 defers all three.
+- **DLQ and redrive** for queues and for the new asynchronous and stream sources.
 - **Isolated emulator per test run** (`aws-emulator -p 0`) in `voke/testing`.
+- **Lazy `aws()` capabilities (bundle size).** Since plan 019 the generated Lambda entry imports
+  `voke.config.ts`, and `aws()` eagerly imports its deploy, synthesis, local and build code, so
+  every Lambda bundle carries it: `examples/sqs-events` went from 83 KB to 255 KB, and Gateway
+  projects already paid most of this. Load those capabilities with dynamic `import()` so a
+  deployed bundle holds only the runtime half.
+- **Confirm S3 key encoding** with a captured S3 → EventBridge event before the first release
+  (plan 017, ADR 0013). If AWS URL-encodes keys, switch `s3()` to decoding.
+- **Real-AWS proof for Durable Functions** (plan 018, step 8): the managed runtime's SDK commands,
+  re-execution after suspension, the synchronous invoke response, and Node 22.
 - **Lambda Function URLs and response streaming** as a cheaper, simpler alternative to API
   Gateway for single-Function APIs.
 - **Personal and preview stages, CI workflow generator** (roadmap v2 phase 7). The reserved
@@ -224,7 +312,21 @@ Ordered by how much they would add to "easy to use and deploy" once 001–006 la
 - Keep the named API Gateway stage and strip the stage prefix from `rawPath` in the adapter:
   rejected in favor of the `$default` stage, which removes the problem and gives cleaner URLs.
 
+- A Step Functions state machine builder or a typed workflow DSL: rejected by the owner on
+  2026-11-14 in favor of durable functions (plan 018). A state machine can still be declared as
+  a raw CloudFormation resource.
+- Classic S3 bucket notifications for the S3 Event Source: rejected, they create a
+  CloudFormation dependency cycle with the shared resource policy. Plan 017 uses EventBridge.
+- Plugins declared on `voke(functions, { plugins })`: rejected. Registry-only projects have no
+  Gateway call, and the CLI needs Plugins at synth time. Plan 019 declares them in
+  `voke.config.ts`, like the Provider.
+
 ## How the evidence was gathered
+
+Plans 014–021 (2026-11-14): source was read at commit `4015c46`. No test suite, build or
+install ran during planning. AWS Lambda durable function facts in plan 018 were read from the
+AWS documentation and the SDK repository on 2026-11-14; items a plan could not verify are
+marked "verify before coding" in that plan.
 
 Revision on 2026-11-14: plans 003–010 were checked against commit `3435023` (PR #51 merged with
 `main`, `node_modules` installed, all repository gates green). One read-only review per plan

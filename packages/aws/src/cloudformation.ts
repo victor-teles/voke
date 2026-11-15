@@ -1,6 +1,7 @@
 export {
   dynamodbTable,
   eventBus,
+  kinesisStream,
   s3Bucket,
   secret,
   snsTopic,
@@ -13,6 +14,7 @@ export type {
   CloudFormationResource,
   CloudFormationTemplate,
   CloudFormationValue,
+  KinesisStreamOptions,
   StackResourceDefinition,
   SynthesizeCloudFormationOptions,
 } from "./cloudformation-synthesis";

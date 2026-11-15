@@ -1,0 +1,168 @@
+---
+title: SNS events
+description: Run a Function for each message published to an SNS topic, filter the messages, and test the Function locally.
+---
+
+After reading this page you can declare an SNS topic, attach a Function to it as an **Event Source**,
+filter the messages it receives, and test the Function without AWS.
+
+## Declare the topic and the Function
+
+Declare the topic in `resources` in `voke.config.ts` with `snsTopic()` from
+`@voke/aws/cloudformation`. Then create the Function with `sns()` from `@voke/aws`, and pass the
+topic's resource key as `topic`:
+
+```ts twoslash
+// @filename: voke.config.ts
+import { aws } from "@voke/aws";
+import { snsTopic } from "@voke/aws/cloudformation";
+import { defineConfig } from "voke";
+
+export default defineConfig({
+  name: "orders",
+  provider: aws(),
+  resources: {
+    ordersTopic: snsTopic(),
+  },
+});
+
+// @filename: src/index.ts
+import { sns } from "@voke/aws";
+import { schema } from "@voke/schema";
+import { createFunctions } from "voke";
+
+const orderCreated = schema.object({
+  orderId: schema.string(),
+  total: schema.number(),
+});
+
+export const functions = createFunctions({
+  onOrderCreated: sns({
+    topic: "ordersTopic",
+    message: orderCreated,
+    handler: async (message) => {
+      console.info(`order ${message.body.orderId}: ${message.body.total}`);
+    },
+  }),
+});
+```
+
+- `topic` is the key of a resource in `resources`. Model validation fails if no resource has that key,
+  or if the resource is not an `snsTopic()`.
+- `message` is a Function Contract for one JSON message body. Any
+  [Standard Schema](/docs/guides/schemas) validator works.
+- A Function has one topic. To consume two topics, create two Functions.
+
+## Handle a message
+
+SNS delivers one message per invocation. Voke parses the message body as JSON and validates it with
+`message` before your handler runs. The handler receives:
+
+| Field        | Value                                                         |
+| ------------ | ------------------------------------------------------------- |
+| `body`       | The parsed, validated body, typed from `message`.             |
+| `id`         | The SNS message id.                                           |
+| `subject`    | The message subject, when the publisher set one.              |
+| `attributes` | The message attributes, as `{ type, value }` objects by name. |
+| `topicArn`   | The ARN of the topic.                                         |
+| `timestamp`  | When SNS received the message, ISO 8601.                      |
+| `raw`        | The original SNS record.                                      |
+
+The handler returns nothing.
+
+A message whose body is not valid JSON, or does not match `message`, fails the invocation with an
+`InvokeError` with code `INVALID_PAYLOAD`. Your handler never sees it. SNS invokes the Function
+asynchronously, so Lambda retries a failed invocation and then drops the message. If the handler
+throws, the same retry applies.
+
+## Filter messages
+
+Pass `filterPolicy` to receive only the messages that match an
+[SNS filter policy](https://docs.aws.amazon.com/sns/latest/dg/sns-message-filtering.html). Voke copies
+it to the subscription untouched. By default SNS matches the policy against the message attributes;
+set `filterPolicyScope: "MessageBody"` to match it against the JSON body:
+
+```ts twoslash
+import { sns } from "@voke/aws";
+import { schema } from "@voke/schema";
+
+// ---cut---
+export const onPaidOrder = sns({
+  topic: "ordersTopic",
+  message: schema.object({ orderId: schema.string(), status: schema.string() }),
+  filterPolicy: { status: ["PAID"] },
+  filterPolicyScope: "MessageBody",
+  handler: (message) => {
+    console.info(message.body.orderId);
+  },
+});
+```
+
+`filterPolicyScope` is `"MessageAttributes"` or `"MessageBody"`. Any other value makes `sns()` throw a
+`VokeConfigError`.
+
+## Test an SNS Function
+
+`voke dev` does not receive messages from topics. Test an SNS Function with
+`functions.sendEvent(name, { message })`. It runs the same parsing, validation and handler code as
+the deployed Lambda:
+
+```ts twoslash
+import { sns } from "@voke/aws";
+import { schema } from "@voke/schema";
+import { createFunctions } from "voke";
+
+const functions = createFunctions({
+  onOrderCreated: sns({
+    topic: "ordersTopic",
+    message: schema.object({ orderId: schema.string() }),
+    handler: (message) => {
+      console.info(message.body.orderId);
+    },
+  }),
+});
+
+// ---cut---
+await functions.sendEvent("onOrderCreated", {
+  message: { orderId: "ord_1" },
+  subject: "OrderCreated",
+  attributes: { type: { type: "String", value: "created" } },
+});
+```
+
+Only `message` is required. An object message is serialized to JSON; a string is used as it is, so you
+can test bodies that are not valid JSON. Voke fills in the SNS metadata: `id` defaults to `msg_1`,
+`topicArn` to a local ARN with the topic key, and `timestamp` to now. `id`, `subject` and `attributes`
+are optional. A filter policy is not applied locally.
+
+See [Testing](/docs/guides/testing) for test setup.
+
+## What gets deployed
+
+`voke build` generates the Lambda handler, and `voke synth` adds, for each SNS Function:
+
+- an `AWS::SNS::Subscription` with protocol `lambda` from the topic to the Function, with the filter
+  policy when you set one;
+- an `AWS::Lambda::Permission` that lets `sns.amazonaws.com` invoke the Function, only from that
+  topic.
+
+`voke local bootstrap` creates the topic but not the subscription: the local stack holds resources
+only. See [Local AWS](/docs/guides/local-aws).
+
+## Limits
+
+<Callout type="info">
+
+SNS support is intentionally small in v1:
+
+- One topic per Function, and only standard topics. Lambda cannot subscribe to FIFO topics.
+- There is no dead-letter queue, redrive policy or Lambda `OnFailure` destination.
+- An `sns()` Function cannot have HTTP routes or an output schema.
+
+</Callout>
+
+## Next steps
+
+- [EventBridge events](/docs/guides/eventbridge-events): react to events on an event bus.
+- [Resources and bindings](/docs/guides/resources): publish to the topic from another Function.
+- [Testing](/docs/guides/testing): test Functions and the Gateway.

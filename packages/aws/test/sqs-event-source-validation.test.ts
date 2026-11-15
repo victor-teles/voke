@@ -55,6 +55,6 @@ test("core model validation still rejects missing SQS event source resources", (
       },
     })
   ).toThrow(
-    'SQS event source references resource "missingQueue", but no matching resource is defined.'
+    '"sqs" Event Source references resource "missingQueue", but no matching resource is defined.'
   );
 });

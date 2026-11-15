@@ -10,8 +10,16 @@ import type {
 import type { VokeEnv } from "./context";
 import { VokeConfigError } from "./errors";
 import { json, jsonError } from "./http";
-import type { VokeModelProviderExtensionRecord } from "./model";
-import type { VokeProvider } from "./provider";
+import type {
+  VokeModelProviderExtensionRecord,
+  VokeModelRecord,
+} from "./model";
+import type { FunctionExecution, FunctionWrap } from "./plugin";
+import type {
+  ProviderInvokeCapability,
+  ProviderInvokeTarget,
+  VokeProvider,
+} from "./provider";
 import { Voke } from "./route-builder";
 import { readEnv, sleep } from "./runtime-env";
 import { formatValidationIssue, readStandardResult } from "./standard-schema";
@@ -49,6 +57,7 @@ export type InvokeRuntime = "local" | "aws";
 
 export type InvokeTrace = Record<string, string | number | boolean | undefined>;
 export type InvokeErrorCode =
+  | "INVALID_OPTIONS"
   | "INVALID_PAYLOAD"
   | "INVALID_RESULT"
   | "LOCAL_FUNCTION_FAILED"
@@ -95,22 +104,23 @@ export interface InvokeContext<
 
 export interface AsyncInvokeResult {
   accepted: true;
+  /** The execution the Provider started, when its transport reports one. */
+  executionId?: string;
   requestId?: string;
 }
 
-export interface SqsEventSourceOptions {
-  batchSize?: number;
-  enabled?: boolean;
-  maxBatchingWindowSeconds?: number;
+/**
+ * One trigger of an Event Source Function. Provider packages author it through their own
+ * authoring helpers; core knows no source by name.
+ */
+export interface EventSourceDefinition {
+  /** The Event Source type, named by the Provider package that authored it. */
+  readonly source: string;
+  /** The Voke resource key the source reads from, when it has one. */
+  readonly resource?: string;
+  /** Source settings. Voke copies them to the model untouched; the Provider validates them. */
+  readonly properties: VokeModelRecord;
 }
-
-export interface SqsEventSourceDefinition {
-  readonly options: SqsEventSourceOptions;
-  readonly queue: string;
-  readonly source: "sqs";
-}
-
-export type EventSourceDefinition = SqsEventSourceDefinition;
 
 export interface FunctionSynthesisConfig {
   entrypoint?: string;
@@ -128,117 +138,6 @@ export interface FunctionSynthesisConfig {
 }
 
 type AnyStandardSchema = StandardSchemaV1<unknown, unknown>;
-
-export interface SqsMessageAttribute {
-  binaryListValues?: string[];
-  binaryValue?: string;
-  dataType: string;
-  stringListValues?: string[];
-  stringValue?: string;
-}
-
-export interface SqsRecord {
-  attributes: Record<string, string>;
-  awsRegion: string;
-  body: string;
-  eventSource: "aws:sqs";
-  eventSourceARN: string;
-  md5OfBody: string;
-  messageAttributes: Record<string, SqsMessageAttribute>;
-  messageId: string;
-  receiptHandle: string;
-}
-
-export interface SqsAwsEvent {
-  Records: SqsRecord[];
-}
-
-export interface SqsBatchItemFailure {
-  itemIdentifier: string;
-}
-
-export interface SqsBatchResult {
-  batchItemFailures: SqsBatchItemFailure[];
-}
-
-export interface SqsValidMessage<TBody> {
-  attributes: Record<string, string>;
-  body: TBody;
-  id: string;
-  messageAttributes: Record<string, SqsMessageAttribute>;
-  raw: SqsRecord;
-  valid: true;
-}
-
-export interface SqsInvalidMessage {
-  attributes: Record<string, string>;
-  error: InvokeError;
-  id: string;
-  messageAttributes: Record<string, SqsMessageAttribute>;
-  raw: SqsRecord;
-  rawBody: string;
-  valid: false;
-}
-
-export interface SqsBatchResultBuilder extends SqsBatchResult {
-  fail(message: Pick<SqsInvalidMessage | SqsValidMessage<unknown>, "id">): void;
-}
-
-export interface SqsMessageBatch<TMessage> {
-  batchResult(): SqsBatchResultBuilder;
-  messages: SqsValidMessage<TMessage>[];
-  ok(): SqsBatchResult;
-  source: "sqs";
-}
-
-export interface SqsMessageBatchIncludeInvalid<TMessage> {
-  batchResult(): SqsBatchResultBuilder;
-  messages: (SqsInvalidMessage | SqsValidMessage<TMessage>)[];
-  ok(): SqsBatchResult;
-  source: "sqs";
-}
-
-export type SqsInvalidMessageBodyMode = "fail" | "include";
-
-type SqsEventInvocationBody<TBody, TInvalidMessageBody> =
-  TInvalidMessageBody extends "include" ? TBody | unknown : TBody;
-
-export interface SqsMessageBatchOptions<
-  TInvalidMessageBody extends SqsInvalidMessageBodyMode =
-    SqsInvalidMessageBodyMode,
-> {
-  invalidMessageBody?: TInvalidMessageBody;
-}
-
-export interface SqsEventInvocationMessage<TBody> {
-  attributes?: Record<string, string>;
-  body: TBody;
-  id?: string;
-  messageAttributes?: Record<string, SqsMessageAttribute>;
-  raw?: SqsRecord;
-}
-
-export interface SqsEventInvocationInput<TBody = unknown> {
-  messages: SqsEventInvocationMessage<TBody>[];
-  source?: "sqs";
-}
-
-export type EventInvocationInput<TBody = unknown> =
-  SqsEventInvocationInput<TBody>;
-
-export interface SqsMessageBatchSchema<
-  TBodySchema extends AnyStandardSchema = AnyStandardSchema,
-  TInvalidMessageBody extends SqsInvalidMessageBodyMode = "fail",
-> extends StandardSchemaV1<
-  SqsEventInvocationInput<StandardSchemaInput<TBodySchema>>,
-  TInvalidMessageBody extends "include"
-    ? SqsMessageBatchIncludeInvalid<StandardSchemaOutput<TBodySchema>>
-    : SqsMessageBatch<StandardSchemaOutput<TBodySchema>>
-> {
-  readonly body: TBodySchema;
-  readonly invalidMessageBody: TInvalidMessageBody;
-  readonly source: "sqs";
-}
 
 type FunctionKind = "authorizer" | "event" | "invokable" | "route";
 export type RouteAuthorizerReference = "none" | string;
@@ -303,6 +202,17 @@ type RouteSchemaInput<TSchema, TFallback> = TSchema extends AnyStandardSchema
     : StandardSchemaInput<TSchema>
   : TFallback;
 
+/** Documentation for a route. The Gateway ignores it at run time. */
+export interface RouteMeta {
+  readonly summary?: string;
+  readonly description?: string;
+  readonly tags?: readonly string[];
+  readonly operationId?: string;
+  readonly deprecated?: boolean;
+  /** Leave the route out of generated documentation. */
+  readonly hidden?: boolean;
+}
+
 export interface RouteDefinitionInput<
   _TMethod extends RouteMethod,
   _TPath extends string,
@@ -325,6 +235,7 @@ export interface RouteDefinitionInput<
     TVariables
   >;
   readonly headers?: THeadersSchema;
+  readonly meta?: RouteMeta;
   readonly middleware?: readonly MiddlewareHandler<VokeEnv>[];
   readonly output?: TOutputSchema;
   readonly params?: TParamsSchema;
@@ -485,10 +396,11 @@ export type FunctionHandler<
 export type EventFunctionHandler<
   TPayload,
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+  TResult = unknown,
 > = (
   payload: TPayload,
   context: InvokeContext<TVariables>
-) => SqsBatchResult | Promise<SqsBatchResult>;
+) => TResult | Promise<TResult>;
 
 export interface BaseFunctionDefinition<
   TKey extends string = string,
@@ -537,11 +449,13 @@ export type EventFunctionDefinition<
   TKey extends string = string,
   TInputSchema extends AnyStandardSchema = AnyStandardSchema,
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+  TResult = unknown,
 > = BaseFunctionDefinition<TKey, "event", TVariables> & {
   readonly events: readonly EventSourceDefinition[];
   readonly handler: EventFunctionHandler<
     StandardSchemaOutput<TInputSchema>,
-    TVariables
+    TVariables,
+    TResult
   >;
   readonly input: TInputSchema;
 };
@@ -629,44 +543,6 @@ export interface HttpFunctionDefinitionInput<
   readonly variables?: TVariables;
 }
 
-type EventFunctionDefinitionInput<
-  TInputSchema extends AnyStandardSchema,
-  TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
-> = Omit<FunctionDefinitionInputBase, "routes"> & {
-  readonly events: readonly EventSourceDefinition[];
-  readonly handler: EventFunctionHandler<
-    StandardSchemaOutput<TInputSchema>,
-    TVariables
-  >;
-  readonly input: TInputSchema;
-  readonly variables?: TVariables;
-};
-
-type SqsQueueInput =
-  | string
-  | ({ readonly queue: string } & SqsEventSourceOptions);
-
-type SqsQueueListInput = SqsQueueInput | readonly SqsQueueInput[];
-
-export interface SqsFunctionDefinitionInput<
-  TMessageSchema extends AnyStandardSchema,
-  TInvalidMessageBody extends SqsInvalidMessageBodyMode = "fail",
-  TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
->
-  extends Omit<FunctionDefinitionInputBase, "routes">, SqsEventSourceOptions {
-  readonly handler: EventFunctionHandler<
-    StandardSchemaOutput<
-      SqsMessageBatchSchema<TMessageSchema, TInvalidMessageBody>
-    >,
-    TVariables
-  >;
-  readonly invalidMessageBody?: TInvalidMessageBody;
-  readonly message: TMessageSchema;
-  readonly queue?: string;
-  readonly queues?: SqsQueueListInput;
-  readonly variables?: TVariables;
-}
-
 export type FunctionRegistryInput = Record<string, AnyFunctionDefinition>;
 
 type FunctionDefinitionWithKey<
@@ -707,14 +583,25 @@ type FunctionDefinitionWithKey<
     : RequestAuthorizerFunctionDefinition<TKey>
   : TDefinition extends {
         readonly events: readonly EventSourceDefinition[];
+        readonly handler: (...args: never[]) => infer THandlerResult;
         readonly input: infer TInputSchema;
         readonly kind: "event";
         readonly variables?: infer TVariables;
       }
     ? TInputSchema extends AnyStandardSchema
       ? TVariables extends RuntimeVariableCatalog
-        ? EventFunctionDefinition<TKey, TInputSchema, TVariables>
-        : EventFunctionDefinition<TKey, TInputSchema, Record<never, never>>
+        ? EventFunctionDefinition<
+            TKey,
+            TInputSchema,
+            TVariables,
+            Awaited<THandlerResult>
+          >
+        : EventFunctionDefinition<
+            TKey,
+            TInputSchema,
+            Record<never, never>,
+            Awaited<THandlerResult>
+          >
       : never
     : TDefinition extends {
           readonly input: infer TInputSchema;
@@ -797,15 +684,25 @@ export type FunctionRegistry<
 };
 
 export interface InvokeRequest<TPayload = unknown> {
+  /** A caller-chosen name that makes starting the execution idempotent. */
+  executionName?: string;
   functionName: string;
   invocationType: "RequestResponse" | "Event";
-  payload: {
-    payload: TPayload;
-    trace: InvokeTrace;
-  };
+  /**
+   * The `{ payload, trace }` envelope for `runtime: "aws"`; the bare parsed payload for a
+   * Function the Provider routes through its invoke target.
+   */
+  payload:
+    | {
+        payload: TPayload;
+        trace: InvokeTrace;
+      }
+    | TPayload;
 }
 
 export interface InvokeTransportResponse<TResult = unknown> {
+  /** The execution the invocation started, when the platform reports one. */
+  executionId?: string;
   functionError?: string;
   statusCode?: number;
   payload?: TResult | { data: TResult };
@@ -819,6 +716,12 @@ export interface InvokeTransport {
 }
 
 export interface InvokeOptions {
+  /**
+   * Names the execution so starting it is idempotent. Only for Functions the Provider accepts it
+   * for (its invoke capability's `acceptsExecutionName`); an in-process run ignores it, and any
+   * other Function rejects with `INVALID_OPTIONS`.
+   */
+  executionName?: string;
   mode?: InvokeMode;
   runtime?: InvokeRuntime;
   trace?: InvokeTrace;
@@ -872,53 +775,35 @@ type InvokeResult<TResult, TOptions> = TOptions extends { mode: "async" }
 
 type EventFunctionKey<TRegistry> = {
   [TKey in keyof TRegistry]: TRegistry[TKey] extends {
-    readonly events: readonly EventSourceDefinition[];
-    readonly handler: unknown;
-    readonly input: SqsLikeMessageBatchSchema;
+    readonly input: AnyStandardSchema;
+    readonly kind: "event";
   }
     ? TKey
     : never;
 }[keyof TRegistry];
 
-type SqsLikeMessageBatchSchema<
-  TBodySchema extends AnyStandardSchema = AnyStandardSchema,
-  TInvalidMessageBody extends SqsInvalidMessageBodyMode =
-    SqsInvalidMessageBodyMode,
-> = AnyStandardSchema & {
-  readonly body: TBodySchema;
-  readonly invalidMessageBody: TInvalidMessageBody;
-  readonly source: "sqs";
-};
-
 type EventFunctionInput<TFunction> = TFunction extends {
   readonly input: infer TInputSchema;
 }
-  ? TInputSchema extends SqsLikeMessageBatchSchema<
-      infer TBodySchema,
-      infer TInvalidMessageBody
-    >
-    ? SqsEventInvocationInput<
-        SqsEventInvocationBody<
-          StandardSchemaInput<TBodySchema>,
-          TInvalidMessageBody
-        >
-      >
-    : never
+  ? StandardSchemaInput<TInputSchema>
   : never;
 
+type EventFunctionResult<TFunction> = TFunction extends {
+  readonly handler: (...args: never[]) => infer THandlerResult;
+}
+  ? Awaited<THandlerResult>
+  : unknown;
+
+/**
+ * Event Invocation: delivers an event to an Event Source Function. The event shape is the
+ * Function's input schema input; the result is whatever its handler returns.
+ */
 export type FunctionRegistrySendEvent<TRegistry> = <
   TKey extends EventFunctionKey<TRegistry>,
 >(
   functionName: TKey,
   event: EventFunctionInput<TRegistry[TKey]>
-) => Promise<SqsBatchResult>;
-
-export interface SqsEventHandlerOptions<
-  TRegistry extends FunctionRegistryInput = FunctionRegistryInput,
-> {
-  function: Parameters<FunctionRegistry<TRegistry>["sendEvent"]>[0];
-  functions: FunctionRegistry<TRegistry>;
-}
+) => Promise<EventFunctionResult<TRegistry[TKey]>>;
 
 export interface FunctionRegistryInvoke<TRegistry> {
   <
@@ -942,10 +827,19 @@ export interface FunctionRegistryInvoke<TRegistry> {
 const traceStack: InvokeTrace[] = [];
 interface FunctionRegistryActivation {
   activationKey: string;
+  invoke?: ProviderInvokeCapability;
   variableCache: RuntimeVariableCache;
   unregisteredVariableProviders: "defer" | "error";
   variableOverrides?: RuntimeVariableOverrides;
   variableProviders: readonly RuntimeVariableProvider[];
+  /** Plugin Function Wraps, outermost first. Absent when no Plugin wraps. */
+  wraps?: readonly PluginFunctionWrap[];
+}
+
+/** A Function Wrap with the name of the Plugin that declared it. */
+export interface PluginFunctionWrap {
+  readonly plugin: string;
+  readonly wrap: FunctionWrap;
 }
 
 const activatedFunctionRegistries = new WeakMap<
@@ -991,8 +885,12 @@ export const activateFunctionRegistry = (
   registry: object,
   activationKey: string,
   options: {
+    /** The Provider's invoke capability; its `target` can route Functions through its transport. */
+    invoke?: ProviderInvokeCapability;
     variableOverrides?: RuntimeVariableOverrides;
     variableProviders?: readonly RuntimeVariableProvider[];
+    /** Plugin Function Wraps around every handler call, outermost first. */
+    wraps?: readonly PluginFunctionWrap[];
   } = {}
 ): void => {
   const previousActivation = activatedFunctionRegistries.get(registry);
@@ -1009,6 +907,7 @@ export const activateFunctionRegistry = (
   const variableProviders = options.variableProviders ?? [];
   const activation: FunctionRegistryActivation = {
     activationKey,
+    invoke: options.invoke,
     // Without any provider (no configured Provider, no explicit providers), Runtime Variables
     // can still resolve from overrides and the environment, so provider checks wait for load.
     unregisteredVariableProviders:
@@ -1017,6 +916,9 @@ export const activateFunctionRegistry = (
       previousActivation?.variableCache ?? createRuntimeVariableCache(),
     variableOverrides: options.variableOverrides,
     variableProviders,
+    ...(options.wraps === undefined || options.wraps.length === 0
+      ? {}
+      : { wraps: options.wraps }),
   };
 
   activatedFunctionRegistries.set(registry, activation);
@@ -1044,6 +946,44 @@ const resolveRuntime = (options: InvokeOptions): InvokeRuntime => {
 
 const deployedName = (definition: BaseFunctionDefinition): string =>
   definition.name ?? definition.key;
+
+/** The Plugin Function Wraps of an activated definition; undefined when there are none. */
+const functionWraps = (
+  definition: object
+): readonly PluginFunctionWrap[] | undefined =>
+  activatedFunctionDefinitions.get(definition as BaseFunctionDefinition)?.wraps;
+
+// Composes the wraps outermost first around `run`. Callers check `functionWraps` first, so a
+// Function without wraps calls its handler directly, with no extra closure or promise.
+const runWrapped = async (
+  wraps: readonly PluginFunctionWrap[],
+  execution: FunctionExecution,
+  run: () => unknown
+): Promise<unknown> => {
+  const dispatch = async (index: number): Promise<unknown> => {
+    const entry = wraps[index];
+
+    if (entry === undefined) {
+      return await run();
+    }
+
+    let called = false;
+
+    return await entry.wrap(execution, async () => {
+      if (called) {
+        throw new Error(
+          `Plugin "${entry.plugin}" called next() more than once for Function "${execution.functionKey}"`
+        );
+      }
+
+      called = true;
+
+      return await dispatch(index + 1);
+    });
+  };
+
+  return await dispatch(0);
+};
 
 const createInvokeContext = <TVariables extends RuntimeVariableCatalog>(
   definition: BaseFunctionDefinition<string, FunctionKind, TVariables>,
@@ -1309,10 +1249,29 @@ const runRoute = async (
     unknown,
     RuntimeVariableCatalog
   >;
-  const result = await handler(
-    request as RouteRequest<never, never, never, never>,
-    context
-  );
+  const wraps =
+    definition === undefined ? undefined : functionWraps(definition);
+  const result =
+    wraps === undefined || definition === undefined
+      ? await handler(
+          request as RouteRequest<never, never, never, never>,
+          context
+        )
+      : await runWrapped(
+          wraps,
+          {
+            context,
+            functionKey: definition.key,
+            input: request,
+            kind: "route",
+            route: `${route.method} ${route.path}`,
+          },
+          () =>
+            handler(
+              request as RouteRequest<never, never, never, never>,
+              context
+            )
+        );
 
   return await parseRouteOutput(route, result);
 };
@@ -1375,9 +1334,22 @@ export const runRequestAuthorizer = async (
     {}
   );
   await loadRuntimeVariablesBeforeHandler(runtimeContext.variables);
-  const result = await handler(request, runtimeContext);
+  const wraps = functionWraps(definition);
+  const result =
+    wraps === undefined
+      ? await handler(request, runtimeContext)
+      : ((await runWrapped(
+          wraps,
+          {
+            context: runtimeContext,
+            functionKey: definition.key,
+            input: request,
+            kind: "authorizer",
+          },
+          () => handler(request, runtimeContext)
+        )) as Awaited<ReturnType<RequestAuthorizerHandler>> | undefined);
 
-  if (typeof result.authorized !== "boolean") {
+  if (typeof result?.authorized !== "boolean") {
     throw new InvokeError("Invalid authorizer result", {
       code: "INVALID_RESULT",
     });
@@ -1623,8 +1595,20 @@ const runLocalFunction = async <
   const parsedPayload = await parsePayload(definition, payload);
   const context = createInvokeContext(definition, options);
   await loadRuntimeVariablesBeforeHandler(context.variables);
+  const wraps = functionWraps(definition);
   const result = await withTimeout(
-    definition.handler(parsedPayload, context),
+    wraps === undefined
+      ? definition.handler(parsedPayload, context)
+      : (runWrapped(
+          wraps,
+          {
+            context,
+            functionKey: definition.key,
+            input: parsedPayload,
+            kind: "invokable",
+          },
+          () => definition.handler(parsedPayload, context)
+        ) as Promise<StandardSchemaInput<TOutputSchema>>),
     options.timeoutMs,
     `invoke("${functionName}") timed out after ${options.timeoutMs}ms`,
     functionName
@@ -1684,22 +1668,32 @@ const unwrapPayload = <TResult>(
   return payload as TResult;
 };
 
-const invokeAws = async (
+/**
+ * How a transport invocation is addressed. `runtime: "aws"` sends the `{ payload, trace }`
+ * envelope to the deployed name and unwraps a `{ data }` result; a Provider-routed Function
+ * gets the bare payload at the Provider's target and its result is used as returned.
+ */
+interface TransportRoute {
+  envelope: boolean;
+  functionName: string;
+  missingTransportMessage: string;
+  transport: InvokeTransport | undefined;
+}
+
+const invokeThroughTransport = async (
   definition: InvokableFunctionDefinition,
   payload: unknown,
-  options: InvokeOptions
+  options: InvokeOptions,
+  route: TransportRoute
 ): Promise<unknown> => {
-  const { transport } = options;
+  const { transport } = route;
   const functionName = deployedName(definition);
 
   if (transport === undefined) {
-    throw new InvokeError(
-      `invoke("${functionName}") requires an InvokeTransport for runtime "aws"`,
-      {
-        code: "MISSING_TRANSPORT",
-        functionName,
-      }
-    );
+    throw new InvokeError(route.missingTransportMessage, {
+      code: "MISSING_TRANSPORT",
+      functionName,
+    });
   }
 
   const parsedPayload = await parsePayload(definition, payload);
@@ -1709,13 +1703,18 @@ const invokeAws = async (
         Promise.resolve()
           .then(() =>
             transport.invoke({
-              functionName,
+              ...(options.executionName === undefined
+                ? {}
+                : { executionName: options.executionName }),
+              functionName: route.functionName,
               invocationType:
                 options.mode === "async" ? "Event" : "RequestResponse",
-              payload: {
-                payload: parsedPayload,
-                trace: resolveTrace(options),
-              },
+              payload: route.envelope
+                ? {
+                    payload: parsedPayload,
+                    trace: resolveTrace(options),
+                  }
+                : parsedPayload,
             })
           )
           .catch((error: unknown) => {
@@ -1736,6 +1735,9 @@ const invokeAws = async (
   if (options.mode === "async") {
     return {
       accepted: true,
+      ...(response.executionId === undefined
+        ? {}
+        : { executionId: response.executionId }),
       ...(response.requestId === undefined
         ? {}
         : { requestId: response.requestId }),
@@ -1759,7 +1761,44 @@ const invokeAws = async (
     );
   }
 
-  return await parseResult(definition, unwrapPayload(response.payload));
+  return await parseResult(
+    definition,
+    route.envelope ? unwrapPayload(response.payload) : response.payload
+  );
+};
+
+const invokeAws = async (
+  definition: InvokableFunctionDefinition,
+  payload: unknown,
+  options: InvokeOptions
+): Promise<unknown> => {
+  const functionName = deployedName(definition);
+
+  return await invokeThroughTransport(definition, payload, options, {
+    envelope: true,
+    functionName,
+    missingTransportMessage: `invoke("${functionName}") requires an InvokeTransport for runtime "aws"`,
+    transport: options.transport,
+  });
+};
+
+/** The Provider's target for this Function, unless the caller chose a runtime explicitly. */
+const providerInvokeTarget = (
+  definition: InvokableFunctionDefinition,
+  options: InvokeOptions
+):
+  | { capability: ProviderInvokeCapability; target: ProviderInvokeTarget }
+  | undefined => {
+  if (options.runtime !== undefined) {
+    return undefined;
+  }
+
+  const capability = activatedFunctionDefinitions.get(definition)?.invoke;
+  const target = capability?.target?.({ definition, key: definition.key });
+
+  return capability === undefined || target === undefined
+    ? undefined
+    : { capability, target };
 };
 
 const invokeFunction = async (
@@ -1777,6 +1816,33 @@ const invokeFunction = async (
     ...options,
     trace: resolveTrace(options),
   };
+  const routed = providerInvokeTarget(definition, invokeOptions);
+
+  if (routed !== undefined) {
+    const functionName = deployedName(definition);
+
+    return await invokeThroughTransport(definition, payload, invokeOptions, {
+      envelope: false,
+      functionName: routed.target.functionName,
+      missingTransportMessage: `invoke("${functionName}") is routed by the Provider, which supplies no invoke transport`,
+      transport: routed.capability.transport?.(),
+    });
+  }
+
+  const acceptsExecutionName =
+    activatedFunctionDefinitions
+      .get(definition)
+      ?.invoke?.acceptsExecutionName?.({ definition, key: definition.key }) ===
+    true;
+
+  if (options.executionName !== undefined && !acceptsExecutionName) {
+    const functionName = deployedName(definition);
+
+    throw new InvokeError(
+      `invoke("${functionName}") cannot use executionName: the Provider accepts it only for Functions whose executions it names`,
+      { code: "INVALID_OPTIONS", functionName }
+    );
+  }
 
   if (resolveRuntime(invokeOptions) === "aws") {
     return await invokeAws(definition, payload, invokeOptions);
@@ -1812,11 +1878,15 @@ export const invokeRegistryFunction = async (
   return await invokeFunction(definition, payload, options);
 };
 
+// createFunctions guarantees at least one Event Source, all of one source type.
+const eventSourceType = (definition: EventFunctionDefinition): string =>
+  definition.events[0]?.source ?? "event";
+
 const sendEventToFunction = async (
   definition: EventFunctionDefinition | undefined,
-  event: EventInvocationInput,
+  event: unknown,
   options: InvokeOptions = {}
-): Promise<SqsBatchResult> => {
+): Promise<unknown> => {
   if (definition === undefined) {
     throw new InvokeError("Cannot send an event to an undefined function", {
       code: "MISSING_FUNCTION",
@@ -1828,17 +1898,25 @@ const sendEventToFunction = async (
     definition.input,
     event as never,
     (message, cause) =>
-      new InvokeError(`Invalid SQS event for ${functionName}: ${message}`, {
-        cause,
-        code: "INVALID_PAYLOAD",
-        functionName,
-      })
+      new InvokeError(
+        `Invalid "${eventSourceType(definition)}" event for ${functionName}: ${message}`,
+        { cause, code: "INVALID_PAYLOAD", functionName }
+      )
   );
 
   const context = createInvokeContext(definition, options);
   await loadRuntimeVariablesBeforeHandler(context.variables);
+  const wraps = functionWraps(definition);
 
-  return await definition.handler(parsedEvent, context);
+  if (wraps === undefined) {
+    return await definition.handler(parsedEvent, context);
+  }
+
+  return await runWrapped(
+    wraps,
+    { context, functionKey: definition.key, input: parsedEvent, kind: "event" },
+    () => definition.handler(parsedEvent, context)
+  );
 };
 
 export function fn<
@@ -1862,15 +1940,6 @@ export function fn<
   >
 ): InvokableFunctionDefinition<string, undefined, TOutputSchema, TVariables>;
 export function fn<
-  const TInputSchema extends SqsMessageBatchSchema<
-    AnyStandardSchema,
-    SqsInvalidMessageBodyMode
-  >,
-  const TVariables extends RuntimeVariableCatalog = Record<never, never>,
->(
-  definition: EventFunctionDefinitionInput<TInputSchema, TVariables>
-): EventFunctionDefinition<string, TInputSchema, TVariables>;
-export function fn<
   const TRoutes extends readonly AnyRouteDefinition[],
   const TVariables extends RuntimeVariableCatalog = Record<never, never>,
 >(
@@ -1885,37 +1954,10 @@ export function fn(
         AnyStandardSchema
       >
     | InvokableZeroInputFunctionDefinitionInput<AnyStandardSchema>
-    | (EventFunctionDefinitionInput<
-        SqsMessageBatchSchema<AnyStandardSchema, SqsInvalidMessageBodyMode>
-      > & {
-        readonly output?: AnyStandardSchema;
-        readonly routes?: readonly AnyRouteDefinition[];
-      })
     | RouteFunctionDefinitionInput
 ): AnyFunctionDefinition {
   if (definition.name !== undefined && definition.name.trim() === "") {
     throw new Error("Function definition name must not be empty");
-  }
-
-  if ("events" in definition) {
-    if (definition.routes !== undefined && definition.routes.length > 0) {
-      throw new VokeConfigError(
-        "Event Source Functions cannot define HTTP routes in v1."
-      );
-    }
-
-    if (definition.output !== undefined) {
-      throw new VokeConfigError(
-        "Event Source Functions cannot define an output schema because Voke owns the event response contract."
-      );
-    }
-
-    return {
-      ...definition,
-      key: "",
-      kind: "event",
-      routes: [],
-    };
   }
 
   if ("handler" in definition) {
@@ -2083,9 +2125,15 @@ const colorize = (value: string, ...codes: string[]): string =>
 const formatEventSourceSummary = (eventSource: EventSourceDefinition): string =>
   [
     colorize(eventSource.source.toUpperCase(), color.green),
-    colorize(eventSource.queue, color.bold),
+    colorize(eventSource.resource ?? "-", color.bold),
     colorize(
-      `batchSize=${eventSource.options.batchSize ?? "-"} maxBatchingWindowSeconds=${eventSource.options.maxBatchingWindowSeconds ?? "-"} enabled=${eventSource.options.enabled ?? true}`,
+      Object.entries(eventSource.properties)
+        // Scalars print as-is; objects and arrays (an event pattern, a filter policy) as JSON.
+        .map(
+          ([name, value]) =>
+            `${name}=${typeof value === "object" && value !== null ? JSON.stringify(value) : String(value)}`
+        )
+        .join(" "),
       color.dim
     ),
   ].join(" ");
@@ -2184,6 +2232,45 @@ export const formatDevFunctionSummary = (
   return [formatDevHeader(), ...sections].join("\n\n").trimEnd();
 };
 
+// Provider packages build Event Source Functions directly, so every rule that keeps their
+// Function Contract unambiguous is checked here, where every definition passes.
+const assertEventFunctionShape = (
+  key: string,
+  definition: AnyFunctionDefinition
+): void => {
+  if (definition.kind !== "event") {
+    return;
+  }
+
+  if (definition.routes !== undefined && definition.routes.length > 0) {
+    throw new VokeConfigError(
+      "Event Source Functions cannot define HTTP routes in v1."
+    );
+  }
+
+  if (definition.output !== undefined) {
+    throw new VokeConfigError(
+      "Event Source Functions cannot define an output schema because Voke owns the event response contract."
+    );
+  }
+
+  const [first, ...rest] = definition.events ?? [];
+
+  if (first === undefined) {
+    throw new VokeConfigError(
+      `Function "${key}" is an Event Source Function without an Event Source.`
+    );
+  }
+
+  const other = rest.find((event) => event.source !== first.source);
+
+  if (other !== undefined) {
+    throw new VokeConfigError(
+      `Function "${key}" mixes Event Sources "${first.source}" and "${other.source}"; a Function's Event Sources must share one source.`
+    );
+  }
+};
+
 export const createFunctions = <const TRegistry extends FunctionRegistryInput>(
   registry: TRegistry
 ): FunctionRegistry<TRegistry> => {
@@ -2193,6 +2280,8 @@ export const createFunctions = <const TRegistry extends FunctionRegistryInput>(
     if (reservedFunctionRegistryKeys.has(key)) {
       throw new VokeConfigError(`Function Registry key "${key}" is reserved`);
     }
+
+    assertEventFunctionShape(key, definition);
 
     functions[key] = {
       ...definition,
@@ -2231,7 +2320,7 @@ export const createFunctions = <const TRegistry extends FunctionRegistryInput>(
   });
   Object.defineProperty(functions, "sendEvent", {
     enumerable: false,
-    value: ((functionName: string, event: EventInvocationInput) => {
+    value: ((functionName: string, event: unknown) => {
       const definition = functions[functionName];
 
       if (definition?.kind !== "event") {

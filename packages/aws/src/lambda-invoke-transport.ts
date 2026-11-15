@@ -8,7 +8,10 @@ import type {
   InvokeRequest,
   InvokeTransport,
   InvokeTransportResponse,
+  ProviderInvokeCapability,
 } from "voke";
+
+import { durableInvokeTarget, isDurableFunction } from "./durable";
 
 export interface AwsLambdaInvokeClient {
   send(command: InvokeCommand): Promise<InvokeCommandOutput>;
@@ -51,6 +54,9 @@ const loadLambdaSdk = (): Promise<LambdaSdk> =>
   import("@aws-sdk/client-lambda");
 
 const invokeCommandInput = <TPayload>(request: InvokeRequest<TPayload>) => ({
+  ...(request.executionName === undefined
+    ? {}
+    : { DurableExecutionName: request.executionName }),
   FunctionName: request.functionName,
   InvocationType: request.invocationType,
   Payload: textEncoder.encode(JSON.stringify(request.payload)),
@@ -79,11 +85,34 @@ export const createAwsLambdaInvokeTransport = (
       );
 
       return {
+        ...(response.DurableExecutionArn === undefined
+          ? {}
+          : { executionId: response.DurableExecutionArn }),
         functionError: response.FunctionError,
         payload: parseLambdaPayload(response.Payload),
         requestId: response.$metadata.requestId,
         statusCode: response.StatusCode,
       };
+    },
+  };
+};
+
+/**
+ * The AWS Provider's invoke capability: deployed Durable Functions start through Lambda at their
+ * `live` alias; every other Function runs in-process. The transport is created once, so its
+ * Lambda client and connections are reused.
+ */
+export const createAwsInvokeCapability = (): ProviderInvokeCapability => {
+  let transport: InvokeTransport | undefined;
+
+  return {
+    // Durable Functions take an execution name; a local run, which has no Lambda to name, ignores it.
+    acceptsExecutionName: ({ definition }) => isDurableFunction(definition),
+    target: durableInvokeTarget,
+    transport: () => {
+      transport ??= createAwsLambdaInvokeTransport();
+
+      return transport;
     },
   };
 };

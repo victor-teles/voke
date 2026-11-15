@@ -1,0 +1,183 @@
+---
+title: S3 events
+description: Run a Function for each object created in or deleted from an S3 bucket, and test the Function locally.
+---
+
+After reading this page you can run a Function when an object is created in or deleted from a
+bucket, filter the objects by key, and test the Function without AWS.
+
+## Declare the bucket and the Function
+
+Declare the bucket in `resources` with `s3Bucket()` from `@voke/aws/cloudformation`. Then create the
+Function with `s3()` from `@voke/aws`, and pass the bucket's resource key as `bucket`:
+
+```ts twoslash
+// @filename: voke.config.ts
+import { aws } from "@voke/aws";
+import { s3Bucket } from "@voke/aws/cloudformation";
+import { defineConfig } from "voke";
+
+export default defineConfig({
+  name: "photos",
+  provider: aws(),
+  resources: {
+    uploadsBucket: s3Bucket(),
+  },
+});
+
+// @filename: src/index.ts
+import { s3 } from "@voke/aws";
+import { createFunctions } from "voke";
+
+export const functions = createFunctions({
+  onUpload: s3({
+    bucket: "uploadsBucket",
+    on: ["created"],
+    prefix: "incoming/",
+    suffix: ".jpg",
+    handler: async (event) => {
+      console.info(`${event.key} (${event.size} bytes) in ${event.bucket}`);
+    },
+  }),
+});
+```
+
+- `bucket` is the key of a resource in `resources`. Model validation fails if no resource has that
+  key, or if the resource is not an `s3Bucket()`.
+- `on` lists the object changes to receive: `"created"`, `"deleted"` or both. It defaults to
+  `["created"]`.
+- `prefix` and `suffix` are optional. With them, only keys that start with `prefix` and end with
+  `suffix` invoke the Function. They compare the key exactly as EventBridge delivers it (see
+  [Object keys](#object-keys)).
+- A Function has one bucket. To react to two buckets, create two Functions.
+
+## Handle an event
+
+EventBridge delivers one object event per invocation. There is no schema: an S3 event carries object
+metadata, not an application payload. The handler receives:
+
+| Field          | Value                                                                       |
+| -------------- | --------------------------------------------------------------------------- |
+| `kind`         | `"created"` or `"deleted"`.                                                 |
+| `bucket`       | The bucket name.                                                            |
+| `key`          | The object key, exactly as delivered.                                       |
+| `size`         | The object size in bytes. Absent on most delete events.                     |
+| `etag`         | The object's ETag, when S3 sends one.                                       |
+| `versionId`    | The object version, on a versioned bucket.                                  |
+| `sequencer`    | A value that orders the events of one key: a higher value is a later event. |
+| `reason`       | The S3 API that caused the change, such as `PutObject` or `DeleteObject`.   |
+| `deletionType` | For deletes: `Permanently Deleted` or `Delete Marker Created`.              |
+| `id`, `time`   | The event id and when the change happened, ISO 8601.                        |
+| `raw`          | The original EventBridge event.                                             |
+
+The handler returns nothing. EventBridge invokes the Function asynchronously, so Lambda retries a
+failed invocation and then drops the event. An event that is not an S3 object event fails the
+invocation with an `InvokeError` with code `INVALID_PAYLOAD`.
+
+The Function's role can already read, write and delete the bucket's objects, so the handler can read
+the object with the bucket binding. See [Resources and bindings](/docs/guides/resources).
+
+## Object keys
+
+Voke passes `event.key` through exactly as EventBridge delivers it. It never URL-decodes the key: a
+`+` stays a `+` and `%20` stays `%20`. The `prefix` and `suffix` filters match the same delivered
+key.
+
+<Callout type="warn">
+
+The classic S3 notification format URL-encodes keys (`red flower.jpg` arrives as `red+flower.jpg`).
+The AWS documentation does not say whether S3 events delivered through EventBridge do the same, and
+Voke has not yet confirmed it against a real event. Passing the key through unchanged cannot turn one
+key into another. Test keys with spaces, `+` or non-ASCII characters before you rely on them.
+
+</Callout>
+
+## Test an S3 Function
+
+`voke dev` does not receive events from buckets. Test an S3 Function with
+`functions.sendEvent(name, { key })`. It runs the same handler code as the deployed Lambda:
+
+```ts twoslash
+import { s3 } from "@voke/aws";
+import { createFunctions } from "voke";
+
+const functions = createFunctions({
+  onUpload: s3({
+    bucket: "uploadsBucket",
+    on: ["created", "deleted"],
+    handler: (event) => {
+      console.info(event.kind, event.bucket, event.key);
+    },
+  }),
+});
+
+// ---cut---
+await functions.sendEvent("onUpload", { key: "incoming/cat.jpg" });
+// created uploadsBucket incoming/cat.jpg
+await functions.sendEvent("onUpload", {
+  key: "incoming/cat.jpg",
+  kind: "deleted",
+});
+// deleted uploadsBucket incoming/cat.jpg
+```
+
+Only `key` is required, and Voke uses it verbatim. `kind` defaults to the first value of `on`, and a
+`kind` that is not in `on` is rejected. `bucket` defaults to the bucket's resource key, `id` to
+`evt_1` and `time` to now. You can also pass `size`, `etag` and `versionId`.
+
+`prefix` and `suffix` are not applied locally: `sendEvent` always calls the handler, as it does for
+every Event Source.
+
+See [Testing](/docs/guides/testing) for test setup.
+
+## What gets deployed
+
+`voke build` generates the Lambda handler, and `voke synth` adds:
+
+- `NotificationConfiguration.EventBridgeConfiguration.EventBridgeEnabled: true` on each bucket that
+  at least one `s3()` Function uses. Other notification settings on the bucket are kept.
+- for each S3 Function, an `AWS::Events::Rule` on the account's default event bus. It matches
+  `source: ["aws.s3"]`, the `detail-type` values from `on` (`Object Created`, `Object Deleted`), the
+  bucket by name, and the key filter, with the Function as its target;
+- an `AWS::Lambda::Permission` that lets `events.amazonaws.com` invoke the Function, only from that
+  rule.
+
+Voke does not use classic bucket notifications to Lambda. They would make the bucket depend on the
+Function, and every Function's role depends on the bucket, so CloudFormation would reject the stack
+as a circular dependency.
+
+`voke local bootstrap` creates the bucket but not the rule or the EventBridge setting: the local
+stack holds resources only. See [Local AWS](/docs/guides/local-aws).
+
+## Good to know
+
+- `"created"` covers every way an object comes to exist: `PutObject`, `POST Object`, `CopyObject` and
+  `CompleteMultipartUpload`. `event.reason` says which.
+- `"deleted"` covers permanent deletes and delete markers on versioned buckets. `event.deletionType`
+  says which, and `event.reason` is `Lifecycle Expiration` when a lifecycle rule deleted the object.
+- Delivery is at least once, and events can arrive out of order. Make the handler safe to run twice
+  for the same object, and use `sequencer` to order events of one key.
+- Turning on EventBridge delivery sends all of the bucket's events to the account's default event
+  bus, not only the ones your Functions match. See the Amazon S3 and Amazon EventBridge pricing pages
+  for what these events cost.
+
+## Limits
+
+<Callout type="info">
+
+S3 support is intentionally small in v1:
+
+- Only object created and object deleted events. Restore, tagging, ACL, storage class and replication
+  events are not supported.
+- One bucket per Function, and the bucket must be a Voke resource. Existing buckets are not
+  supported.
+- Filters are `prefix` and `suffix` only. When you set both, `prefix` cannot end with `*` and
+  `suffix` cannot start with `*`, because EventBridge does not accept consecutive wildcards.
+
+</Callout>
+
+## Next steps
+
+- [Resources and bindings](/docs/guides/resources): read the object from the handler.
+- [EventBridge events](/docs/guides/eventbridge-events): match other EventBridge events.
+- [Testing](/docs/guides/testing): test Functions and the Gateway.

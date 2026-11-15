@@ -113,6 +113,15 @@ const metadataBinding = (
   return { attribute, resource: name || logicalId };
 };
 
+// Resources whose local binding is their logical id, under the `name` attribute by default.
+const nameBoundResourceTypes = new Set([
+  "AWS::DynamoDB::Table",
+  "AWS::Events::EventBus",
+  "AWS::Kinesis::Stream",
+  "AWS::S3::Bucket",
+  "AWS::SSM::Parameter",
+]);
+
 const resourceBindingFor = (
   logicalId: string,
   resource: CloudFormationResource,
@@ -124,7 +133,7 @@ const resourceBindingFor = (
   const bindingResource = modelBinding?.resource ?? logicalId;
   const bindingAttribute = modelBinding?.attribute;
 
-  if (resource.Type === "AWS::DynamoDB::Table") {
+  if (nameBoundResourceTypes.has(resource.Type)) {
     return binding(bindingResource, bindingAttribute ?? "name", logicalId);
   }
 
@@ -136,20 +145,12 @@ const resourceBindingFor = (
     );
   }
 
-  if (resource.Type === "AWS::S3::Bucket") {
-    return binding(bindingResource, bindingAttribute ?? "name", logicalId);
-  }
-
   if (resource.Type === "AWS::SNS::Topic") {
     return binding(
       bindingResource,
       bindingAttribute ?? "arn",
       `arn:aws:sns:${region}:${accountId}:${logicalId}`
     );
-  }
-
-  if (resource.Type === "AWS::Events::EventBus") {
-    return binding(bindingResource, bindingAttribute ?? "name", logicalId);
   }
 
   if (resource.Type === "AWS::SecretsManager::Secret") {
@@ -160,10 +161,6 @@ const resourceBindingFor = (
         ? `arn:aws:secretsmanager:${region}:${accountId}:secret:${logicalId}`
         : logicalId
     );
-  }
-
-  if (resource.Type === "AWS::SSM::Parameter") {
-    return binding(bindingResource, bindingAttribute ?? "name", logicalId);
   }
 
   return undefined;

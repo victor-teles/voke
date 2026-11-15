@@ -1,6 +1,6 @@
 import { voke } from "../src/app";
 import { fn, createFunctions } from "../src/invoke";
-import type { StandardSchemaV1 } from "../src/invoke";
+import type { RouteMeta, StandardSchemaV1 } from "../src/invoke";
 import { Voke } from "../src/route-builder";
 
 const schema = <TInput, TOutput = TInput>(): StandardSchemaV1<
@@ -87,3 +87,22 @@ void functions.route("POST", "/users", { body: { fullName: "Victor" } });
 
 // @ts-expect-error route-only functions are not accepted by functions.invoke.
 void functions.invoke("users");
+
+const _documentedRoute = app.get("/documented", {
+  handler: () => ({ ok: true }),
+  meta: {
+    deprecated: false,
+    description: "A documented route.",
+    hidden: false,
+    operationId: "getDocumented",
+    summary: "Documented",
+    tags: ["docs"],
+  },
+});
+const _documentedMeta: RouteMeta | undefined = _documentedRoute.meta;
+
+void app.get("/undocumented", {
+  handler: () => ({ ok: true }),
+  // @ts-expect-error meta accepts only the documented keys.
+  meta: { title: "Unknown" },
+});

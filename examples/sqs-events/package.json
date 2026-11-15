@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@voke/aws": "workspace:*",
+    "@voke/idempotency": "workspace:*",
     "@voke/schema": "workspace:*",
     "hono": "^4.0.0",
     "voke": "workspace:*"

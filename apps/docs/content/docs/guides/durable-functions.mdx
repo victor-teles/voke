@@ -1,0 +1,329 @@
+---
+title: Durable Functions
+description: Write multi-step work that survives failures and long waits as one TypeScript Function, test it locally, and deploy it as an AWS Lambda durable function.
+---
+
+After reading this page you can declare a **Durable Function** with `durable()`, start executions
+from your code, test them without AWS, and deploy them.
+
+## When to use a Durable Function
+
+Use a Durable Function for work that has several steps and must survive failures and waits: order
+fulfilment, approvals, payment sagas, AI agent loops. Each step is checkpointed. When the Function
+waits (for minutes or for months), Lambda stops it and you pay nothing. When the wait ends, Lambda
+runs the handler again and the SDK replays the finished steps from their checkpoints instead of
+running them again. An execution can run for up to one year.
+
+Voke runs Durable Functions as [AWS Lambda durable functions](https://docs.aws.amazon.com/lambda/latest/dg/durable-functions.html).
+This is Voke's orchestration model: there is no Step Functions builder and no workflow language.
+
+For work that finishes within one Lambda invocation, use a plain [Function](/docs/guides/functions).
+
+## Declare a Durable Function
+
+Create the Function with `durable()` from `@voke/aws`:
+
+```ts twoslash
+// @filename: voke.config.ts
+import { aws } from "@voke/aws";
+import { defineConfig } from "voke";
+
+export default defineConfig({ name: "shop", provider: aws() });
+
+// @filename: src/index.ts
+// ---cut---
+import { durable } from "@voke/aws";
+import { schema } from "@voke/schema";
+import { createFunctions, voke } from "voke";
+import config from "../voke.config";
+
+const order = schema.object({ id: schema.string(), sku: schema.string() });
+const receipt = schema.object({
+  orderId: schema.string(),
+  reservationId: schema.string(),
+});
+
+export const functions = createFunctions({
+  fulfilOrder: durable({
+    input: order,
+    output: receipt,
+    executionTimeout: { hours: 24 },
+    handler: async (payload, context) => {
+      const reservation = await context.durable.step(
+        "reserve-stock",
+        async () => {
+          return { id: `res_${payload.id}` };
+        }
+      );
+      await context.durable.wait("cancellation-window", { minutes: 10 });
+
+      return { orderId: payload.id, reservationId: reservation.id };
+    },
+  }),
+});
+
+export default voke(functions, { config });
+```
+
+- `input` and `output` are the Function Contract, as for `fn()`. Voke validates the payload before
+  the handler runs and the result after it returns.
+- `executionTimeout` is required. It limits how long one execution can run in total, across all
+  waits and replays (`{ days, hours, minutes, seconds }`, at most 366 days).
+- `retentionDays` (1 to 90, default 14) sets how long Lambda keeps the history of a finished
+  execution.
+- `name`, `synthesis` and `variables` work as they do for `fn()`.
+- The handler receives the payload and the invoke context. `context.durable` is the
+  `DurableContext` of the
+  [AWS durable execution SDK](https://github.com/aws/aws-durable-execution-sdk-js): `step`, `wait`,
+  `waitForCallback`, `createCallback`, `waitForCondition`, `invoke`, `runInChildContext`, `map`,
+  `parallel`, `promise.all` and the other operations. Voke does not wrap it.
+
+A Durable Function is an invokable Function. It cannot have HTTP routes or Event Sources.
+
+## Write a handler that replays
+
+Lambda runs the handler again after every wait and every step retry. Follow these rules so a replay
+gives the same result:
+
+- Put every side effect in a `step`: writes, API calls, emails, random values and the current time.
+  A finished step returns its checkpointed result on replay and does not run again.
+- Do not `await` work that is not a durable operation while a `wait` is pending. The SDK suspends
+  an idle execution after a few milliseconds, and the untracked work runs again on replay.
+- Keep the order of durable operations the same on every run. Do not branch on values that are not
+  checkpointed.
+- Payloads, step results and outputs must be JSON-serializable. One operation result can be at most
+  1 MB.
+- A step can still run more than once (for example, when Lambda stops during the step). Make step
+  work idempotent.
+
+A step retries with the SDK's default strategy. Pass `retryStrategy` to change it:
+
+```ts twoslash
+import { durable } from "@voke/aws";
+import { schema } from "@voke/schema";
+
+const chargeCard = async () => ({ chargeId: "ch_1" });
+// ---cut---
+export const charge = durable({
+  output: schema.string(),
+  executionTimeout: { minutes: 30 },
+  handler: async (_payload, context) => {
+    const payment = await context.durable.step("charge-card", chargeCard, {
+      retryStrategy: (_error, attempt) =>
+        attempt < 5
+          ? { shouldRetry: true, delay: { seconds: 30 } }
+          : { shouldRetry: false },
+    });
+
+    return payment.chargeId;
+  },
+});
+```
+
+## Start an execution
+
+Start a Durable Function with `functions.invoke`, like any invokable Function:
+
+```ts twoslash
+import { durable } from "@voke/aws";
+import { schema } from "@voke/schema";
+import { createFunctions, voke } from "voke";
+
+const functions = createFunctions({
+  fulfilOrder: durable({
+    input: schema.object({ id: schema.string() }),
+    output: schema.object({ orderId: schema.string() }),
+    executionTimeout: { hours: 24 },
+    handler: (payload) => ({ orderId: payload.id }),
+  }),
+});
+
+voke(functions, { config: { name: "shop" } });
+// ---cut---
+const started = await functions.invoke(
+  "fulfilOrder",
+  { id: "ord_1" },
+  { mode: "async", executionName: "order-ord_1" }
+);
+
+console.info(started.executionId);
+```
+
+- `mode: "async"` returns `{ accepted: true }` at once. Use it for every execution that can take
+  longer than 15 minutes: a synchronous invocation waits for the whole execution, and Lambda limits
+  it to 15 minutes.
+- `executionName` makes the start idempotent. A second start with the same name and payload returns
+  the existing execution instead of starting another one; the same name with a different payload
+  fails with `DurableExecutionAlreadyStartedException`. A name has 1 to 64 letters, digits, `-` or
+  `_`.
+- When deployed, `executionId` is the ARN of the durable execution. Locally it is absent.
+
+Deployed, `functions.invoke` on a Durable Function always goes through Lambda: Voke calls the
+Function's `live` alias, so the execution is durable. Invocations of other Functions still run
+in-process. `executionName` is accepted only for Durable Functions; on another Function the call
+rejects with `InvokeError` code `INVALID_OPTIONS`.
+
+### Start an execution from an Event Source
+
+An Event Source cannot trigger a Durable Function directly. Consume the events with an Event Source
+Function and start one execution per event:
+
+```ts twoslash
+import { durable, sqs } from "@voke/aws";
+import { schema } from "@voke/schema";
+import { createFunctions } from "voke";
+
+const order = schema.object({ id: schema.string() });
+// ---cut---
+export const functions = createFunctions({
+  fulfilOrder: durable({
+    input: order,
+    output: schema.object({ orderId: schema.string() }),
+    executionTimeout: { hours: 24 },
+    handler: (payload) => ({ orderId: payload.id }),
+  }),
+  takeOrders: sqs({
+    queue: "ordersQueue",
+    message: order,
+    handler: async (batch) => {
+      for (const message of batch.messages) {
+        await functions.invoke("fulfilOrder", message.body, {
+          mode: "async",
+          executionName: `order-${message.body.id}`,
+        });
+      }
+
+      return batch.ok();
+    },
+  }),
+});
+```
+
+The execution name keeps a redelivered message from starting a second execution.
+
+## Test a Durable Function
+
+`@voke/aws/testing` runs executions locally with the AWS durable execution testing runner. It needs
+no AWS credentials and no containers.
+
+```ts twoslash
+// @filename: src/functions.ts
+import { durable } from "@voke/aws";
+import { schema } from "@voke/schema";
+import { createFunctions, voke } from "voke";
+
+export const functions = createFunctions({
+  fulfilOrder: durable({
+    input: schema.object({ id: schema.string() }),
+    output: schema.object({ orderId: schema.string() }),
+    executionTimeout: { hours: 24 },
+    handler: async (payload, context) => {
+      await context.durable.step("reserve-stock", async () => "res_1");
+      await context.durable.wait("cancellation-window", { minutes: 10 });
+
+      return { orderId: payload.id };
+    },
+  }),
+});
+
+voke(functions, { config: { name: "shop" } });
+
+// @filename: test/fulfil-order.test.ts
+// ---cut---
+import { afterAll, beforeAll, expect, test } from "bun:test";
+import {
+  runDurable,
+  setupDurableTests,
+  teardownDurableTests,
+} from "@voke/aws/testing";
+import { functions } from "../src/functions";
+
+beforeAll(async () => {
+  await setupDurableTests();
+});
+
+afterAll(async () => {
+  await teardownDurableTests();
+});
+
+test("reserves stock once and waits ten minutes", async () => {
+  const run = await runDurable(functions, "fulfilOrder", { id: "ord_1" });
+
+  expect(run.result).toEqual({ orderId: "ord_1" });
+  expect(run.operations.map((operation) => operation.getName())).toEqual([
+    "reserve-stock",
+    "cancellation-window",
+  ]);
+  expect(run.operations[1]?.getWaitDetails()?.waitSeconds).toBe(600);
+});
+```
+
+- `setupDurableTests()` makes waits and retry delays finish at once. It installs a fake clock, so
+  `Date` and timers in the same test file are fake until `teardownDurableTests()`.
+- `runDurable(functions, key, payload)` invokes through `functions.invoke`, so the Function Contract
+  is validated, and returns `result`, the recorded `operations` and the runner's `execution`.
+- `functions.invoke("fulfilOrder", payload)` also works in tests and returns the output only.
+- A failed execution rejects with the error the handler threw. For a failed step this is the SDK's
+  `StepError`.
+
+## What local runs do
+
+Under `voke dev`, in tests and with `functions.invoke` in any local process, Voke runs each execution
+with the AWS testing runner. The runner replays the handler as Lambda does: finished steps return
+their checkpointed results, and step retries follow `retryStrategy`.
+
+- Time is real unless the test called `setupDurableTests()`. A `wait({ minutes: 10 })` under
+  `voke dev` waits ten minutes.
+- `executionName` is ignored locally, and there is no `executionId`.
+- `context.durable.invoke` and callbacks run against the local runner, not against deployed Lambdas.
+- A plain script that runs a durable execution stays alive until it calls `teardownDurableTests()`.
+
+## Callbacks
+
+`context.durable.waitForCallback(name, submit)` pauses the execution until another system reports a
+result. `submit` receives a callback id; send it to the system that does the work. That system
+completes the callback with the Lambda API actions `SendDurableExecutionCallbackSuccess` or
+`SendDurableExecutionCallbackFailure` (in `@aws-sdk/client-lambda`), using the callback id. Voke has
+no helper for this yet. The caller needs `lambda:SendDurableExecutionCallbackSuccess` and
+`lambda:SendDurableExecutionCallbackFailure` on the Function's qualified ARN
+(`arn:aws:lambda:<region>:<account>:function:<name>:*`).
+
+## Deploy
+
+`voke deploy` deploys a Durable Function with:
+
+- `DurableConfig` on the Lambda, from `executionTimeout` and `retentionDays`.
+- A Lambda version, published on every deploy that changes the code or the Function's settings, and
+  an alias named `live` that points at it. An execution stays on the version that started it, so a
+  deploy does not change the code of executions that are waiting. Old versions are kept
+  (`DeletionPolicy: Retain`) so their executions can finish.
+- `lambda:CheckpointDurableExecution` and `lambda:GetDurableExecutionState` on the Function's role.
+- For every Function in the stack, a `VOKE_INVOKE_TARGET_<KEY>` variable and
+  `lambda:InvokeFunction` on the alias, so any Function can start the Durable Function.
+
+Keep these limits in mind:
+
+- **Durable execution is set when Lambda creates a function.** To make an existing Function durable,
+  or to stop it being durable, give it a new registry key or `name`, deploy, and then remove the old
+  Function. `voke deploy` stops with an error before it changes anything when a Function would need
+  to be replaced.
+- **Runtimes**: `nodejs22.x` and `nodejs24.x`, the two runtimes Voke supports.
+- **Regions**: not every region supports durable functions. Check the Lambda console or the AWS
+  documentation for your region before you deploy.
+- **Limits**: 1 MB per operation result, 30,000 operations and 100 MB of checkpoint data per
+  execution.
+- Lambda does not retry a failed durable execution. Retries happen per step.
+- Retained versions add up: one per Durable Function for each deploy that changes the bundle.
+
+## Need Step Functions?
+
+Voke does not synthesize Step Functions state machines. Write the workflow as a Durable Function. If
+you must keep an existing state machine, declare it as a raw CloudFormation resource in `resources`
+in `voke.config.ts`, with its own role and permissions.
+
+## Next steps
+
+- [Functions](/docs/guides/functions): invoke options and the handler context.
+- [Testing](/docs/guides/testing): test setup for Functions and the Gateway.
+- [Deploy](/docs/guides/deploy): deploy a project to AWS.
+- [Troubleshooting](/docs/guides/troubleshooting): errors from durable deploys and invocations.

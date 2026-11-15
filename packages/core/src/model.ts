@@ -11,7 +11,6 @@ import {
   assertUniqueHandlerExportNames,
   createHandlerExportName,
 } from "./handler-names";
-import { functionRegistryEntries } from "./invoke";
 import type {
   AnyFunctionDefinition,
   FunctionRegistry,
@@ -19,6 +18,8 @@ import type {
   FunctionSynthesisConfig,
 } from "./invoke";
 import { positiveIntegerIssue } from "./numbers";
+import { projectFunctionEntries } from "./plugin";
+import type { VokePlugin } from "./plugin";
 import type { RuntimeVariableCatalog } from "./variables";
 
 export type VokeModelScalar = string | number | boolean | null;
@@ -40,6 +41,13 @@ export interface VokeModel {
   functions: Record<string, VokeModelFunction>;
   resources: Record<string, VokeModelResource>;
   outputs: Record<string, VokeModelOutput>;
+  /** Plugin Provider Extension Records, keyed by Plugin name. Absent when no Plugin has one. */
+  plugins?: Record<string, VokeModelPlugin>;
+}
+
+export interface VokeModelPlugin {
+  /** The Plugin's `contributions.provider`, copied untouched; each Provider reads its own key. */
+  provider: Record<string, VokeModelProviderExtensionRecord>;
 }
 
 export interface VokeModelService {
@@ -103,14 +111,12 @@ export interface VokeModelFunction {
   bindings: VokeModelBinding[];
 }
 
-export type VokeModelEventSource = VokeModelSqsEventSource;
-
-export interface VokeModelSqsEventSource {
-  type: "sqs";
-  queue: string;
-  batchSize?: number;
-  maxBatchingWindowSeconds?: number;
-  enabled?: boolean;
+/** One Event Source of a Function. The Provider that authored the source validates and synthesizes it. */
+export interface VokeModelEventSource {
+  type: string;
+  /** The Voke resource key the source reads from, when it has one. */
+  resource?: string;
+  properties: VokeModelRecord;
 }
 
 export interface VokeModelBinding {
@@ -359,6 +365,12 @@ const assertFunctionSynthesis = (
   }
 };
 
+const missingEventSourceResourceMessage = (
+  source: string,
+  resource: string
+): string =>
+  `"${source}" Event Source references resource "${resource}", but no matching resource is defined.`;
+
 const validateModel = (model: VokeModel): void => {
   const issues: VokeIssue[] = [];
 
@@ -400,18 +412,17 @@ const validateModel = (model: VokeModel): void => {
     }
 
     for (const [eventSourceIndex, eventSource] of fn.eventSources.entries()) {
-      if (eventSource.type !== "sqs") {
-        continue;
-      }
-
-      const resource = model.resources[eventSource.queue];
-
-      if (resource === undefined) {
+      if (
+        eventSource.resource !== undefined &&
+        model.resources[eventSource.resource] === undefined
+      ) {
         issues.push({
-          message: `Function "${functionName}" SQS event source references resource "${eventSource.queue}", but no matching resource is defined.`,
-          path: `functions.${functionName}.eventSources.${eventSourceIndex}.queue`,
+          message: missingEventSourceResourceMessage(
+            eventSource.type,
+            eventSource.resource
+          ),
+          path: `functions.${functionName}.eventSources.${eventSourceIndex}.resource`,
         });
-        continue;
       }
     }
   }
@@ -493,6 +504,18 @@ const validateRuntimeVariableResources = (
   }
 };
 
+const toModelPlugins = (
+  plugins: readonly VokePlugin[]
+): Record<string, VokeModelPlugin> | undefined => {
+  const entries = plugins.flatMap((plugin) =>
+    plugin.contributions?.provider === undefined
+      ? []
+      : [[plugin.name, { provider: { ...plugin.contributions.provider } }]]
+  );
+
+  return entries.length === 0 ? undefined : Object.fromEntries(entries);
+};
+
 export type VokeModelInput = (VokeConfig | VokeConfigInput) & {
   /** The Function Registry discovered from the project entrypoint. */
   readonly functions?: FunctionRegistry | FunctionRegistryInput;
@@ -524,7 +547,7 @@ export const createInternalModel = (input: VokeModelInput): VokeModel => {
       },
     ])
   );
-  const registryEntries = functionRegistryEntries(registry);
+  const registryEntries = projectFunctionEntries(registry, config);
   assertUniqueHandlerExportNames(registryEntries.map(([name]) => name));
   const generatedFunctionName = (name: string): string =>
     `${config.name}-${config.stage}-${name}`;
@@ -538,26 +561,26 @@ export const createInternalModel = (input: VokeModelInput): VokeModel => {
     for (const [eventSourceIndex, eventSource] of (
       definition.events ?? []
     ).entries()) {
-      if (eventSource.source !== "sqs") {
-        continue;
-      }
-
-      const resource = resources[eventSource.queue];
-
-      if (resource === undefined) {
+      if (
+        eventSource.resource !== undefined &&
+        resources[eventSource.resource] === undefined
+      ) {
         eventSourceIssues.push({
-          message: `SQS event source references resource "${eventSource.queue}", but no matching resource is defined.`,
-          path: `functions.${name}.events.${eventSourceIndex}.queue`,
+          message: missingEventSourceResourceMessage(
+            eventSource.source,
+            eventSource.resource
+          ),
+          path: `functions.${name}.events.${eventSourceIndex}.resource`,
         });
         continue;
       }
 
       eventSources.push({
-        batchSize: eventSource.options.batchSize,
-        enabled: eventSource.options.enabled,
-        maxBatchingWindowSeconds: eventSource.options.maxBatchingWindowSeconds,
-        queue: eventSource.queue,
-        type: "sqs",
+        properties: { ...eventSource.properties },
+        ...(eventSource.resource === undefined
+          ? {}
+          : { resource: eventSource.resource }),
+        type: eventSource.source,
       });
     }
 
@@ -640,6 +663,7 @@ export const createInternalModel = (input: VokeModelInput): VokeModel => {
       }
     : {};
 
+  const plugins = toModelPlugins(config.plugins);
   const model: VokeModel = {
     apis: hasHttpApi
       ? {
@@ -662,6 +686,7 @@ export const createInternalModel = (input: VokeModelInput): VokeModel => {
       ...functionOutputs,
       ...resourceOutputs,
     },
+    ...(plugins === undefined ? {} : { plugins }),
     resources,
     schemaVersion: "1",
     service: {

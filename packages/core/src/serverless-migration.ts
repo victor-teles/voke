@@ -1289,16 +1289,16 @@ const createGeneratedFiles = (
 const eventManualReason = (event: ServerlessFunctionEvent): string => {
   switch (event.type) {
     case "s3": {
-      return "S3 notifications require bucket notification wiring and permissions that Voke does not generate in this migration phase.";
+      return "Rewrite it with `s3()` from `@voke/aws`; the bucket must be a Voke resource declared with `s3Bucket()`.";
     }
     case "schedule": {
-      return "Scheduled triggers require EventBridge rule infrastructure that must be reviewed before migration.";
+      return "Rewrite it with `schedule()` from `@voke/aws`; review the expression and time zone.";
     }
     case "sns": {
-      return "SNS subscriptions and publish/subscribe permissions are inventory-only in this migration phase.";
+      return "Rewrite it with `sns()` from `@voke/aws` and declare the topic with `snsTopic()`; review the filter policy.";
     }
     case "stream": {
-      return "Stream event source mappings need batching, starting position, and source permissions reviewed manually.";
+      return "Rewrite it with kinesis() or dynamodbStream() from @voke/aws, then review the starting position, batching and retry settings.";
     }
     case "unsupported": {
       return `${event.name} is not an automatic Voke migration target. Recreate the trigger, permissions, batching, and failure behavior manually before cutting over.`;
@@ -2502,13 +2502,15 @@ const pluginCompatibilityCatalog: Record<
     "serverless-step-functions",
     {
       manualSteps: [
-        "Move Step Functions definitions and IAM permissions manually; Voke does not synthesize state machines in the stable local/dev/build/synth scope.",
+        "Rewrite Lambda-centric workflows as durable() Functions from @voke/aws: steps, waits and callbacks become TypeScript in the Function's handler.",
+        "Declare state machines you keep as raw CloudFormation resources in voke.config.ts, with their IAM roles and permissions.",
       ],
       notes: [
-        "State machines are application workflow infrastructure and are not converted automatically.",
+        "Voke does not synthesize Step Functions state machines; AWS Lambda durable functions are its orchestration model.",
       ],
       status: "manual",
-      summary: "Step Functions definitions require manual migration.",
+      summary:
+        "Step Functions workflows move to durable Functions or raw CloudFormation resources.",
     }
   ),
   "serverless-webpack": buildBundlerPluginCompatibility(

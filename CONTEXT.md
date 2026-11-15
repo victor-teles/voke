@@ -38,6 +38,14 @@ _Avoid_: Function implementation import, remote source import, TypeScript-only c
 
 **Remote Function Registry**:
 A typed catalog of Functions provided by another **Voke Project** and invoked through that project's runtime endpoint instead of local handlers.
+
+**OpenAPI Document**:
+The OpenAPI 3.1 description of a **Gateway**'s **HTTP API**, generated from route contracts.
+_Avoid_: Swagger file, contract artifact
+
+**API Reference Page**:
+The browsable HTML page that renders an **OpenAPI Document**, served next to it by the `openapi()` **Plugin**.
+_Avoid_: Swagger UI, docs site
 _Avoid_: Imported implementation registry, HTTP route client
 
 **Dev Function Invoke Endpoint**:
@@ -168,9 +176,49 @@ _Avoid_: Batch schema, raw SQS body schema
 The handler result that tells an **SQS Event Source** which messages failed while allowing successful messages in the same batch to stay acknowledged.
 _Avoid_: Raw Lambda batch response as primary contract
 
+**SNS Event Source**:
+An AWS **Event Source** where an SNS topic invokes a **Function** through a Lambda subscription, one message per invocation.
+_Avoid_: SNS route, SNS worker, topic resource
+
+**EventBridge Event Source**:
+An AWS **Event Source** where an EventBridge rule on an event bus invokes a **Function** for each event that matches its pattern.
+_Avoid_: EventBridge worker, event bus resource, scheduled rule
+
+**Schedule Event Source**:
+An AWS **Event Source** where an EventBridge Scheduler schedule invokes a **Function** on a recurring `rate(...)` or `cron(...)` expression.
+_Avoid_: Cron job, scheduled rule, timer
+
+**Kinesis Event Source**:
+An AWS **Event Source** where a Kinesis data stream invokes a **Function** with ordered batches of records through a Lambda event source mapping.
+_Avoid_: Kinesis worker, stream route
+
+**DynamoDB Stream Event Source**:
+An AWS **Event Source** where a DynamoDB table's stream invokes a **Function** with ordered batches of item changes through a Lambda event source mapping.
+_Avoid_: Table trigger, change handler as a separate concept
+
+**S3 Event Source**:
+An AWS **Event Source** where object changes in a bucket invoke a **Function** through an EventBridge rule.
+_Avoid_: Bucket notification, S3 trigger
+
+**Stream Record Batch**:
+The normalized input delivered to a **Function** by a **Kinesis Event Source** or a **DynamoDB Stream Event Source**, where each record exposes decoded data (a parsed payload, or plain keys and item images) plus its sequence number and raw provider metadata.
+_Avoid_: Raw stream event as primary contract, shard batch
+
+**Stream Batch Result**:
+The handler result that tells a stream Event Source the first record to deliver again.
+_Avoid_: SQS Batch Result for streams, checkpoint response
+
 **Event Invocation**:
 The local test/runtime path that delivers an event-shaped payload to an Event Source Function.
 _Avoid_: Function invocation, route invocation
+
+**Durable Function**:
+A **Function** whose handler runs as a checkpointed, replayable execution that can pause and resume.
+_Avoid_: Workflow, state machine, saga function
+
+**Durable Execution**:
+One run of a **Durable Function**, identified by an execution id and optionally a caller-chosen name.
+_Avoid_: Workflow run, job, instance
 
 **Dev Function Summary**:
 A human-readable startup log that lists the runtime **Gateway** assembly's **Functions** and **Event Sources** during `voke dev`.
@@ -183,6 +231,34 @@ _Avoid_: Resource declaration, CloudFormation secret, environment variable bindi
 **Runtime Variable Key**:
 The app-facing name a **Function** uses to read a **Runtime Variable** from runtime context.
 _Avoid_: AWS secret name, parameter path, resource key
+
+**Plugin**:
+A named unit declared in `voke.config.ts` that extends a **Voke Project** at run time and at deploy time without being a **Provider**.
+_Avoid_: Middleware, extension, Provider plugin
+
+**Function Wrap**:
+A **Plugin** hook that runs around every handler call of an activated **Function Registry**: invokable, route, Event Source and **Request Authorizer Function** handlers alike.
+_Avoid_: Middleware, interceptor, decorator
+
+**Plugin Contribution**:
+Static deploy-time data a **Plugin** adds to the project: resources, environment variables, **Provider Extension Records** and **Plugin Functions**.
+_Avoid_: Plugin config, raw template patch
+
+**Plugin Function**:
+A route-backed **Function** contributed by a **Plugin**, keyed `<plugin name>-<function name>` and deployed like the project's own.
+_Avoid_: Plugin route, internal endpoint
+
+**Idempotency Key**:
+The application value that identifies one logical operation, chosen by the handler author, such as an order id or a client-sent request id.
+_Avoid_: request id, message id as a default
+
+**Idempotency Record**:
+What an **Idempotency Store** keeps for one **Function** and **Idempotency Key**: the status (`INPROGRESS` or `COMPLETED`), the expiry, a hash of the validated input and the stored result.
+_Avoid_: lock, cache entry
+
+**Idempotency Store**:
+Where **Idempotency Records** live: the DynamoDB table the idempotency **Plugin** provisions, or memory in tests.
+_Avoid_: idempotency cache, persistence layer
 
 ## Relationships
 
@@ -208,6 +284,9 @@ _Avoid_: AWS secret name, parameter path, resource key
 - Runtime-exposed provider metadata is the primary source for generating a **Function Contract Artifact**.
 - A **Function Contract Artifact** is portable metadata for code generation and cross-language consumption.
 - A **Function Contract Artifact** has a stable fingerprint that changes when its public Function contract surface changes.
+- An **OpenAPI Document** describes routes, which callers reach over HTTP; a **Function Contract Artifact** describes invokable **Functions**, which callers reach with `invoke`. Neither replaces the other.
+- An **OpenAPI Document** and a **Function Contract Artifact** read JSON Schema from **Function Contracts** through the same reader (Standard JSON Schema); the artifact keeps a narrower subset.
+- An **OpenAPI Document** is served under `voke dev` only, unless the `openapi()` **Plugin** is told to expose it; an exposed document and **API Reference Page** are public **Plugin Function** routes.
 - **Remote Code Generation** is the primary happy path for consuming provider metadata.
 - `voke remote generate` runs **Remote Code Generation** for every configured remote by default.
 - `voke remote generate <name>` runs **Remote Code Generation** for one configured remote.
@@ -238,6 +317,8 @@ _Avoid_: AWS secret name, parameter path, resource key
 - **HTTP Helpers** belong to a specialized package rather than the root `voke` package.
 - A **Function** can have HTTP route handlers, an invokable handler, or both.
 - A **Function** can have one or more **Event Sources**.
+- A **Function**'s **Event Sources** share one source type.
+- **Event Source** types are authored through Provider packages; the root `voke` package names none.
 - A Function with **Event Sources** does not mix HTTP routes or invokable handlers in v1.
 - An **SQS Event Source** is attached to a **Function**.
 - An **SQS Event Source** is authored through the **AWS Provider** package rather than the root `voke` package.
@@ -245,6 +326,19 @@ _Avoid_: AWS secret name, parameter path, resource key
 - An **SQS Message Schema** describes one message body, while an **SQS Message Batch** is the handler input.
 - An **SQS Event Source** uses partial batch failure reporting by default.
 - An SQS Function can have one or more **SQS Event Sources**.
+- An **SNS Event Source**, an **EventBridge Event Source** and a **Schedule Event Source** are authored through the **AWS Provider** package, with `sns()`, `eventBridge()` and `schedule()`.
+- An **SNS Event Source** delivers one message per invocation; an **EventBridge Event Source** delivers one event per invocation.
+- An **SNS Event Source** references its topic, and an **EventBridge Event Source** its event bus, by Voke resource key; an **EventBridge Event Source** without a bus uses the account's default event bus.
+- For an **SNS Event Source** or an **EventBridge Event Source**, an invalid payload fails the invocation, so the provider's retry and failure handling apply.
+- A **Schedule Event Source** delivers a Voke-defined scheduled event, and every **Schedule Event Source** in a stack shares one scheduler role.
+- An SNS, EventBridge or schedule Function has exactly one **Event Source** in v1.
+- A **Kinesis Event Source** and a **DynamoDB Stream Event Source** are authored through the **AWS Provider** package and deliver a **Stream Record Batch**.
+- A stream Function has exactly one stream Event Source in v1.
+- A stream Event Source uses partial batch failure reporting by default, and its handler returns a **Stream Batch Result**.
+- A stream Event Source redelivers every record from the lowest failed sequence number.
+- An **S3 Event Source** is authored through the **AWS Provider** package with `s3()`, delivers one object event per invocation, and references its bucket by Voke resource key.
+- An **S3 Event Source** passes the object key through exactly as EventBridge delivers it; Voke never URL-decodes it.
+- A stream Event Source configures Lambda trigger behavior; stream capacity, retention and view type belong to the stream or table resource.
 - Project code primarily invokes **Functions** through its imported **Function Registry**.
 - A **Function Registry** is activated for local invocation by a **Gateway**.
 - A **Gateway** accepts a **Function Registry** as top-level app composition.
@@ -293,8 +387,8 @@ _Avoid_: AWS secret name, parameter path, resource key
 - Every deployable **Function** kind can declare **Runtime Variables**.
 - **Runtime Variables** are provider implementation dependencies, not part of a **Function Contract** or **Function Contract Artifact**.
 - Voke owns provider fetching for **Runtime Variables** in the common authoring path.
-- **Runtime Variables** can be supplied by provider plugins, with AWS Secrets Manager and SSM Parameter Store as first-party providers.
-- **Runtime Variable** provider plugins are registered at the runtime or test boundary.
+- **Runtime Variables** can be supplied by Runtime Variable providers, with AWS Secrets Manager and SSM Parameter Store as first-party providers.
+- Runtime Variable providers are registered at the runtime or test boundary.
 - Advanced **Runtime Variable** loader overrides are configured at the runtime or test boundary, not on individual **Runtime Variable** declarations.
 - The **Dev Function Summary** does not list **Runtime Variables**.
 - An **HTTP API** can have an **Authorizer Registry**.
@@ -344,6 +438,21 @@ _Avoid_: AWS secret name, parameter path, resource key
 - **Functions** are internal and invokable unless they define an HTTP route.
 - A **Function Registry** can perform **Event Invocation** for Event Source Functions.
 - A **Function Registry** can perform typed route invocation for route-backed **Functions**, while a **Gateway** performs HTTP request testing.
+- A **Durable Function** is an invokable **Function** authored with `durable()` through the **AWS Provider** package.
+- A **Durable Function** does not mix HTTP routes or **Event Sources**; an Event Source Function starts one with `functions.invoke(key, payload, { mode: "async" })`.
+- Deployed invocations of a **Durable Function** always go through the **Provider**, which starts a **Durable Execution**; local invocations run it in-process.
+- A caller can name a **Durable Execution** with `executionName`, which makes starting it idempotent.
+- Durable Functions are the supported orchestration model; Step Functions state machines are raw CloudFormation resources.
+- A **Plugin** is declared only in `voke.config.ts`, never on a **Gateway**.
+- **Function Wraps** nest in `plugins` order: the first **Plugin** is the outermost.
+- A **Function Wrap** applies only to **Functions** of a **Function Registry** activated with a config that declares the **Plugin**.
+- **Plugin Functions** are route-backed and sit outside the typed **Function Registry**; a **Gateway** serves them and the **Provider** deploys them.
+- A **Plugin** cannot change a **Function Contract** or the input a handler receives.
+- A **Plugin**'s provider-specific contributions are **Provider Extension Records** that the configured **Provider** validates and interprets.
+- Idempotency is opt-in per handler: the idempotency **Plugin** provides the **Idempotency Store** and a **Function Wrap**, and `idempotent(...)` marks a handler.
+- An **Idempotency Record** belongs to one **Function** and one **Idempotency Key**; two **Functions** with the same key value do not share a record.
+- An **SQS Message Batch** handled with `idempotentBatch(...)` has one **Idempotency Record** per message.
+- A **Durable Function** start uses `executionName` as its idempotency, not an **Idempotency Record**.
 
 ## Flagged ambiguities
 
@@ -434,8 +543,8 @@ _Avoid_: AWS secret name, parameter path, resource key
 > **Dev:** "Should tests call an SQS Function handler directly?"
 > **Domain expert:** "No, tests use **Event Invocation** through the **Function Registry** so SQS normalization and validation stay in the path."
 >
-> **Dev:** "Does `functions.sendEvent(...)` require a source for SQS?"
-> **Domain expert:** "No, SQS is the default Event Invocation source in v1, though callers may state `source: \"sqs\"` explicitly."
+> **Dev:** "Does `functions.sendEvent(...)` default to SQS?"
+> **Domain expert:** "No, the event shape and the result of an **Event Invocation** are defined by the Function's **Event Source**; for an SQS Function that is a batch of messages, and callers may still state `source: \"sqs\"` explicitly."
 >
 > **Dev:** "Do local SQS tests have to build full AWS records?"
 > **Domain expert:** "No, local **Event Invocation** accepts minimal messages with a body and lets Voke synthesize SQS metadata."
@@ -589,6 +698,6 @@ _Avoid_: AWS secret name, parameter path, resource key
 - `sqs()` uses `invalidMessageBody: "fail" | "include"` to control invalid body handling.
 - `sqs()` treats SQS message bodies as JSON in v1, validated with its `message` schema.
 - Event Source Functions are tested through `functions.sendEvent(...)`, not `functions.invoke(...)` or direct handler calls.
-- `functions.sendEvent(...)` defaults to SQS in v1 and also accepts an explicit `source: "sqs"`.
+- The event shape and the result of an **Event Invocation** are defined by the Function's **Event Source**; `functions.sendEvent(...)` has no default source.
 - Local SQS **Event Invocation** accepts minimal message inputs and synthesizes provider metadata when omitted.
 - Voke owns the deployed SQS Lambda adapter rather than requiring users to write AWS event glue.

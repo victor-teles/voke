@@ -244,6 +244,49 @@ const response = await gateway.request("/users", {
 
 See [Testing](/docs/guides/testing) for test setups.
 
+## Describe a route
+
+`meta` documents a route for generated API documentation, such as the [OpenAPI document](/docs/guides/openapi). The Gateway ignores it when it serves requests:
+
+```ts twoslash
+import { schema } from "@voke/schema";
+import { createFunctions, http, route } from "voke";
+
+const functions = createFunctions({
+  orders: http({
+    routes: [
+      route.get("/orders/:id", {
+        meta: {
+          summary: "Get an order",
+          description: "Reads one order by its id.",
+          tags: ["orders"],
+          operationId: "getOrder",
+        },
+        params: schema.object({ id: schema.string() }),
+        handler: (request) => ({ id: request.params.id }),
+      }),
+      route.get("/orders/internal/stats", {
+        meta: { hidden: true },
+        handler: () => ({ count: 1 }),
+      }),
+    ],
+  }),
+});
+```
+
+| Field         | Meaning                                       |
+| ------------- | --------------------------------------------- |
+| `summary`     | A one-line title.                             |
+| `description` | A longer explanation.                         |
+| `tags`        | Groups for the route.                         |
+| `operationId` | A unique, stable name for the operation.      |
+| `deprecated`  | `true` marks the route as deprecated.         |
+| `hidden`      | `true` leaves the route out of documentation. |
+
+## Middleware
+
+`voke(functions, { middleware: [...] })` adds Hono middleware to every route of the Gateway, and `route.use(...)` adds it to the routes of one Route Builder. Middleware reaches HTTP requests only. To run code around every Function, including invokable and Event Source Functions, or to add a deployed route from a package, write a [Plugin](/docs/guides/plugins).
+
 ## Timeout limit on AWS
 
 API Gateway HTTP APIs wait at most 30 seconds for a Lambda integration. A Function with routes therefore cannot have a timeout above 30 seconds: the AWS Provider rejects a larger `synthesis.timeout` or `runtime.timeout` when it synthesizes the stack. Move longer work to an [SQS Function](/docs/guides/sqs-events) or an invokable Function called with `mode: "async"`.
@@ -251,6 +294,7 @@ API Gateway HTTP APIs wait at most 30 seconds for a Lambda integration. A Functi
 ## Next steps
 
 - [Schemas and validation](/docs/guides/schemas)
+- [OpenAPI and API reference](/docs/guides/openapi)
 - [Authorizers](/docs/guides/authorizers)
 - [Testing](/docs/guides/testing)
 - [Configuration reference](/docs/reference/config)

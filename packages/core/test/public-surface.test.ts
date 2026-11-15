@@ -27,9 +27,18 @@ const teachingSurfaceFiles = [
   "../../../apps/docs/content/docs/concepts.mdx",
   "../../../apps/docs/content/docs/guides/functions.mdx",
   "../../../apps/docs/content/docs/guides/http-routes.mdx",
+  "../../../apps/docs/content/docs/guides/openapi.mdx",
   "../../../apps/docs/content/docs/guides/schemas.mdx",
   "../../../apps/docs/content/docs/guides/authorizers.mdx",
   "../../../apps/docs/content/docs/guides/sqs-events.mdx",
+  "../../../apps/docs/content/docs/guides/idempotency.mdx",
+  "../../../apps/docs/content/docs/guides/sns-events.mdx",
+  "../../../apps/docs/content/docs/guides/eventbridge-events.mdx",
+  "../../../apps/docs/content/docs/guides/scheduled-functions.mdx",
+  "../../../apps/docs/content/docs/guides/kinesis-events.mdx",
+  "../../../apps/docs/content/docs/guides/dynamodb-stream-events.mdx",
+  "../../../apps/docs/content/docs/guides/s3-events.mdx",
+  "../../../apps/docs/content/docs/guides/durable-functions.mdx",
   "../../../apps/docs/content/docs/guides/runtime-variables.mdx",
   "../../../apps/docs/content/docs/guides/resources.mdx",
   "../../../apps/docs/content/docs/guides/remote-functions.mdx",
@@ -37,6 +46,7 @@ const teachingSurfaceFiles = [
   "../../../apps/docs/content/docs/guides/local-aws.mdx",
   "../../../apps/docs/content/docs/guides/deploy.mdx",
   "../../../apps/docs/content/docs/guides/serverless-migration.mdx",
+  "../../../apps/docs/content/docs/guides/plugins.mdx",
   "../../../apps/docs/content/docs/guides/troubleshooting.mdx",
   "../../../apps/docs/content/docs/reference/config.mdx",
   "../../../apps/docs/content/docs/reference/cli.mdx",
@@ -55,7 +65,12 @@ const firstPartyExampleFiles = [
   "../../../examples/hello-api/src/aws.ts",
   "../../../examples/hello-api/src/local.ts",
   "../../../examples/hello-api/src/middleware/request-info.ts",
+  "../../../examples/hello-api/src/plugins/request-timing.ts",
   "../../../examples/sqs-events/src/functions.ts",
+  "../../../examples/event-sources/src/functions.ts",
+  "../../../examples/stream-events/src/functions.ts",
+  "../../../examples/durable-workflow/src/functions.ts",
+  "../../../examples/durable-workflow/src/index.ts",
 ];
 
 const readPackageFile = async (path: string): Promise<string> =>
@@ -99,9 +114,15 @@ test("keeps the stable root runtime surface intentional", () => {
     "http",
     "invokeRegistryFunction",
     "loadVokeConfig",
+    // A Provider building block: the project's Functions plus the Plugin-contributed ones.
+    "projectFunctionEntries",
+    // The one JSON Schema reader: OpenAPI documents and Function Contract Artifacts share it.
+    "readJsonSchema",
     "readStandardResult",
     "route",
     "runRequestAuthorizer",
+    // Narrows JSON Schema to the Function Contract Artifact's subset (@voke/remote uses it).
+    "toContractJsonSchema",
     "voke",
   ]);
   // toEnvKey is an AWS binding-name helper: it lives in @voke/aws only.
@@ -114,6 +135,7 @@ test("keeps AWS authoring in @voke/aws", async () => {
   expect(Object.keys(aws).toSorted()).toEqual([
     "aws",
     "awsLambda",
+    "awsPolicy",
     "bindResource",
     "createAuthorizers",
     "createAwsClientConfig",
@@ -121,16 +143,24 @@ test("keeps AWS authoring in @voke/aws", async () => {
     "createLambdaHandlers",
     "createResourceBindingName",
     "createSqsEventHandler",
+    "durable",
+    "dynamodbStream",
+    "eventBridge",
     "jwtAuthorizer",
+    "kinesis",
     "lambdaAuthorizer",
     "parameter",
     "requestAuthorizer",
+    "s3",
+    "schedule",
     "secret",
+    "sns",
     "sqs",
     "toEnvKey",
   ]);
   expect("dynamodbTable" in voke).toBe(false);
   expect("sqsQueue" in voke).toBe(false);
+  expect("durable" in voke).toBe(false);
 });
 
 test("keeps CloudFormation synthesis and resource builders in @voke/aws/cloudformation", async () => {
@@ -139,6 +169,7 @@ test("keeps CloudFormation synthesis and resource builders in @voke/aws/cloudfor
   expect(Object.keys(cloudformation).toSorted()).toEqual([
     "dynamodbTable",
     "eventBus",
+    "kinesisStream",
     "s3Bucket",
     "secret",
     "snsTopic",
@@ -177,8 +208,12 @@ test("keeps AWS testing helpers in @voke/aws/testing", async () => {
 
   expect(Object.keys(awsTesting).toSorted()).toEqual([
     "createStackTestContext",
+    "runDurable",
+    "setupDurableTests",
+    "teardownDurableTests",
   ]);
   expect("createStackTestContext" in voke).toBe(false);
+  expect("runDurable" in voke).toBe(false);
 });
 
 test("keeps Remote Function helpers in @voke/remote", async () => {
@@ -208,6 +243,31 @@ test("keeps schema helpers in @voke/schema", async () => {
 
   expect(Object.keys(schemaHelpers).toSorted()).toEqual(["schema"]);
   expect("schema" in voke).toBe(false);
+});
+
+test("keeps OpenAPI helpers in @voke/openapi", async () => {
+  const openapiHelpers = await importPackage("@voke/openapi");
+
+  expect(Object.keys(openapiHelpers).toSorted()).toEqual([
+    "createOpenApiDocument",
+    "openapi",
+  ]);
+  expect("openapi" in voke).toBe(false);
+  expect("createOpenApiDocument" in voke).toBe(false);
+});
+
+test("keeps idempotency helpers in @voke/idempotency", async () => {
+  const idempotencyHelpers = await importPackage("@voke/idempotency");
+
+  expect(Object.keys(idempotencyHelpers).toSorted()).toEqual([
+    "IdempotencyError",
+    "dynamoDbStore",
+    "idempotency",
+    "idempotent",
+    "idempotentBatch",
+    "memoryStore",
+  ]);
+  expect("idempotent" in voke).toBe(false);
 });
 
 test("keeps local AWS provider helpers in @voke/aws/local", async () => {

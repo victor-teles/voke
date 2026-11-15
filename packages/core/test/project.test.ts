@@ -48,6 +48,30 @@ export default voke(functions, { config: { name: "gateway-project" } });
   expect(project.entrypoint).toBe(entrypoint);
 });
 
+test("adds Plugin-contributed Functions after the project's own", async () => {
+  const entrypoint = await writeEntrypoint(registrySource);
+  const { http, route } = await import("../src/index");
+  const config = defineConfig({
+    name: "plugin-project",
+    plugins: [
+      {
+        contributions: {
+          functions: {
+            docs: http({ routes: [route.get("/docs", { handler: () => "" })] }),
+          },
+        },
+        name: "openapi",
+      },
+    ],
+  });
+  const project = await loadProject({ config, entrypoint });
+
+  expect(Object.keys(project.functions)).toEqual(["http", "openapi-docs"]);
+  expect(
+    (project.functions as Record<string, { key: string }>)["openapi-docs"]?.key
+  ).toBe("openapi-docs");
+});
+
 test("discovers a functions export when there is no Gateway", async () => {
   const entrypoint = await writeEntrypoint(registrySource);
   const project = await loadProject({

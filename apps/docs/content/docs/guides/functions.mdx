@@ -99,15 +99,16 @@ In tests, import the module that calls `voke(...)`, or call `voke(functions, { c
 
 `functions.invoke(key, payload, options)` accepts these options:
 
-| Option         | Type                                       | Default   | Description                                                                                                        |
-| -------------- | ------------------------------------------ | --------- | ------------------------------------------------------------------------------------------------------------------ |
-| `mode`         | `"sync"` or `"async"`                      | `"sync"`  | `"async"` returns `{ accepted: true }` at once and runs the Function in the background.                            |
-| `trace`        | object of string, number or boolean values | none      | Metadata the handler reads from `context.trace`.                                                                   |
-| `timeoutMs`    | `number`                                   | none      | Rejects with an `InvokeError` with code `TIMEOUT` when the call takes longer.                                      |
-| `retries`      | `number`                                   | `0`       | Extra attempts after a failed attempt. `retries: 2` runs the Function at most three times.                         |
-| `onAsyncError` | `(error: InvokeError) => void`             | none      | Receives the error of a failed `"async"` call. Without it, Voke logs the message with `console.error`.             |
-| `runtime`      | `"local"` or `"aws"`                       | `"local"` | `"local"` runs the handler in the current process. `"aws"` calls the deployed Lambda through `transport`.          |
-| `transport`    | `InvokeTransport`                          | none      | Required when `runtime` is `"aws"`. `createAwsLambdaInvokeTransport()` from `@voke/aws` calls Lambda's Invoke API. |
+| Option          | Type                                       | Default   | Description                                                                                                        |
+| --------------- | ------------------------------------------ | --------- | ------------------------------------------------------------------------------------------------------------------ |
+| `mode`          | `"sync"` or `"async"`                      | `"sync"`  | `"async"` returns `{ accepted: true }` at once and runs the Function in the background.                            |
+| `trace`         | object of string, number or boolean values | none      | Metadata the handler reads from `context.trace`.                                                                   |
+| `timeoutMs`     | `number`                                   | none      | Rejects with an `InvokeError` with code `TIMEOUT` when the call takes longer.                                      |
+| `retries`       | `number`                                   | `0`       | Extra attempts after a failed attempt. `retries: 2` runs the Function at most three times.                         |
+| `onAsyncError`  | `(error: InvokeError) => void`             | none      | Receives the error of a failed `"async"` call. Without it, Voke logs the message with `console.error`.             |
+| `executionName` | `string`                                   | none      | Names the execution of a [Durable Function](/docs/guides/durable-functions), so starting it is idempotent.         |
+| `runtime`       | `"local"` or `"aws"`                       | `"local"` | `"local"` runs the handler in the current process. `"aws"` calls the deployed Lambda through `transport`.          |
+| `transport`     | `InvokeTransport`                          | none      | Required when `runtime` is `"aws"`. `createAwsLambdaInvokeTransport()` from `@voke/aws` calls Lambda's Invoke API. |
 
 ```ts twoslash
 // @filename: voke.config.ts

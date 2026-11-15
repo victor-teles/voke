@@ -1,0 +1,461 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Voke stack for orders-events (prod)",
+  "Outputs": {
+    "NightlyCleanupFunctionName": {
+      "Description": "nightlyCleanup Lambda function name",
+      "Value": {
+        "Ref": "NightlyCleanupFunction"
+      }
+    },
+    "OrderCreatedFunctionName": {
+      "Description": "orderCreated Lambda function name",
+      "Value": {
+        "Ref": "OrderCreatedFunction"
+      }
+    },
+    "OrderPaidFunctionName": {
+      "Description": "orderPaid Lambda function name",
+      "Value": {
+        "Ref": "OrderPaidFunction"
+      }
+    },
+    "OrdersBusName": {
+      "Description": "ordersBus name",
+      "Value": {
+        "Ref": "OrdersBus"
+      }
+    },
+    "OrdersTopicArn": {
+      "Description": "ordersTopic arn",
+      "Value": {
+        "Ref": "OrdersTopic"
+      }
+    }
+  },
+  "Resources": {
+    "OrdersBus": {
+      "Metadata": {
+        "VokeBinding": {
+          "Attribute": "name",
+          "Resource": "ordersBus"
+        }
+      },
+      "Properties": {},
+      "Type": "AWS::Events::EventBus"
+    },
+    "OrdersTopic": {
+      "Metadata": {
+        "VokeBinding": {
+          "Attribute": "arn",
+          "Resource": "ordersTopic"
+        }
+      },
+      "Properties": {},
+      "Type": "AWS::SNS::Topic"
+    },
+    "NightlyCleanupFunctionRole": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "ManagedPolicyArns": [
+          "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        ],
+        "Policies": [
+          {
+            "PolicyDocument": {
+              "Statement": [
+                {
+                  "Action": ["events:PutEvents"],
+                  "Effect": "Allow",
+                  "Resource": {
+                    "Fn::GetAtt": ["OrdersBus", "Arn"]
+                  }
+                },
+                {
+                  "Action": ["sns:Publish"],
+                  "Effect": "Allow",
+                  "Resource": {
+                    "Ref": "OrdersTopic"
+                  }
+                }
+              ],
+              "Version": "2012-10-17"
+            },
+            "PolicyName": "VokeResourceAccess"
+          }
+        ]
+      },
+      "Type": "AWS::IAM::Role"
+    },
+    "NightlyCleanupFunction": {
+      "Metadata": {
+        "VokeDeployedName": "orders-events-prod-nightlyCleanup",
+        "VokeEntrypoint": "./src/index.ts",
+        "VokeFunction": "nightlyCleanup",
+        "VokeInvokable": false,
+        "VokeRoutes": []
+      },
+      "Properties": {
+        "Architectures": ["arm64"],
+        "Code": {
+          "ZipFile": "exports.handler = async () => ({ statusCode: 501, body: \"Build and upload this Voke function before deploying.\" });"
+        },
+        "Environment": {
+          "Variables": {
+            "VOKE_RESOURCE_ORDERS_BUS_NAME": {
+              "Ref": "OrdersBus"
+            },
+            "VOKE_RESOURCE_ORDERS_TOPIC_ARN": {
+              "Ref": "OrdersTopic"
+            }
+          }
+        },
+        "FunctionName": "orders-events-prod-nightlyCleanup",
+        "Handler": "index.nightlyCleanup",
+        "LoggingConfig": {
+          "LogGroup": {
+            "Ref": "NightlyCleanupFunctionLogGroup"
+          }
+        },
+        "MemorySize": 1024,
+        "Role": {
+          "Fn::GetAtt": ["NightlyCleanupFunctionRole", "Arn"]
+        },
+        "Runtime": "nodejs22.x",
+        "Timeout": 15
+      },
+      "Type": "AWS::Lambda::Function"
+    },
+    "NightlyCleanupFunctionLogGroup": {
+      "Properties": {
+        "LogGroupName": "/aws/lambda/orders-events-prod-nightlyCleanup",
+        "RetentionInDays": 14
+      },
+      "Type": "AWS::Logs::LogGroup"
+    },
+    "NightlyCleanupFunctionSchedule": {
+      "Properties": {
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "ScheduleExpression": "cron(0 3 * * ? *)",
+        "ScheduleExpressionTimezone": "America/Sao_Paulo",
+        "State": "ENABLED",
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": ["NightlyCleanupFunction", "Arn"]
+          },
+          "Input": "{\"attempt\":\"<aws.scheduler.attempt-number>\",\"executionId\":\"<aws.scheduler.execution-id>\",\"scheduledTime\":\"<aws.scheduler.scheduled-time>\",\"voke\":\"schedule\"}",
+          "RoleArn": {
+            "Fn::GetAtt": ["VokeSchedulerRole", "Arn"]
+          }
+        }
+      },
+      "Type": "AWS::Scheduler::Schedule"
+    },
+    "OrderCreatedFunctionRole": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "ManagedPolicyArns": [
+          "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        ],
+        "Policies": [
+          {
+            "PolicyDocument": {
+              "Statement": [
+                {
+                  "Action": ["events:PutEvents"],
+                  "Effect": "Allow",
+                  "Resource": {
+                    "Fn::GetAtt": ["OrdersBus", "Arn"]
+                  }
+                },
+                {
+                  "Action": ["sns:Publish"],
+                  "Effect": "Allow",
+                  "Resource": {
+                    "Ref": "OrdersTopic"
+                  }
+                }
+              ],
+              "Version": "2012-10-17"
+            },
+            "PolicyName": "VokeResourceAccess"
+          }
+        ]
+      },
+      "Type": "AWS::IAM::Role"
+    },
+    "OrderCreatedFunction": {
+      "Metadata": {
+        "VokeDeployedName": "orders-events-prod-orderCreated",
+        "VokeEntrypoint": "./src/index.ts",
+        "VokeFunction": "orderCreated",
+        "VokeInvokable": false,
+        "VokeRoutes": []
+      },
+      "Properties": {
+        "Architectures": ["arm64"],
+        "Code": {
+          "ZipFile": "exports.handler = async () => ({ statusCode: 501, body: \"Build and upload this Voke function before deploying.\" });"
+        },
+        "Environment": {
+          "Variables": {
+            "VOKE_RESOURCE_ORDERS_BUS_NAME": {
+              "Ref": "OrdersBus"
+            },
+            "VOKE_RESOURCE_ORDERS_TOPIC_ARN": {
+              "Ref": "OrdersTopic"
+            }
+          }
+        },
+        "FunctionName": "orders-events-prod-orderCreated",
+        "Handler": "index.orderCreated",
+        "LoggingConfig": {
+          "LogGroup": {
+            "Ref": "OrderCreatedFunctionLogGroup"
+          }
+        },
+        "MemorySize": 1024,
+        "Role": {
+          "Fn::GetAtt": ["OrderCreatedFunctionRole", "Arn"]
+        },
+        "Runtime": "nodejs22.x",
+        "Timeout": 15
+      },
+      "Type": "AWS::Lambda::Function"
+    },
+    "OrderCreatedFunctionLogGroup": {
+      "Properties": {
+        "LogGroupName": "/aws/lambda/orders-events-prod-orderCreated",
+        "RetentionInDays": 14
+      },
+      "Type": "AWS::Logs::LogGroup"
+    },
+    "OrderCreatedFunctionOrdersTopicPermission": {
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Ref": "OrderCreatedFunction"
+        },
+        "Principal": "sns.amazonaws.com",
+        "SourceArn": {
+          "Ref": "OrdersTopic"
+        }
+      },
+      "Type": "AWS::Lambda::Permission"
+    },
+    "OrderCreatedFunctionOrdersTopicSubscription": {
+      "Properties": {
+        "Endpoint": {
+          "Fn::GetAtt": ["OrderCreatedFunction", "Arn"]
+        },
+        "Protocol": "lambda",
+        "TopicArn": {
+          "Ref": "OrdersTopic"
+        },
+        "FilterPolicy": {
+          "type": ["created"]
+        }
+      },
+      "Type": "AWS::SNS::Subscription"
+    },
+    "OrderPaidFunctionRole": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "ManagedPolicyArns": [
+          "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        ],
+        "Policies": [
+          {
+            "PolicyDocument": {
+              "Statement": [
+                {
+                  "Action": ["events:PutEvents"],
+                  "Effect": "Allow",
+                  "Resource": {
+                    "Fn::GetAtt": ["OrdersBus", "Arn"]
+                  }
+                },
+                {
+                  "Action": ["sns:Publish"],
+                  "Effect": "Allow",
+                  "Resource": {
+                    "Ref": "OrdersTopic"
+                  }
+                }
+              ],
+              "Version": "2012-10-17"
+            },
+            "PolicyName": "VokeResourceAccess"
+          }
+        ]
+      },
+      "Type": "AWS::IAM::Role"
+    },
+    "OrderPaidFunction": {
+      "Metadata": {
+        "VokeDeployedName": "orders-events-prod-orderPaid",
+        "VokeEntrypoint": "./src/index.ts",
+        "VokeFunction": "orderPaid",
+        "VokeInvokable": false,
+        "VokeRoutes": []
+      },
+      "Properties": {
+        "Architectures": ["arm64"],
+        "Code": {
+          "ZipFile": "exports.handler = async () => ({ statusCode: 501, body: \"Build and upload this Voke function before deploying.\" });"
+        },
+        "Environment": {
+          "Variables": {
+            "VOKE_RESOURCE_ORDERS_BUS_NAME": {
+              "Ref": "OrdersBus"
+            },
+            "VOKE_RESOURCE_ORDERS_TOPIC_ARN": {
+              "Ref": "OrdersTopic"
+            }
+          }
+        },
+        "FunctionName": "orders-events-prod-orderPaid",
+        "Handler": "index.orderPaid",
+        "LoggingConfig": {
+          "LogGroup": {
+            "Ref": "OrderPaidFunctionLogGroup"
+          }
+        },
+        "MemorySize": 1024,
+        "Role": {
+          "Fn::GetAtt": ["OrderPaidFunctionRole", "Arn"]
+        },
+        "Runtime": "nodejs22.x",
+        "Timeout": 15
+      },
+      "Type": "AWS::Lambda::Function"
+    },
+    "OrderPaidFunctionLogGroup": {
+      "Properties": {
+        "LogGroupName": "/aws/lambda/orders-events-prod-orderPaid",
+        "RetentionInDays": 14
+      },
+      "Type": "AWS::Logs::LogGroup"
+    },
+    "OrderPaidFunctionOrdersBusRule": {
+      "Properties": {
+        "EventPattern": {
+          "source": ["orders"],
+          "detail-type": ["OrderPaid"],
+          "detail": {
+            "status": ["PAID"]
+          }
+        },
+        "State": "ENABLED",
+        "Targets": [
+          {
+            "Arn": {
+              "Fn::GetAtt": ["OrderPaidFunction", "Arn"]
+            },
+            "Id": "VokeFunction"
+          }
+        ],
+        "EventBusName": {
+          "Ref": "OrdersBus"
+        }
+      },
+      "Type": "AWS::Events::Rule"
+    },
+    "OrderPaidFunctionOrdersBusRulePermission": {
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Ref": "OrderPaidFunction"
+        },
+        "Principal": "events.amazonaws.com",
+        "SourceArn": {
+          "Fn::GetAtt": ["OrderPaidFunctionOrdersBusRule", "Arn"]
+        }
+      },
+      "Type": "AWS::Lambda::Permission"
+    },
+    "VokeSchedulerRole": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Condition": {
+                "ArnLike": {
+                  "aws:SourceArn": {
+                    "Fn::Sub": "arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule-group/default"
+                  }
+                },
+                "StringEquals": {
+                  "aws:SourceAccount": {
+                    "Ref": "AWS::AccountId"
+                  }
+                }
+              },
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "scheduler.amazonaws.com"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "Policies": [
+          {
+            "PolicyDocument": {
+              "Statement": [
+                {
+                  "Action": "lambda:InvokeFunction",
+                  "Effect": "Allow",
+                  "Resource": [
+                    {
+                      "Fn::GetAtt": ["NightlyCleanupFunction", "Arn"]
+                    }
+                  ]
+                }
+              ],
+              "Version": "2012-10-17"
+            },
+            "PolicyName": "VokeInvokeScheduledFunctions"
+          }
+        ]
+      },
+      "Type": "AWS::IAM::Role"
+    }
+  }
+}

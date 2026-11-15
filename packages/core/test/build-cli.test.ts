@@ -68,14 +68,25 @@ test("build CLI builds the Provider's plan from the Functions the entrypoint dec
       "esm",
       "--external",
       "@aws-sdk/*",
+      "--external",
+      "@aws/durable-execution-sdk-js-testing",
+      "--external",
+      "@aws/durable-execution-sdk-js",
     ],
   ]);
 
   // The CLI writes the generated entry before bundling and the build metadata after.
   // Paths are relative, so they resolve against the test's working directory.
   try {
-    expect(await Bun.file(".voke/build/index.ts").text()).toContain(
-      'export const http = handlers["http"];'
+    const entry = await Bun.file(".voke/build/index.ts").text();
+
+    expect(entry).toContain('export const http = handlers["http"];');
+    // The deployed handlers compose the Gateway from the config file the CLI loaded.
+    expect(entry).toContain(
+      `import config from ${JSON.stringify(configPath)};`
+    );
+    expect(entry).toContain(
+      "const handlers = createLambdaHandlers(project, { config });"
     );
     expect(await Bun.file("./configured-dist/package.json").json()).toEqual({
       type: "module",

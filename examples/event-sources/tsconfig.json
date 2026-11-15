@@ -1,0 +1,7 @@
+{
+  "extends": "../../tsconfig.json",
+  "include": ["voke.config.ts", "src/**/*.ts", "test/**/*.ts"],
+  "compilerOptions": {
+    "strictNullChecks": true
+  }
+}

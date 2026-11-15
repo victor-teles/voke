@@ -1,3 +1,4 @@
+import { VokeModelError } from "voke";
 import type { VokeModel, VokeProvider } from "voke";
 
 import { createAwsBuildPlan } from "./build";
@@ -5,7 +6,13 @@ import { synthesizeCloudFormationFromModel } from "./cloudformation-synthesis";
 import { deployAwsStack, removeAwsStack } from "./deploy";
 import { createDeployAwsClients } from "./deploy-clients";
 import { createAwsDiagnostics } from "./diagnostics";
+import {
+  findAwsEventSourceAdapter,
+  unsupportedEventSourceMessage,
+} from "./event-sources";
+import type { VokeIssue } from "./event-sources";
 import { awsRouteAuth } from "./lambda";
+import { createAwsInvokeCapability } from "./lambda-invoke-transport";
 import {
   defineAwsLambdaSettings,
   validateAwsLambdaModel,
@@ -19,6 +26,7 @@ import {
 } from "./local";
 import { awsEmulator } from "./local-aws-emulator";
 import type { LocalProvider } from "./local-provider";
+import { pluginRecordIssues } from "./plugin-records";
 import { createAwsRuntimeVariableProvider } from "./runtime-variables";
 
 export {
@@ -58,6 +66,7 @@ export {
   type AwsLogRetentionDays,
 } from "./lambda-settings";
 export { parameter, secret } from "./runtime-variables";
+export { awsPolicy, type AwsPolicyStatement } from "./plugin-records";
 export type {
   AwsLambdaContext,
   AwsLambdaHttpApiV2Event,
@@ -66,6 +75,7 @@ export type {
 export {
   createLambdaHandlers,
   type LambdaHandler,
+  type LambdaHandlersOptions,
   type LambdaProjectModule,
 } from "./lambda-handlers";
 export {
@@ -89,24 +99,130 @@ export {
   type SqsRecord,
   type SqsValidMessage,
 } from "./sqs";
+export {
+  sns,
+  type SnsAwsEvent,
+  type SnsEventInvocationInput,
+  type SnsEventSourceDefinition,
+  type SnsFilterPolicy,
+  type SnsFilterPolicyScope,
+  type SnsFunctionDefinitionInput,
+  type SnsMessage,
+  type SnsMessageAttribute,
+  type SnsMessageSchema,
+  type SnsNotification,
+  type SnsRecord,
+} from "./sns";
+export {
+  eventBridge,
+  type EventBridgeAwsEvent,
+  type EventBridgeEvent,
+  type EventBridgeEventInvocationInput,
+  type EventBridgeEventSchema,
+  type EventBridgeEventSourceDefinition,
+  type EventBridgeFunctionDefinitionInput,
+  type EventBridgePattern,
+} from "./eventbridge";
+export {
+  schedule,
+  type ScheduledEvent,
+  type ScheduledEventSchema,
+  type ScheduleEnvelope,
+  type ScheduleEventInvocationInput,
+  type ScheduleEventSourceDefinition,
+  type ScheduleFunctionDefinitionInput,
+} from "./schedule";
+export {
+  kinesis,
+  type KinesisAwsEvent,
+  type KinesisEventInvocationInput,
+  type KinesisEventInvocationRecord,
+  type KinesisEventSourceDefinition,
+  type KinesisFunctionDefinitionInput,
+  type KinesisInvalidRecord,
+  type KinesisRecord,
+  type KinesisRecordBatch,
+  type KinesisRecordBatchIncludeInvalid,
+  type KinesisRecordBatchSchema,
+  type KinesisValidRecord,
+} from "./kinesis";
+export {
+  dynamodbStream,
+  type DynamodbStreamAwsEvent,
+  type DynamodbStreamAwsRecord,
+  type DynamodbStreamEventInvocationInput,
+  type DynamodbStreamEventInvocationRecord,
+  type DynamodbStreamEventName,
+  type DynamodbStreamEventSourceDefinition,
+  type DynamodbStreamFunctionDefinitionInput,
+  type DynamodbStreamInvalidRecord,
+  type DynamodbStreamRecordBatch,
+  type DynamodbStreamRecordBatchIncludeInvalid,
+  type DynamodbStreamRecordBatchSchema,
+  type DynamodbStreamValidRecord,
+  type DynamodbStreamViewType,
+} from "./dynamodb-stream";
+export {
+  s3,
+  type S3AwsEvent,
+  type S3AwsEventDetail,
+  type S3EventInvocationInput,
+  type S3EventKind,
+  type S3EventSourceDefinition,
+  type S3FunctionDefinitionInput,
+  type S3ObjectEvent,
+  type S3ObjectEventSchema,
+} from "./s3";
+export {
+  durable,
+  type DurableContext,
+  type DurableDuration,
+  type DurableFunctionHandler,
+  type DurableFunctionWithInputDefinitionInput,
+  type DurableInvokeContext,
+  type DurableZeroInputFunctionDefinitionInput,
+} from "./durable";
+export type {
+  StreamBatchResult,
+  StreamBatchResultBuilder,
+  StreamEventSourceOptions,
+  StreamInvalidRecordMode,
+  StreamStartingPosition,
+} from "./stream-batch";
 
 const validateAwsModel = (model: VokeModel): void => {
-  for (const [functionName, definition] of Object.entries(model.functions)) {
-    for (const eventSource of definition.eventSources) {
-      if (eventSource.type !== "sqs") {
+  const issues: VokeIssue[] = [];
+
+  for (const [functionKey, definition] of Object.entries(model.functions)) {
+    for (const [
+      eventSourceIndex,
+      eventSource,
+    ] of definition.eventSources.entries()) {
+      const adapter = findAwsEventSourceAdapter(eventSource.type);
+
+      if (adapter === undefined) {
+        issues.push({
+          message: unsupportedEventSourceMessage(functionKey, eventSource.type),
+          path: `functions.${functionKey}.eventSources.${eventSourceIndex}.type`,
+        });
         continue;
       }
 
-      const resource = model.resources[eventSource.queue];
-      const cloudFormationType =
-        resource?.provider?.aws?.properties.cloudFormationType;
-
-      if (resource !== undefined && cloudFormationType !== "AWS::SQS::Queue") {
-        throw new Error(
-          `Function "${functionName}" SQS event source references resource "${eventSource.queue}", but it is an ${JSON.stringify(cloudFormationType)} resource instead of an "AWS::SQS::Queue".`
-        );
-      }
+      issues.push(
+        ...adapter.validate({
+          eventSource,
+          eventSourceIndex,
+          functionKey,
+          model,
+        })
+      );
     }
+  }
+
+  issues.push(...pluginRecordIssues(model));
+
+  if (issues.length > 0) {
+    throw VokeModelError.validation(issues);
   }
 
   validateAwsLambdaModel(model);
@@ -161,6 +277,7 @@ export const aws = (options: AwsProviderOptions = {}): VokeProvider => {
         }),
     },
     diagnostics: createAwsDiagnostics(localProvider),
+    invoke: createAwsInvokeCapability(),
     local: {
       devEnvironment: async ({ config, endpoint, model, region, stage }) => {
         const environment = await createLocalAwsEnvironment({

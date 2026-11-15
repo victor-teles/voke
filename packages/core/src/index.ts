@@ -27,6 +27,8 @@ export {
   type RequestAuthorizerOutcome,
   type AnyFunctionDefinition,
   type EventFunctionDefinition,
+  type EventFunctionHandler,
+  type EventSourceDefinition,
   type FunctionSynthesisConfig,
   type FunctionRegistry,
   type FunctionRegistryInput,
@@ -36,11 +38,16 @@ export {
   type InvokeOptions,
   type InvokeTransport,
   type RouteAuthContext,
+  type RouteMeta,
   type InvokeTransportResponse,
 } from "./invoke";
 export {
   formatValidationIssue,
+  readJsonSchema,
   readStandardResult,
+  type StandardJsonSchemaConverter,
+  type StandardJsonSchemaOptions,
+  type StandardJsonSchemaTarget,
   type StandardSchemaFailureResult,
   type StandardSchemaInput,
   type StandardSchemaIssue,
@@ -87,11 +94,13 @@ export type { VokeEnv } from "./context";
 export {
   createInternalModel as createVokeModel,
   type VokeModel,
+  type VokeModelEventSource,
   type VokeModelFunction,
   type VokeModelHttpAuthorizer,
   type VokeModelProviderExtensionRecord,
   type VokeModelRecord,
   type VokeModelInput,
+  type VokeModelPlugin,
   type VokeModelResource,
 } from "./model";
 export {
@@ -111,6 +120,7 @@ export {
   type ProviderCommandRunner,
   type ProviderCommandRunOptions,
   type ProviderInvokeCapability,
+  type ProviderInvokeTarget,
   type ProviderLocalCapability,
   type ProviderLocalDevEnvironment,
   type ProviderLocalWorkflow,
@@ -120,4 +130,20 @@ export {
   type VokeProvider,
   type VokeProviderCapability,
 } from "./provider";
+// A package building block: @voke/remote narrows contract JSON Schema the same way.
+export { toContractJsonSchema } from "./remote";
 export { route } from "./route-builder";
+export {
+  projectFunctionEntries,
+  type FunctionExecution,
+  type FunctionExecutionKind,
+  type FunctionWrap,
+  type PluginCliCapability,
+  type PluginCommand,
+  type PluginCommandInput,
+  type PluginContributions,
+  type PluginRuntimeCapability,
+  type PluginRuntimeHooks,
+  type PluginRuntimeInput,
+  type VokePlugin,
+} from "./plugin";

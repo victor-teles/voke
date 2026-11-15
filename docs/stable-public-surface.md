@@ -12,15 +12,19 @@ Use the root package for the common Function-first Gateway authoring path:
 - Function Contract helpers: `StandardSchemaV1`-compatible schemas accepted by `fn(...)`, `http(...)`, and the Route Builder
 - Route Builder support: `route.get(...)`, `.post(...)`, `.put(...)`, `.patch(...)`, `.delete(...)`, `.head(...)`, `.options(...)`, and `.route(...)`
 - Config: root exports `defineConfig`
+- Plugins ([ADR 0015](./adr/0015-plugin-contract.md)): the `VokePlugin` contract types (`PluginRuntimeCapability`, `PluginRuntimeInput`, `PluginRuntimeHooks`, `PluginContributions`, `PluginCliCapability`, `PluginCommand`, `PluginCommandInput`, `FunctionExecution`, `FunctionExecutionKind`, `FunctionWrap`) and the Provider building block `projectFunctionEntries`
 - Runtime Variable primitives (provider-neutral): `createVariableSource`, `createVariableProvider`
 - Error classes: `VokeConfigError`, `VokeModelError`, `VokeResourceBindingError`, `VokeRuntimeVariableError`, `InvokeError`
-- Provider building blocks: `functionRegistryEntries`, `createHandlerExportName`, `runRequestAuthorizer`, `readStandardResult` and `formatValidationIssue` (read a Standard Schema result), and the `BuildPlan`, `ProviderBuildInput` and `RouteAuthContext` types
+- Provider building blocks: `functionRegistryEntries`, `createHandlerExportName`, `runRequestAuthorizer`, `readStandardResult` and `formatValidationIssue` (read a Standard Schema result), the `BuildPlan`, `ProviderBuildInput` and `RouteAuthContext` types, and the open Event Source types `EventSourceDefinition`, `EventFunctionHandler` and `VokeModelEventSource` that Provider packages build Event Source Functions with
+- Provider invoke routing: `ProviderInvokeCapability` (`transport`, `target`, `acceptsExecutionName`) and the `ProviderInvokeTarget` type; `InvokeOptions.executionName`, `AsyncInvokeResult.executionId`, and the `INVALID_OPTIONS` invoke error code
 - HTTP helpers: use `@voke/http`
 - Runtime AWS binding helpers: use `@voke/aws`
 - CloudFormation synthesis entrypoint: use `@voke/aws/cloudformation`
 - Internal model inspection: use root type exports from `voke`
 - Remote helpers: use `@voke/remote`
 - Build helpers: use `@voke/build`
+- OpenAPI documents and the API Reference Page: use `@voke/openapi`
+- JSON Schema building blocks: `readJsonSchema` (Standard JSON Schema, draft 2020-12) and `toContractJsonSchema` (the Function Contract Artifact subset), shared by `@voke/openapi` and `@voke/remote`; the `RouteMeta` type documents a route
 - Invoke helpers: `functions.invoke(...)` and `functions.route(...)`
 - Test helpers used by stable examples: use `@voke/testing`
 - AWS-specific test helpers: use `@voke/aws/testing`
@@ -34,15 +38,21 @@ The root should not export removed pre-stable APIs such as `api()`, `createGatew
 Use `@voke/aws` for AWS-specific authoring and runtime binding helpers:
 
 - Runtime Variable builders: `secret`, `parameter` (each with `.fromResource(...)`)
-- Event Source Function helpers: `sqs`, `createSqsEventHandler`
+- Event Source Function helpers: `sqs`, `createSqsEventHandler`, `sns`, `eventBridge`, `schedule`, and their input and event types (`SnsMessage`, `SnsEventInvocationInput`, `EventBridgeEvent`, `EventBridgeEventInvocationInput`, `EventBridgePattern`, `ScheduledEvent`, `ScheduleEventInvocationInput`)
+- Stream Event Source Function helpers: `kinesis`, `dynamodbStream` (handlers return a `StreamBatchResult`)
+- S3 Event Source Function helper: `s3`, with `S3ObjectEvent`, `S3EventInvocationInput` and `S3EventKind`
+- Durable Function helper: `durable` (handlers receive `context.durable`, the AWS SDK's `DurableContext`; types `DurableContext`, `DurableDuration`, `DurableInvokeContext`, `DurableFunctionHandler`)
+- Durable Function test helpers in `@voke/aws/testing`: `setupDurableTests`, `teardownDurableTests`, `runDurable`
 - Generated Lambda handlers: `createLambdaHandlers` (used by the entry module `voke build` generates)
 - API Gateway authorizer helpers: `createAuthorizers`, `jwtAuthorizer`, `lambdaAuthorizer`, `requestAuthorizer`
 - Runtime binding helpers: `bindResource`, `createAwsClientConfig`
+- Plugin Provider Extension Record: `awsPolicy` (IAM statements a Plugin adds to every Function role)
 - Provider: `aws`
 
 CloudFormation resource builders live in `@voke/aws/cloudformation`, so runtime value loading and
 infrastructure declaration do not share an import boundary: `dynamodbTable`, `sqsQueue`, `snsTopic`,
 `eventBus`, `s3Bucket`, `secret`, `ssmParameter`, and `synthesizeCloudFormation`.
+The Kinesis stream builder, `kinesisStream`, lives there too.
 
 ```ts
 import { defineConfig } from "voke";
@@ -60,6 +70,8 @@ These packages are stable, but should be used only when the caller needs the spe
 - `@voke/aws/testing`
 - `@voke/build`
 - `@voke/http`
+- `@voke/openapi`
+- `@voke/idempotency`
 - `@voke/remote`
 - `@voke/schema`
 - `@voke/testing`

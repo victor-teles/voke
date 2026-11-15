@@ -1,6 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
 
 import { secret } from "@voke/aws";
+import { schema as vokeSchema } from "@voke/schema";
+import { z } from "zod";
 
 import { voke } from "../src/app";
 import { defineConfig } from "../src/config";
@@ -11,7 +13,11 @@ import type {
   FunctionContractMetadata,
   JsonSchema,
 } from "../src/remote";
-import { createRemoteFunctions, generateRemoteModules } from "../src/remote";
+import {
+  createFunctionContractArtifact,
+  createRemoteFunctions,
+  generateRemoteModules,
+} from "../src/remote";
 import { setEnv } from "./support/env";
 
 const schema = <TValue>(
@@ -145,6 +151,57 @@ test("invokes a remote Function through another voke dev server", async () => {
       name: "Victor",
       requestId: "req_remote",
     });
+  });
+});
+
+test("a Zod contract becomes a JSON Schema entry in the Function Contract Artifact", () => {
+  const artifact = createFunctionContractArtifact(
+    "users",
+    createFunctions({
+      getUser: fn({
+        handler: (payload) => ({ id: payload.id, name: "Ada" }),
+        input: z.object({ id: z.string().min(1) }),
+        output: z.object({
+          id: z.string(),
+          name: z.union([z.string(), z.null()]),
+        }),
+      }),
+    })
+  );
+
+  expect(artifact.functions.getUser).toEqual({
+    input: {
+      properties: { id: { type: "string" } },
+      required: ["id"],
+      type: "object",
+    },
+    output: {
+      additionalProperties: false,
+      // The union cannot be expressed by the artifact's JSON Schema subset.
+      properties: { id: { type: "string" }, name: true },
+      required: ["id", "name"],
+      type: "object",
+    },
+  });
+});
+
+test("a @voke/schema contract becomes a JSON Schema entry in the Function Contract Artifact", () => {
+  const artifact = createFunctionContractArtifact(
+    "users",
+    createFunctions({
+      getUser: fn({
+        handler: (payload) => payload,
+        input: vokeSchema.object({ id: vokeSchema.string() }),
+        output: vokeSchema.object({ id: vokeSchema.string() }),
+      }),
+    })
+  );
+
+  expect(artifact.functions.getUser?.input).toEqual({
+    additionalProperties: false,
+    properties: { id: { type: "string" } },
+    required: ["id"],
+    type: "object",
   });
 });
 

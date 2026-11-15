@@ -1,0 +1,237 @@
+---
+title: DynamoDB stream events
+description: Run a Function for each batch of changes to a DynamoDB table, with keys and item images as plain values, and test the Function locally.
+---
+
+After reading this page you can turn on a table's stream, attach a Function to it as an **Event
+Source**, report failed records, and test the Function without AWS.
+
+## Turn on the stream and declare the Function
+
+Pass `stream` to `dynamodbTable()` from `@voke/aws/cloudformation`. It sets the table's stream view
+type, which decides what each change record carries:
+
+| `stream`               | Each record carries                      |
+| ---------------------- | ---------------------------------------- |
+| `"NEW_AND_OLD_IMAGES"` | The keys, the new and the old item.      |
+| `"NEW_IMAGE"`          | The keys and the item after the change.  |
+| `"OLD_IMAGE"`          | The keys and the item before the change. |
+| `"KEYS_ONLY"`          | The keys only.                           |
+
+Then create the Function with `dynamodbStream()` from `@voke/aws`, and pass the table's resource key
+as `table`:
+
+```ts twoslash
+// @filename: voke.config.ts
+import { aws } from "@voke/aws";
+import { dynamodbTable } from "@voke/aws/cloudformation";
+import { defineConfig } from "voke";
+
+export default defineConfig({
+  name: "orders",
+  provider: aws(),
+  resources: {
+    ordersTable: dynamodbTable({ stream: "NEW_AND_OLD_IMAGES" }),
+  },
+});
+
+// @filename: src/index.ts
+import { dynamodbStream } from "@voke/aws";
+import { schema } from "@voke/schema";
+import { createFunctions } from "voke";
+
+const order = schema.object({
+  id: schema.string(),
+  total: schema.number(),
+});
+
+export const functions = createFunctions({
+  projectOrders: dynamodbStream({
+    table: "ordersTable",
+    item: order,
+    handler: async (batch) => {
+      for (const record of batch.records) {
+        if (record.eventName === "REMOVE") {
+          console.info(`order ${String(record.keys.id)} removed`);
+        } else {
+          console.info(`order ${record.newItem?.id}: ${record.newItem?.total}`);
+        }
+      }
+
+      return batch.ok();
+    },
+  }),
+});
+```
+
+- `table` is the key of a `dynamodbTable()` resource with a `stream`. Model validation fails if the
+  table has no stream, and tells you to add `stream: "NEW_AND_OLD_IMAGES"`.
+- `item` is optional: a Function Contract for one item image. When you pass it, Voke validates every
+  image a record carries. A table with `stream: "KEYS_ONLY"` has no images, so `item` is an error
+  there.
+
+## Work with a batch
+
+The handler receives one batch, not the raw AWS event. Voke converts the keys and images from
+DynamoDB's attribute-value JSON (`{ "S": "o1" }`) to plain values before your handler runs.
+
+`batch.records` is the list of valid records, in stream order. Each record has:
+
+| Field            | Value                                                          |
+| ---------------- | -------------------------------------------------------------- |
+| `eventName`      | `"INSERT"`, `"MODIFY"` or `"REMOVE"`.                          |
+| `keys`           | The item's primary key attributes.                             |
+| `newItem`        | The item after the change, when the view type has new images.  |
+| `oldItem`        | The item before the change, when the view type has old images. |
+| `sequenceNumber` | The record's sequence number in its shard.                     |
+| `id`             | The Lambda event id.                                           |
+| `raw`            | The original record, still in attribute-value JSON.            |
+| `valid`          | `true`.                                                        |
+
+An `INSERT` has no `oldItem`, and a `REMOVE` has no `newItem`. With `"NEW_IMAGE"`, a `REMOVE` record
+has neither image; it is still valid.
+
+The conversion follows `unmarshall` from `@aws-sdk/util-dynamodb`: string, number and binary sets
+become `Set`s, binary values become `Uint8Array`s, and `NULL` becomes `null`. Every number becomes a
+JavaScript `number`. An integer larger than `Number.MAX_SAFE_INTEGER` is rounded, where `unmarshall`
+would return a `bigint`; store such values as strings.
+
+## Report failed records
+
+The handler returns a **Stream Batch Result**, and every mapping has `ReportBatchItemFailures`
+turned on. As with any stream, Lambda takes the lowest failed sequence number as the checkpoint and
+delivers that record again **with every record after it in the batch**, including records that
+succeeded. Make the handler idempotent:
+
+```ts twoslash
+import { dynamodbStream } from "@voke/aws";
+
+const updateSearchIndex = async (
+  keys: Record<string, unknown>
+): Promise<void> => {
+  if (Object.keys(keys).length === 0) {
+    throw new Error("missing keys");
+  }
+};
+
+// ---cut---
+export const indexOrders = dynamodbStream({
+  table: "ordersTable",
+  handler: async (batch) => {
+    const result = batch.batchResult();
+
+    for (const record of batch.records) {
+      try {
+        await updateSearchIndex(record.keys);
+      } catch {
+        result.fail(record);
+        break;
+      }
+    }
+
+    return result;
+  },
+});
+```
+
+If the handler throws, Lambda fails the whole batch. With `bisectOnError` (on by default), Lambda
+splits a failed batch in two and retries each half.
+
+## Invalid records
+
+A record whose attribute values cannot be converted, or whose image does not match `item`, is
+invalid. By default Voke reports it as a failed record and leaves it out of `batch.records`.
+
+Set `invalidRecord: "include"` to receive invalid records too. An invalid record has `valid: false`,
+`eventName`, `sequenceNumber`, `raw` and `error` (an `InvokeError` with code `INVALID_PAYLOAD`).
+`batch.ok()` and `batch.batchResult()` still report it as failed; to move past it, return a result
+without it.
+
+## Mapping options
+
+`dynamodbStream()` accepts the same mapping options as `kinesis()`: `startingPosition`
+(`"trimHorizon"` by default), `batchSize` (`100`), `maxBatchingWindowSeconds` (`0`),
+`bisectOnError` (`true`), `maxRetryAttempts` (not set) and `enabled` (`true`). See
+[Kinesis events](/docs/guides/kinesis-events#mapping-options) for their ranges.
+
+## When a record can never succeed
+
+A record that always fails blocks its shard until it succeeds or leaves the stream, which DynamoDB
+Streams keeps for 24 hours. Voke leaves `maxRetryAttempts` unset on purpose: a capped mapping
+discards the record after its last attempt, and Voke has no failure destination to keep it yet. A
+stalled shard is visible; a discarded change is lost silently.
+
+To move past a record that cannot succeed, handle it in your code (log it or store it) and return a
+result without it. If losing changes is acceptable, set `maxRetryAttempts`.
+
+## Test a DynamoDB stream Function
+
+`voke dev` does not read table streams. Test the Function with `functions.sendEvent(name, { records })`.
+Records use plain values; Voke converts them to attribute-value JSON and runs the same conversion,
+validation and handler code as the deployed Lambda:
+
+```ts twoslash
+import { dynamodbStream } from "@voke/aws";
+import { schema } from "@voke/schema";
+import { createFunctions } from "voke";
+
+const functions = createFunctions({
+  projectOrders: dynamodbStream({
+    table: "ordersTable",
+    item: schema.object({ id: schema.string(), total: schema.number() }),
+    handler: (batch) => batch.ok(),
+  }),
+});
+
+// ---cut---
+const result = await functions.sendEvent("projectOrders", {
+  records: [
+    {
+      eventName: "INSERT",
+      keys: { id: "o1" },
+      newItem: { id: "o1", total: 10 },
+    },
+    {
+      eventName: "REMOVE",
+      keys: { id: "o2" },
+      oldItem: { id: "o2", total: 5 },
+    },
+  ],
+});
+
+console.info(result);
+// { batchItemFailures: [] }
+```
+
+`sequenceNumber` defaults to `"1"`, `"2"`, and so on.
+
+## What gets deployed
+
+For each `dynamodbStream()` Function, `voke synth` adds:
+
+- An `AWS::Lambda::EventSourceMapping` from the table's stream (`Fn::GetAtt` `StreamArn`) to the
+  Function, with the same defaults as a Kinesis mapping.
+- Read access on the Function's own role only: `dynamodb:DescribeStream`, `dynamodb:GetRecords` and
+  `dynamodb:GetShardIterator` on the table's stream, and `dynamodb:ListStreams` on `*`, the same
+  set as the AWS managed policy `AWSLambdaDynamoDBExecutionRole`.
+
+`dynamodbTable({ stream })` adds `StreamSpecification` to the table. A table without `stream` is
+synthesized exactly as before.
+
+## Limits
+
+<Callout type="info">
+
+DynamoDB stream support is intentionally small in v1:
+
+- One table per Function. `ParallelizationFactor`, tumbling windows and event filtering are not
+  supported.
+- There is no failure destination for discarded records.
+
+</Callout>
+
+## Next steps
+
+- [Kinesis events](/docs/guides/kinesis-events): consume a Kinesis data stream.
+- [Resources and bindings](/docs/guides/resources): read and write the table from a Function.
+- [Testing](/docs/guides/testing): test Functions and the Gateway.

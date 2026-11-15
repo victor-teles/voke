@@ -53,6 +53,8 @@ Invalid CLI usage: Unknown flag --stag for "synth". Did you mean --stage?
 Usage: voke synth [entrypoint] [out] [--config voke.config.ts] [--name api] [--stage local] [--region us-east-1]
 ```
 
+A [Plugin](/docs/guides/plugins) can add commands, run as `voke <plugin> <command>`. When `./voke.config.ts` loads, `voke --help` lists them under "Plugin commands:"; `voke <plugin>` lists one Plugin's commands, and `voke <plugin> <command> --help` prints a command's usage and flags. Every Plugin command accepts `--config`. Built-in commands always win, so no Plugin command can replace one.
+
 Commands that read the project accept `--config`, `--entrypoint`, `--name`, `--region` and `--stage`. When `voke.config.ts` does not exist and you do not pass `--config`, Voke builds a config from these flags; the name falls back to the `package.json` name, then `api`. The commands that need a Provider (`synth`, `build`, `deploy`, `remove`, `local`) fail with an example `provider: aws()` line when the config has none. See [Config](/docs/reference/config) for every setting.
 
 ## build
@@ -228,6 +230,28 @@ voke migrate serverless ./serverless.yml --out ./voke-migration
 ```
 
 `voke migrate serverless` reads a Serverless Framework service and writes a Function-first Voke skeleton and a migration report to the output directory. It prints `Wrote migration skeleton to <directory>`. See [Serverless migration](/docs/guides/serverless-migration).
+
+## openapi
+
+A command of the `openapi()` Plugin from `@voke/openapi`: it exists when `voke.config.ts` declares that Plugin.
+
+```txt
+Usage: voke openapi generate [--out openapi.json] [--server <url>]
+
+Write the OpenAPI document of the project's HTTP API.
+
+Flags:
+  --out <value>     Output file. Default: openapi.json
+  --server <value>  A server URL to list in the document
+  --config <value>  Config file. Default: voke.config.ts
+```
+
+```bash
+voke openapi generate
+voke openapi generate --out ./dist/openapi.json --server https://api.example.com
+```
+
+`voke openapi generate` imports the entrypoint and writes the OpenAPI 3.1 document of every route as two-space JSON. It prints `Wrote <path> (<n> operations)`. See [OpenAPI and API reference](/docs/guides/openapi).
 
 ## remote
 
