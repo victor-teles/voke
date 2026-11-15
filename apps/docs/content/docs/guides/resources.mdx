@@ -3,9 +3,7 @@ title: Resources and bindings
 description: Declare AWS resources such as tables, queues and buckets in voke.config.ts, and read their names and URLs from Function code.
 ---
 
-After reading this page you can declare the AWS resources your project needs, find their deployed
-names and URLs from a Function, create AWS SDK clients that work both locally and on AWS, and know
-which access each Function gets.
+After this page you can declare the AWS resources your project needs, read their deployed names and URLs from a Function, and create AWS SDK clients that work both locally and on AWS. It also lists the access each Function gets.
 
 ## Declare resources
 
@@ -13,7 +11,7 @@ Declare resources in `resources` in `voke.config.ts`, with the builders from
 `@voke/aws/cloudformation`. The key of each entry (`usersTable` below) is the **resource key**: you
 use it to bind the resource in code, and Voke derives the CloudFormation logical id from it.
 
-```ts twoslash
+```ts title="voke.config.ts" twoslash
 import { aws } from "@voke/aws";
 import { dynamodbTable, s3Bucket, sqsQueue } from "@voke/aws/cloudformation";
 import { defineConfig } from "voke";
@@ -33,6 +31,8 @@ export default defineConfig({
 in the Local AWS Provider. See [Local AWS](/docs/guides/local-aws).
 
 ## Builders
+
+Each builder declares one AWS resource and exposes one binding attribute.
 
 | Builder                          | AWS resource                  | Options                                                                                                                                     | Binding attribute |
 | -------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- |
@@ -57,10 +57,12 @@ it needs no declaration. The [idempotency Plugin](/docs/guides/idempotency) uses
 AWS generates the physical names. Your code never hard-codes a table name or a queue URL: it reads
 them from bindings.
 
-`secret` from `@voke/aws/cloudformation` declares a Secrets Manager resource. `secret` from
-`@voke/aws` is a different function that reads a secret at run time. To read the value of a declared
-`secret()` or `ssmParameter()`, use a [Runtime Variable](/docs/guides/runtime-variables) with
-`.fromResource(key)`.
+<Callout type="info" title="Two functions are named secret">
+  `secret` from `@voke/aws/cloudformation` declares a Secrets Manager resource.
+  `secret` from `@voke/aws` is a different function that reads a secret at run
+  time. To read the value of a declared `secret()` or `ssmParameter()`, use a
+  [Runtime Variable](/docs/guides/runtime-variables) with `.fromResource(key)`.
+</Callout>
 
 ## Read a resource from a Function
 
@@ -105,7 +107,7 @@ Pass `createAwsClientConfig()` from `@voke/aws` to every AWS SDK client you crea
   and local commands set these to the Local AWS Provider. A deployed Lambda has neither, so
   `endpoint` is left out and the SDK uses its default AWS endpoint.
 
-<Callout type="warn">
+<Callout type="warn" title="SQS calls can reach real AWS">
   Do not skip `createAwsClientConfig()` for SQS. SQS queue URLs carry the real AWS host
   (`https://sqs.<region>.amazonaws.com/...`). An SQS client without an explicit endpoint sends a
   call for that queue URL to that host, which is real AWS, even while you run locally.
@@ -185,9 +187,12 @@ Voke synthesizes one IAM role per Function. Each role gets the AWS managed polic
 | `secret()`        | `secretsmanager:GetSecretValue`                                                           | The secret ARN.                       |
 | `ssmParameter()`  | `ssm:GetParameter`, `ssm:GetParameters`                                                   | The parameter ARN.                    |
 
-Access is scoped to each resource's ARN, never to `*`. But it is not scoped per Function: every
-Function in the project gets every statement and every `VOKE_RESOURCE_*` binding, whether or not it
-uses the resource. Voke has no way yet to bind a resource to some Functions only.
+<Callout type="warn" title="Access is not scoped per Function">
+  Access is scoped to each resource's ARN, never to `*`. But it is not scoped
+  per Function: every Function in the project gets every statement and every
+  `VOKE_RESOURCE_*` binding, whether or not it uses the resource. Voke has no
+  way yet to bind a resource to some Functions only.
+</Callout>
 
 [Runtime Variables](/docs/guides/runtime-variables#iam-permissions) are different: only the Function
 that declares one gets its permission.
@@ -199,10 +204,52 @@ consumer gets them on the table's stream ARN, plus `dynamodb:ListStreams` on `*`
 
 ## Next steps
 
-- [SQS events](/docs/guides/sqs-events): consume a declared queue with a Function.
-- [SNS events](/docs/guides/sns-events) and [EventBridge events](/docs/guides/eventbridge-events): run a Function for each message on a declared topic or event bus.
-- [Kinesis events](/docs/guides/kinesis-events) and [DynamoDB stream events](/docs/guides/dynamodb-stream-events): consume a declared stream with a Function.
-- [S3 events](/docs/guides/s3-events): run a Function for each object created in or deleted from a declared bucket.
-- [Runtime Variables](/docs/guides/runtime-variables): read a declared secret or parameter.
-- [Local AWS](/docs/guides/local-aws): create the resources locally.
-- [Config reference](/docs/reference/config): every `voke.config.ts` setting.
+<Cards>
+  <Card icon={<Mail />} href="/docs/guides/sqs-events" title="SQS events">
+    Consume a declared queue with a Function.
+  </Card>
+  <Card icon={<Megaphone />} href="/docs/guides/sns-events" title="SNS events">
+    Run a Function for each message on a declared topic.
+  </Card>
+  <Card
+    icon={<Radio />}
+    href="/docs/guides/eventbridge-events"
+    title="EventBridge events"
+  >
+    Run a Function for each event on a declared event bus.
+  </Card>
+  <Card
+    icon={<Waves />}
+    href="/docs/guides/kinesis-events"
+    title="Kinesis events"
+  >
+    Consume a declared stream with a Function.
+  </Card>
+  <Card
+    icon={<Database />}
+    href="/docs/guides/dynamodb-stream-events"
+    title="DynamoDB stream events"
+  >
+    Consume the stream of a declared table with a Function.
+  </Card>
+  <Card icon={<FolderInput />} href="/docs/guides/s3-events" title="S3 events">
+    Run a Function for each object created in or deleted from a declared bucket.
+  </Card>
+  <Card
+    icon={<KeyRound />}
+    href="/docs/guides/runtime-variables"
+    title="Runtime Variables"
+  >
+    Read a declared secret or parameter.
+  </Card>
+  <Card icon={<Boxes />} href="/docs/guides/local-aws" title="Local AWS">
+    Create the resources locally.
+  </Card>
+  <Card
+    icon={<SlidersHorizontal />}
+    href="/docs/reference/config"
+    title="Config reference"
+  >
+    Every `voke.config.ts` setting.
+  </Card>
+</Cards>

@@ -3,8 +3,8 @@ title: Kinesis events
 description: Run a Function for each batch of records on a Kinesis data stream, report the first failed record, and test the Function locally.
 ---
 
-After reading this page you can declare a Kinesis data stream, attach a Function to it as an
-**Event Source**, report failed records, and test the Function without AWS.
+After this page you can declare a Kinesis data stream, attach a Function to it as an **Event
+Source**, report failed records, and test the Function without AWS.
 
 ## Declare the stream and the Function
 
@@ -165,9 +165,14 @@ export const ingestClicks = kinesis({
 ```
 
 An invalid record has `valid: false`, `rawData` (the payload as Kinesis delivered it, still base64)
-and `error` (an `InvokeError` with code `INVALID_PAYLOAD`). `batch.ok()` and `batch.batchResult()`
-still report it as failed. To move past a record you have handled, return a result without it, such
-as `{ batchItemFailures: [] }`.
+and `error` (an `InvokeError` with code `INVALID_PAYLOAD`).
+
+<Callout type="warn" title="Invalid records still count as failed">
+
+`batch.ok()` and `batch.batchResult()` still report an invalid record as failed. To move past a
+record you have handled, return a result without it, such as `{ batchItemFailures: [] }`.
+
+</Callout>
 
 ## Mapping options
 
@@ -200,9 +205,8 @@ result that does not fail it. If losing records is acceptable, set `maxRetryAtte
 
 ## Test a Kinesis Function
 
-`voke dev` does not read records from streams. Test a Kinesis Function with
-`functions.sendEvent(name, { records })`. It runs the same decoding, validation and handler code as
-the deployed Lambda, and returns the batch result:
+Test a Kinesis Function with `functions.sendEvent(name, { records })`. It runs the same decoding,
+validation and handler code as the deployed Lambda, and returns the batch result:
 
 ```ts twoslash
 import { kinesis } from "@voke/aws";
@@ -230,6 +234,12 @@ Each record needs only `data`, a plain value that Voke encodes as a producer wou
 Kinesis metadata: `sequenceNumber` defaults to `"1"`, `"2"`, and so on, and `partitionKey` to
 `"local"`.
 
+<Callout type="info" title="Local runs do not create the trigger">
+
+`voke dev` does not read records from streams.
+
+</Callout>
+
 ## What gets deployed
 
 For each `kinesis()` Function, `voke synth` adds:
@@ -246,9 +256,7 @@ can produce to it. See [Resources and bindings](/docs/guides/resources).
 
 ## Limits
 
-<Callout type="info">
-
-Kinesis support is intentionally small in v1:
+<Callout type="info" title="Kinesis support is intentionally small in v1">
 
 - One stream per Function, read through a shared-throughput (standard) iterator. Enhanced fan-out,
   `ParallelizationFactor`, tumbling windows, `AT_TIMESTAMP` and event filtering are not supported.
@@ -259,6 +267,22 @@ Kinesis support is intentionally small in v1:
 
 ## Next steps
 
-- [DynamoDB stream events](/docs/guides/dynamodb-stream-events): react to table changes.
-- [Resources and bindings](/docs/guides/resources): write records to the stream from another Function.
-- [Testing](/docs/guides/testing): test Functions and the Gateway.
+<Cards>
+  <Card
+    icon={<Database />}
+    href="/docs/guides/dynamodb-stream-events"
+    title="DynamoDB stream events"
+  >
+    React to table changes.
+  </Card>
+  <Card
+    icon={<Database />}
+    href="/docs/guides/resources"
+    title="Resources and bindings"
+  >
+    Write records to the stream from another Function.
+  </Card>
+  <Card icon={<FlaskConical />} href="/docs/guides/testing" title="Testing">
+    Test Functions and the Gateway.
+  </Card>
+</Cards>

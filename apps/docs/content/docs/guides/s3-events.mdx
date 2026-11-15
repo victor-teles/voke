@@ -3,8 +3,8 @@ title: S3 events
 description: Run a Function for each object created in or deleted from an S3 bucket, and test the Function locally.
 ---
 
-After reading this page you can run a Function when an object is created in or deleted from a
-bucket, filter the objects by key, and test the Function without AWS.
+After this page you can run a Function when an object is created in or deleted from a bucket,
+filter the objects by key, and test the Function without AWS.
 
 ## Declare the bucket and the Function
 
@@ -70,9 +70,17 @@ metadata, not an application payload. The handler receives:
 | `id`, `time`   | The event id and when the change happened, ISO 8601.                        |
 | `raw`          | The original EventBridge event.                                             |
 
-The handler returns nothing. EventBridge invokes the Function asynchronously, so Lambda retries a
-failed invocation and then drops the event. An event that is not an S3 object event fails the
-invocation with an `InvokeError` with code `INVALID_PAYLOAD`.
+The handler returns nothing.
+
+<Callout type="warn" title="Invalid payloads fail the invocation">
+
+An event that is not an S3 object event fails the invocation with an `InvokeError` with code
+`INVALID_PAYLOAD`.
+
+</Callout>
+
+EventBridge invokes the Function asynchronously, so Lambda retries a failed invocation and then
+drops the event.
 
 The Function's role can already read, write and delete the bucket's objects, so the handler can read
 the object with the bucket binding. See [Resources and bindings](/docs/guides/resources).
@@ -83,7 +91,7 @@ Voke passes `event.key` through exactly as EventBridge delivers it. It never URL
 `+` stays a `+` and `%20` stays `%20`. The `prefix` and `suffix` filters match the same delivered
 key.
 
-<Callout type="warn">
+<Callout type="warn" title="Key encoding is not confirmed">
 
 The classic S3 notification format URL-encodes keys (`red flower.jpg` arrives as `red+flower.jpg`).
 The AWS documentation does not say whether S3 events delivered through EventBridge do the same, and
@@ -94,8 +102,8 @@ key into another. Test keys with spaces, `+` or non-ASCII characters before you 
 
 ## Test an S3 Function
 
-`voke dev` does not receive events from buckets. Test an S3 Function with
-`functions.sendEvent(name, { key })`. It runs the same handler code as the deployed Lambda:
+Test an S3 Function with `functions.sendEvent(name, { key })`. It runs the same handler code as the
+deployed Lambda:
 
 ```ts twoslash
 import { s3 } from "@voke/aws";
@@ -125,8 +133,14 @@ Only `key` is required, and Voke uses it verbatim. `kind` defaults to the first 
 `kind` that is not in `on` is rejected. `bucket` defaults to the bucket's resource key, `id` to
 `evt_1` and `time` to now. You can also pass `size`, `etag` and `versionId`.
 
-`prefix` and `suffix` are not applied locally: `sendEvent` always calls the handler, as it does for
-every Event Source.
+<Callout type="info" title="Local runs do not create the trigger">
+
+`voke dev` does not receive events from buckets, and `prefix` and `suffix` are not applied locally:
+`sendEvent` always calls the handler, as it does for every Event Source. `voke local bootstrap`
+creates the bucket but not the rule or the EventBridge setting: the local stack holds resources
+only. See [Local AWS](/docs/guides/local-aws).
+
+</Callout>
 
 See [Testing](/docs/guides/testing) for test setup.
 
@@ -146,9 +160,6 @@ Voke does not use classic bucket notifications to Lambda. They would make the bu
 Function, and every Function's role depends on the bucket, so CloudFormation would reject the stack
 as a circular dependency.
 
-`voke local bootstrap` creates the bucket but not the rule or the EventBridge setting: the local
-stack holds resources only. See [Local AWS](/docs/guides/local-aws).
-
 ## Good to know
 
 - `"created"` covers every way an object comes to exist: `PutObject`, `POST Object`, `CopyObject` and
@@ -163,9 +174,7 @@ stack holds resources only. See [Local AWS](/docs/guides/local-aws).
 
 ## Limits
 
-<Callout type="info">
-
-S3 support is intentionally small in v1:
+<Callout type="info" title="S3 support is intentionally small in v1">
 
 - Only object created and object deleted events. Restore, tagging, ACL, storage class and replication
   events are not supported.
@@ -178,6 +187,22 @@ S3 support is intentionally small in v1:
 
 ## Next steps
 
-- [Resources and bindings](/docs/guides/resources): read the object from the handler.
-- [EventBridge events](/docs/guides/eventbridge-events): match other EventBridge events.
-- [Testing](/docs/guides/testing): test Functions and the Gateway.
+<Cards>
+  <Card
+    icon={<Database />}
+    href="/docs/guides/resources"
+    title="Resources and bindings"
+  >
+    Read the object from the handler.
+  </Card>
+  <Card
+    icon={<Radio />}
+    href="/docs/guides/eventbridge-events"
+    title="EventBridge events"
+  >
+    Match other EventBridge events.
+  </Card>
+  <Card icon={<FlaskConical />} href="/docs/guides/testing" title="Testing">
+    Test Functions and the Gateway.
+  </Card>
+</Cards>

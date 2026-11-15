@@ -3,7 +3,7 @@ title: Migrate from Serverless Framework
 description: Generate a Voke project skeleton and a migration report from a serverless.yml file, then move your functions over one at a time.
 ---
 
-After reading this page you can turn a Serverless Framework service into a Voke project skeleton, read the migration report, and move the service to Voke one function at a time.
+After this page you can turn a Serverless Framework service into a Voke project skeleton, read the migration report, and move the service to Voke one function at a time.
 
 ```bash
 voke migrate serverless ./serverless.yml --out ./voke-migration
@@ -15,7 +15,11 @@ Both arguments are optional. The defaults are `./serverless.yml` and `./voke-mig
 
 The migrator reads the service name, provider settings (stage, region, runtime, environment, IAM statements), functions and their events, native CloudFormation resources under `resources.Resources`, package patterns, and plugins.
 
-Its YAML parser is small and has no dependencies. It covers the common Serverless Framework shapes: nested maps, lists, and scalars. Treat YAML anchors, custom tags, and plugin-specific `custom` settings as manual work.
+<Callout type="warn" title="Limits of the YAML parser">
+  Its YAML parser is small and has no dependencies. It covers the common
+  Serverless Framework shapes: nested maps, lists, and scalars. Treat YAML
+  anchors, custom tags, and plugin-specific `custom` settings as manual work.
+</Callout>
 
 ## What it generates
 
@@ -80,7 +84,7 @@ functions:
 
 the migrator writes this `voke.config.ts`:
 
-```ts twoslash title="voke.config.ts"
+```ts title="voke.config.ts" twoslash
 import { aws } from "@voke/aws";
 import { defineConfig } from "voke";
 
@@ -96,7 +100,12 @@ export default defineConfig({
 });
 ```
 
-A `provider.runtime` of `nodejs22.x` or `nodejs24.x` becomes `aws({ lambda: { runtime } })`. Other runtimes, such as `nodejs20.x`, are dropped, and the Functions use the default runtime, `nodejs22.x`. See [Functions](/docs/guides/functions) for Lambda settings.
+A `provider.runtime` of `nodejs22.x` or `nodejs24.x` becomes `aws({ lambda: { runtime } })`. See [Functions](/docs/guides/functions) for Lambda settings.
+
+<Callout type="warn" title="Other runtimes are dropped">
+  Other runtimes, such as `nodejs20.x`, are dropped, and the Functions use the
+  default runtime, `nodejs22.x`.
+</Callout>
 
 ### A generated Function
 
@@ -248,7 +257,21 @@ Route traffic for that path or event to Voke. Remove the matching Serverless Fra
 
 ## Next steps
 
-- [Functions](/docs/guides/functions): write the handlers you port.
-- [HTTP routes](/docs/guides/http-routes): finish the generated Route Builder skeletons.
-- [Deploy](/docs/guides/deploy): deploy the migrated project.
-- [Testing](/docs/guides/testing): test each Function before you move its traffic.
+<Cards>
+  <Card
+    icon={<SquareFunction />}
+    href="/docs/guides/functions"
+    title="Functions"
+  >
+    Write the handlers you port.
+  </Card>
+  <Card icon={<Route />} href="/docs/guides/http-routes" title="HTTP routes">
+    Finish the generated Route Builder skeletons.
+  </Card>
+  <Card icon={<CloudUpload />} href="/docs/guides/deploy" title="Deploy">
+    Deploy the migrated project.
+  </Card>
+  <Card icon={<FlaskConical />} href="/docs/guides/testing" title="Testing">
+    Test each Function before you move its traffic.
+  </Card>
+</Cards>

@@ -3,7 +3,7 @@ title: Deploy
 description: Deploy a Voke project to an AWS stage with one command, preview the changes, and remove the stage again.
 ---
 
-After reading this page you can deploy your project to a stage on AWS, find its API URL, and delete the stage.
+After this page you can deploy your project to a stage on AWS, find its API URL, and delete the stage.
 
 `voke deploy` builds your project, packages it, uploads it, and deploys it through the Provider set in `voke.config.ts`. With the AWS Provider no AWS CLI is needed: Voke calls AWS through the AWS SDK.
 
@@ -18,7 +18,7 @@ voke deploy --stage dev
 
 ### Set the AWS Provider
 
-```ts twoslash
+```ts title="voke.config.ts" twoslash
 import { aws } from "@voke/aws";
 import { defineConfig } from "voke";
 
@@ -129,7 +129,25 @@ The identity that runs `voke deploy` needs:
 
 ## Next steps
 
-- [CLI reference](/docs/reference/cli): every flag of `voke deploy` and `voke remove`.
-- [Testing](/docs/guides/testing): smoke test the deployed stage.
-- [Troubleshooting](/docs/guides/troubleshooting): fix credential and config errors.
-- [Config reference](/docs/reference/config): settings and defaults.
+<Cards>
+  <Card icon={<Terminal />} href="/docs/reference/cli" title="CLI reference">
+    Every flag of `voke deploy` and `voke remove`.
+  </Card>
+  <Card icon={<FlaskConical />} href="/docs/guides/testing" title="Testing">
+    Smoke test the deployed stage.
+  </Card>
+  <Card
+    icon={<LifeBuoy />}
+    href="/docs/guides/troubleshooting"
+    title="Troubleshooting"
+  >
+    Fix credential and config errors.
+  </Card>
+  <Card
+    icon={<SlidersHorizontal />}
+    href="/docs/reference/config"
+    title="Config reference"
+  >
+    Settings and defaults.
+  </Card>
+</Cards>

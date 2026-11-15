@@ -3,15 +3,15 @@ title: Scheduled Functions
 description: Run a Function on a rate or cron schedule in a time zone with EventBridge Scheduler, and test it locally.
 ---
 
-After reading this page you can run a Function on a recurring schedule, choose its time zone, turn
-the schedule off, and test the Function without AWS.
+After this page you can run a Function on a recurring schedule, choose its time zone, turn the
+schedule off, and test the Function without AWS.
 
 ## Declare a scheduled Function
 
 Create the Function with `schedule()` from `@voke/aws` and a `rate(...)` or `cron(...)` expression.
 A schedule needs no resource in `voke.config.ts`:
 
-```ts twoslash
+```ts title="src/index.ts" twoslash
 import { schedule } from "@voke/aws";
 import { createFunctions } from "voke";
 
@@ -54,9 +54,13 @@ The handler receives:
 The handler returns nothing. If it throws, the invocation fails and Lambda retries it. Make the job
 safe to run twice: use `scheduledTime` to tell runs apart.
 
+<Callout type="warn" title="Invalid payloads fail the invocation">
+
 The schedule sends a Voke payload, not EventBridge Scheduler's default one. An invocation that does
-not carry it, for example a test event from the Lambda console, fails with an `InvokeError` with code
-`INVALID_PAYLOAD`.
+not carry it, for example a test event from the Lambda console, fails with an `InvokeError` with
+code `INVALID_PAYLOAD`.
+
+</Callout>
 
 ## Test a scheduled Function
 
@@ -84,8 +88,14 @@ await functions.sendEvent("nightlyCleanup", {
 // 2024-03-01T03:00:00Z 1
 ```
 
-`scheduledTime` defaults to now, `attempt` to `1` and `executionId` to `exec_1`. `voke dev` does not
-run schedules.
+`scheduledTime` defaults to now, `attempt` to `1` and `executionId` to `exec_1`.
+
+<Callout type="info" title="Local runs do not create the trigger">
+
+`voke dev` does not run schedules. `voke local bootstrap` creates no schedule: the local stack holds
+resources only, and a schedule is not a resource. See [Local AWS](/docs/guides/local-aws).
+
+</Callout>
 
 See [Testing](/docs/guides/testing) for test setup.
 
@@ -106,14 +116,9 @@ The identity that runs `voke deploy` needs permission to manage EventBridge Sche
 `scheduler:GetSchedule`) and `iam:PassRole` on the Scheduler role, in addition to the permissions
 every Voke deploy needs. See [Deploy](/docs/guides/deploy).
 
-`voke local bootstrap` creates no schedule: the local stack holds resources only, and a schedule is
-not a resource. See [Local AWS](/docs/guides/local-aws).
-
 ## Limits
 
-<Callout type="info">
-
-Schedule support is intentionally small in v1:
+<Callout type="info" title="Schedule support is intentionally small in v1">
 
 - One schedule per Function, and only recurring `rate(...)` and `cron(...)` expressions.
 - There is no static input per schedule, flexible time window, retry policy or dead-letter queue.
@@ -123,6 +128,22 @@ Schedule support is intentionally small in v1:
 
 ## Next steps
 
-- [EventBridge events](/docs/guides/eventbridge-events): react to events instead of time.
-- [Runtime Variables](/docs/guides/runtime-variables): read secrets in a scheduled handler.
-- [Deploy](/docs/guides/deploy): deploy the schedule and the Function.
+<Cards>
+  <Card
+    icon={<Radio />}
+    href="/docs/guides/eventbridge-events"
+    title="EventBridge events"
+  >
+    React to events instead of time.
+  </Card>
+  <Card
+    icon={<KeyRound />}
+    href="/docs/guides/runtime-variables"
+    title="Runtime Variables"
+  >
+    Read secrets in a scheduled handler.
+  </Card>
+  <Card icon={<CloudUpload />} href="/docs/guides/deploy" title="Deploy">
+    Deploy the schedule and the Function.
+  </Card>
+</Cards>

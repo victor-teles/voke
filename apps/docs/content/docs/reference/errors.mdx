@@ -176,7 +176,7 @@ Each issue path starts with the part that failed:
 500 {"error":{"code":"INTERNAL_SERVER_ERROR","message":"Internal server error"}}
 ```
 
-<Callout type="warn">
+<Callout type="warn" title="Thrown messages never reach the client">
   For any other thrown error, the original message never reaches the client.
   Voke logs the error once to `console.error` as one JSON line with `level`,
   `message`, `name`, `stack`, and `code` when the error has one. Under `voke
@@ -188,7 +188,25 @@ For a failure the client should see, handle it in the handler and return the res
 
 ## Next steps
 
-- [Schemas](/docs/guides/schemas): the schemas that produce `issues`.
-- [HTTP routes](/docs/guides/http-routes): return your own error responses.
-- [Troubleshooting](/docs/guides/troubleshooting): fix common errors.
-- [Config](/docs/reference/config): the settings that `VokeConfigError` checks.
+<Cards>
+  <Card icon={<ShieldCheck />} href="/docs/guides/schemas" title="Schemas">
+    The schemas that produce `issues`.
+  </Card>
+  <Card icon={<Route />} href="/docs/guides/http-routes" title="HTTP routes">
+    Return your own error responses.
+  </Card>
+  <Card
+    icon={<LifeBuoy />}
+    href="/docs/guides/troubleshooting"
+    title="Troubleshooting"
+  >
+    Fix common errors.
+  </Card>
+  <Card
+    icon={<SlidersHorizontal />}
+    href="/docs/reference/config"
+    title="Config"
+  >
+    The settings that `VokeConfigError` checks.
+  </Card>
+</Cards>

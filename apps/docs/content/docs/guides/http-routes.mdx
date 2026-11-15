@@ -9,7 +9,7 @@ After reading this page you can serve HTTP routes from a Function, validate what
 
 `http()` declares a Function that serves HTTP routes. You build each route with the **Route Builder**, `route`, from `voke`:
 
-```ts twoslash
+```ts title="src/index.ts" twoslash
 // @filename: voke.config.ts
 import { aws } from "@voke/aws";
 import { defineConfig } from "voke";
@@ -45,9 +45,14 @@ console.log(response.status, await response.json());
 
 `voke dev` serves these routes on `http://localhost:3000`. When you deploy, the AWS Provider creates an API Gateway HTTP API with one route per declaration, and every route of the `users` Function runs in the same Lambda.
 
-The Route Builder has one method per HTTP verb: `route.get`, `route.post`, `route.put`, `route.patch`, `route.delete`, `route.head` and `route.options`. `route.route(method, path, definition)` takes the verb as an argument. A `GET` or `HEAD` route cannot declare a `body` schema; the Route Builder throws when it does.
+The Route Builder has one method per HTTP verb: `route.get`, `route.post`, `route.put`, `route.patch`, `route.delete`, `route.head` and `route.options`. `route.route(method, path, definition)` takes the verb as an argument.
 
 Path parameters use the `:name` syntax. A method and path pair must be unique across all Functions in the registry, or `voke(...)` throws a `VokeConfigError`.
+
+<Callout type="warn" title="No body schema on GET and HEAD">
+  A `GET` or `HEAD` route cannot declare a `body` schema. The Route Builder
+  throws when it does.
+</Callout>
 
 ## Read the request
 
@@ -165,13 +170,19 @@ Each issue has a `message` and a `path`. The path starts with the request part, 
 }
 ```
 
-When a handler throws, Voke logs one JSON line with the error's name, message and stack, and the client gets the generic body above. The original message never reaches the client in a deployed stage. Under `voke dev` only, the body also carries it in `error.details.message`, so you can see it while you develop.
+When a handler throws, Voke logs one JSON line with the error's name, message and stack, and the client gets the generic body above.
+
+<Callout type="info" title="The original message stays on the server">
+
+The original message never reaches the client in a deployed stage. Under `voke dev` only, the body also carries it in `error.details.message`, so you can see it while you develop.
+
+</Callout>
 
 ## Allow browser requests with CORS
 
-Set `api.cors` in `voke.config.ts` to let browsers on other origins call the API:
+CORS is off by default. Set `api.cors` in `voke.config.ts` to let browsers on other origins call the API:
 
-```ts twoslash
+```ts title="voke.config.ts" twoslash
 // @filename: voke.config.ts
 // ---cut---
 import { aws } from "@voke/aws";
@@ -192,7 +203,13 @@ export default defineConfig({
 });
 ```
 
-`cors: true` allows every origin, method and header, without credentials. In the object form, fields you leave out default to `["*"]` for `origins`, `methods` and `headers`, and to `false` for `credentials`. With `credentials: true` you must list explicit origins. The same settings drive the local Gateway and the deployed HTTP API's CORS configuration, so a preflight request gets the same answer locally and on AWS. CORS is off by default.
+`cors: true` allows every origin, method and header, without credentials. In the object form, fields you leave out default to `["*"]` for `origins`, `methods` and `headers`, and to `false` for `credentials`.
+
+<Callout type="warn" title="Credentials need explicit origins">
+  With `credentials: true` you must list explicit origins.
+</Callout>
+
+The same settings drive the local Gateway and the deployed HTTP API's CORS configuration, so a preflight request gets the same answer locally and on AWS.
 
 ## Call routes from tests
 
@@ -202,7 +219,7 @@ You can call a route in two ways.
 
 `gateway.request(path, init)` sends a real `Request` through the Gateway: routing, CORS, authorizers, validation, serialization and error handling all run. It returns a `Response`.
 
-```ts twoslash
+```ts title="src/index.ts" twoslash
 // @filename: voke.config.ts
 import { aws } from "@voke/aws";
 import { defineConfig } from "voke";
@@ -283,7 +300,7 @@ const functions = createFunctions({
 | `deprecated`  | `true` marks the route as deprecated.         |
 | `hidden`      | `true` leaves the route out of documentation. |
 
-## Middleware
+## Add middleware
 
 `voke(functions, { middleware: [...] })` adds Hono middleware to every route of the Gateway, and `route.use(...)` adds it to the routes of one Route Builder. Middleware reaches HTTP requests only. To run code around every Function, including invokable and Event Source Functions, or to add a deployed route from a package, write a [Plugin](/docs/guides/plugins).
 
@@ -293,8 +310,32 @@ API Gateway HTTP APIs wait at most 30 seconds for a Lambda integration. A Functi
 
 ## Next steps
 
-- [Schemas and validation](/docs/guides/schemas)
-- [OpenAPI and API reference](/docs/guides/openapi)
-- [Authorizers](/docs/guides/authorizers)
-- [Testing](/docs/guides/testing)
-- [Configuration reference](/docs/reference/config)
+<Cards>
+  <Card
+    icon={<ShieldCheck />}
+    href="/docs/guides/schemas"
+    title="Schemas and validation"
+  >
+    Write route schemas and handle validation failures.
+  </Card>
+  <Card
+    icon={<ScrollText />}
+    href="/docs/guides/openapi"
+    title="OpenAPI and API reference"
+  >
+    Generate an OpenAPI 3.1 document from your route contracts.
+  </Card>
+  <Card icon={<KeyRound />} href="/docs/guides/authorizers" title="Authorizers">
+    Protect routes with JWT and Lambda authorizers.
+  </Card>
+  <Card icon={<FlaskConical />} href="/docs/guides/testing" title="Testing">
+    Test Functions and the Gateway without AWS.
+  </Card>
+  <Card
+    icon={<SlidersHorizontal />}
+    href="/docs/reference/config"
+    title="Configuration reference"
+  >
+    Every setting in `voke.config.ts`, its type and its default.
+  </Card>
+</Cards>

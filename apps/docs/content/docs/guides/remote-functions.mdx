@@ -11,7 +11,7 @@ _provider project_; the project that calls them is the _consumer project_. The c
 the provider's code. It uses only the provider's contract metadata, so the two projects can live in
 different repositories.
 
-<Callout type="warn">
+<Callout type="warn" title="Local development only">
   Remote Function Registries work only between local `voke dev` servers in this
   version. A deployed Lambda cannot call another project through them: the
   endpoints exist only under `voke dev`, and only `voke dev` gives the consumer
@@ -98,7 +98,7 @@ PORT=3001 voke dev
 
 Add the provider to `remotes`. The key must be the provider's project `name`:
 
-```ts twoslash
+```ts title="voke.config.ts" twoslash
 import { aws } from "@voke/aws";
 import { defineConfig } from "voke";
 
@@ -202,7 +202,7 @@ of a schema that the subset cannot express (a union, `anyOf`, `oneOf`, `allOf`, 
 `unknown`. A schema with no JSON Schema at all, such as a Zod date, also becomes `true`. The
 provider's own validation still runs in every case.
 
-<Callout type="warn">
+<Callout type="warn" title="Regenerate existing clients once">
   Contracts generated before Voke read Standard JSON Schema have `true` entries
   for `@voke/schema` and Zod schemas, so their fingerprints changed once. Run
   `voke remote generate` once in every consumer and commit the generated
@@ -231,7 +231,25 @@ Other failures:
 
 ## Next steps
 
-- [Functions](/docs/guides/functions): invokable Functions and their contracts.
-- [Schemas](/docs/guides/schemas): the schemas that make up a Function Contract.
-- [CLI reference](/docs/reference/cli): `voke remote generate` and `voke dev` flags.
-- [Config reference](/docs/reference/config): the `remotes` setting.
+<Cards>
+  <Card
+    icon={<SquareFunction />}
+    href="/docs/guides/functions"
+    title="Functions"
+  >
+    Invokable Functions and their contracts.
+  </Card>
+  <Card icon={<ShieldCheck />} href="/docs/guides/schemas" title="Schemas">
+    The schemas that make up a Function Contract.
+  </Card>
+  <Card icon={<Terminal />} href="/docs/reference/cli" title="CLI reference">
+    `voke remote generate` and `voke dev` flags.
+  </Card>
+  <Card
+    icon={<SlidersHorizontal />}
+    href="/docs/reference/config"
+    title="Config reference"
+  >
+    The `remotes` setting.
+  </Card>
+</Cards>

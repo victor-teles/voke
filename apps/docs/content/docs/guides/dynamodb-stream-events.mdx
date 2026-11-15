@@ -3,8 +3,8 @@ title: DynamoDB stream events
 description: Run a Function for each batch of changes to a DynamoDB table, with keys and item images as plain values, and test the Function locally.
 ---
 
-After reading this page you can turn on a table's stream, attach a Function to it as an **Event
-Source**, report failed records, and test the Function without AWS.
+After this page you can turn on a table's stream, attach a Function to it as an **Event Source**,
+report failed records, and test the Function without AWS.
 
 ## Turn on the stream and declare the Function
 
@@ -144,8 +144,13 @@ invalid. By default Voke reports it as a failed record and leaves it out of `bat
 
 Set `invalidRecord: "include"` to receive invalid records too. An invalid record has `valid: false`,
 `eventName`, `sequenceNumber`, `raw` and `error` (an `InvokeError` with code `INVALID_PAYLOAD`).
-`batch.ok()` and `batch.batchResult()` still report it as failed; to move past it, return a result
-without it.
+
+<Callout type="warn" title="Invalid records still count as failed">
+
+`batch.ok()` and `batch.batchResult()` still report an invalid record as failed. To move past it,
+return a result without it.
+
+</Callout>
 
 ## Mapping options
 
@@ -166,9 +171,9 @@ result without it. If losing changes is acceptable, set `maxRetryAttempts`.
 
 ## Test a DynamoDB stream Function
 
-`voke dev` does not read table streams. Test the Function with `functions.sendEvent(name, { records })`.
-Records use plain values; Voke converts them to attribute-value JSON and runs the same conversion,
-validation and handler code as the deployed Lambda:
+Test a DynamoDB stream Function with `functions.sendEvent(name, { records })`. Records use plain
+values; Voke converts them to attribute-value JSON and runs the same conversion, validation and
+handler code as the deployed Lambda:
 
 ```ts twoslash
 import { dynamodbStream } from "@voke/aws";
@@ -205,6 +210,12 @@ console.info(result);
 
 `sequenceNumber` defaults to `"1"`, `"2"`, and so on.
 
+<Callout type="info" title="Local runs do not create the trigger">
+
+`voke dev` does not read table streams.
+
+</Callout>
+
 ## What gets deployed
 
 For each `dynamodbStream()` Function, `voke synth` adds:
@@ -220,9 +231,7 @@ synthesized exactly as before.
 
 ## Limits
 
-<Callout type="info">
-
-DynamoDB stream support is intentionally small in v1:
+<Callout type="info" title="DynamoDB stream support is intentionally small in v1">
 
 - One table per Function. `ParallelizationFactor`, tumbling windows and event filtering are not
   supported.
@@ -232,6 +241,22 @@ DynamoDB stream support is intentionally small in v1:
 
 ## Next steps
 
-- [Kinesis events](/docs/guides/kinesis-events): consume a Kinesis data stream.
-- [Resources and bindings](/docs/guides/resources): read and write the table from a Function.
-- [Testing](/docs/guides/testing): test Functions and the Gateway.
+<Cards>
+  <Card
+    icon={<Waves />}
+    href="/docs/guides/kinesis-events"
+    title="Kinesis events"
+  >
+    Consume a Kinesis data stream.
+  </Card>
+  <Card
+    icon={<Database />}
+    href="/docs/guides/resources"
+    title="Resources and bindings"
+  >
+    Read and write the table from a Function.
+  </Card>
+  <Card icon={<FlaskConical />} href="/docs/guides/testing" title="Testing">
+    Test Functions and the Gateway.
+  </Card>
+</Cards>

@@ -3,7 +3,7 @@ title: Local AWS
 description: Run your project's AWS resources on your machine with a Local AWS Provider, while your Functions run in the local Gateway.
 ---
 
-After reading this page you can create your project's tables, queues, and buckets on your machine and run `voke dev` against them, without an AWS account.
+After this page you can create your project's tables, queues, and buckets on your machine and run `voke dev` against them, without an AWS account.
 
 A **Local AWS Provider** emulates AWS services in Docker. With `provider: aws()`, the default is the official AWS Emulator. Floci is the alternative.
 
@@ -21,7 +21,10 @@ voke local stop        # stop the Local AWS Provider
 
 ## Run your project locally
 
-You need Docker, and the AWS CLI on your `PATH`: `voke local bootstrap` runs `aws cloudformation deploy` against the local endpoint.
+<Callout type="info" title="Prerequisites">
+  You need Docker, and the AWS CLI on your `PATH`: `voke local bootstrap` runs
+  `aws cloudformation deploy` against the local endpoint.
+</Callout>
 
 <Steps>
 <Step>
@@ -86,7 +89,7 @@ Set the Local AWS Provider with `aws({ local })` in `voke.config.ts`. Both build
 
 The default. You do not need to set it, but you can pass options:
 
-```ts twoslash
+```ts title="voke.config.ts" twoslash
 import { aws } from "@voke/aws";
 import { awsEmulator } from "@voke/aws/local";
 import { defineConfig } from "voke";
@@ -112,7 +115,7 @@ export default defineConfig({
 
 Floci keeps state between restarts and uses a smaller image. It runs with Docker Compose.
 
-```ts twoslash
+```ts title="voke.config.ts" twoslash
 import { aws } from "@voke/aws";
 import { floci } from "@voke/aws/local";
 import { defineConfig } from "voke";
@@ -150,7 +153,7 @@ import { SQSClient } from "@aws-sdk/client-sqs";
 const sqs = new SQSClient(createAwsClientConfig());
 ```
 
-<Callout type="warn">
+<Callout type="warn" title="SQS calls can reach real AWS">
   Locally, `createAwsClientConfig()` sets an explicit `endpoint` from
   `VOKE_AWS_ENDPOINT_URL` or `AWS_ENDPOINT_URL`. This matters: SQS queue URLs
   carry the real AWS host, so a client without an explicit endpoint sends queue
@@ -161,7 +164,21 @@ When neither variable is set, as in a deployed Lambda, the config has no `endpoi
 
 ## Next steps
 
-- [Testing](/docs/guides/testing): run tests against local resources.
-- [Resources](/docs/guides/resources): declare the tables, queues, and buckets that bootstrap creates.
-- [Troubleshooting](/docs/guides/troubleshooting): fix "AWS Emulator is not running" and other errors.
-- [Deploy](/docs/guides/deploy): deploy the same project to AWS.
+<Cards>
+  <Card icon={<FlaskConical />} href="/docs/guides/testing" title="Testing">
+    Run tests against local resources.
+  </Card>
+  <Card icon={<Database />} href="/docs/guides/resources" title="Resources">
+    Declare the tables, queues, and buckets that bootstrap creates.
+  </Card>
+  <Card
+    icon={<LifeBuoy />}
+    href="/docs/guides/troubleshooting"
+    title="Troubleshooting"
+  >
+    Fix "AWS Emulator is not running" and other errors.
+  </Card>
+  <Card icon={<CloudUpload />} href="/docs/guides/deploy" title="Deploy">
+    Deploy the same project to AWS.
+  </Card>
+</Cards>

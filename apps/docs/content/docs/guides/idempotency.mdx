@@ -3,7 +3,7 @@ title: Idempotency
 description: Make a retried Function, route or SQS message run once with the idempotency Plugin, an Idempotency Key and a DynamoDB table the Plugin provisions.
 ---
 
-After reading this page you can make a handler that charges a card or sends an email run once, however often AWS or a client retries it, and test it without AWS.
+After this page you can make a handler that charges a card or sends an email run once, however often AWS or a client retries it, and test it without AWS.
 
 AWS delivers events at least once. SQS sends a message again when the Function times out or the batch partly fails, an HTTP client retries a `POST` after a network error, and Lambda retries an asynchronous invocation twice. `@voke/idempotency` records each operation in a DynamoDB table, so a retry returns the first result instead of running the handler again.
 
@@ -11,7 +11,7 @@ AWS delivers events at least once. SQS sends a message again when the Function t
 
 Add `idempotency()` to `plugins` in `voke.config.ts`:
 
-```ts twoslash
+```ts title="voke.config.ts" twoslash
 import { aws } from "@voke/aws";
 import { idempotency } from "@voke/idempotency";
 import { defineConfig } from "voke";
@@ -31,13 +31,17 @@ The Plugin contributes a DynamoDB table under the resource key `idempotencyTable
 | `expiresAfterSeconds` | `3600`               | How long a completed operation replays its result.                              |
 | `store`               | The DynamoDB table   | Another **Idempotency Store**, such as `memoryStore()` in tests. No table then. |
 
+<Callout type="info" title="The Plugin alone changes nothing">
+
 Nothing becomes idempotent because the Plugin is configured. You choose the handlers.
+
+</Callout>
 
 ## Wrap a Function
 
 Wrap the handler with `idempotent(handler, { key })`. `key` returns the **Idempotency Key**: the value that identifies one logical operation, here the order id:
 
-```ts twoslash
+```ts title="src/index.ts" twoslash
 import { schema } from "@voke/schema";
 import { createFunctions, fn } from "voke";
 import { idempotent } from "@voke/idempotency";
@@ -64,7 +68,7 @@ The first `functions.invoke("charge", { orderId: "ord_1", amount: 10 })` runs th
 
 Read the key from a request header. A client sends the same `idempotency-key` with every retry of one request:
 
-```ts twoslash
+```ts title="src/index.ts" twoslash
 import { error } from "@voke/http";
 import { IdempotencyError, idempotent } from "@voke/idempotency";
 import { schema } from "@voke/schema";
@@ -147,7 +151,13 @@ export const settle = sqs({
 
 ## Choose a key
 
-The key is a business decision, so `key` is required. Use the id of the thing the handler changes: an order id, a payment id, a client-generated request id. Do not use the SQS message id or a request id: a producer that sends the same event twice gives it a new message id.
+The key is a business decision, so `key` is required. Use the id of the thing the handler changes: an order id, a payment id, a client-generated request id.
+
+<Callout type="warn" title="Do not use a message id or a request id">
+
+Do not use the SQS message id or a request id: a producer that sends the same event twice gives it a new message id.
+
+</Callout>
 
 - One record exists per Function and key, so two Functions can use the same order id without sharing a record.
 - When one Function runs several operations, give each `idempotent` call a `name` to keep their records apart.
@@ -273,7 +283,25 @@ A second start with the same `executionName` returns the existing execution. `@v
 
 ## Next steps
 
-- [Plugins](/docs/guides/plugins): how a Plugin wraps every Function.
-- [SQS events](/docs/guides/sqs-events): batches and partial batch failures.
-- [Errors](/docs/reference/errors#idempotency-errors): the `IdempotencyError` codes.
-- [Durable Functions](/docs/guides/durable-functions): `executionName`.
+<Cards>
+  <Card icon={<Plug />} href="/docs/guides/plugins" title="Plugins">
+    How a Plugin wraps every Function.
+  </Card>
+  <Card icon={<Mail />} href="/docs/guides/sqs-events" title="SQS events">
+    Batches and partial batch failures.
+  </Card>
+  <Card
+    icon={<TriangleAlert />}
+    href="/docs/reference/errors#idempotency-errors"
+    title="Errors"
+  >
+    The `IdempotencyError` codes.
+  </Card>
+  <Card
+    icon={<Workflow />}
+    href="/docs/guides/durable-functions"
+    title="Durable Functions"
+  >
+    Start one execution per operation with `executionName`.
+  </Card>
+</Cards>

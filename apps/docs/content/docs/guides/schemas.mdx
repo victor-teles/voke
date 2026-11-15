@@ -19,7 +19,7 @@ A schema is any validator that implements [Standard Schema](https://standardsche
 
 `@voke/schema` is a small validator with no dependencies. Import `schema` and compose builders:
 
-```ts twoslash
+```ts title="src/index.ts" twoslash
 // @filename: voke.config.ts
 import { aws } from "@voke/aws";
 import { defineConfig } from "voke";
@@ -113,7 +113,7 @@ Zod schemas work wherever a `@voke/schema` schema does. Both tabs define the sam
 <Tabs items={["@voke/schema", "Zod"]}>
 <Tab value="@voke/schema">
 
-```ts twoslash
+```ts title="src/index.ts" twoslash
 // @filename: voke.config.ts
 import { aws } from "@voke/aws";
 import { defineConfig } from "voke";
@@ -144,7 +144,7 @@ voke(functions, { config });
 </Tab>
 <Tab value="Zod">
 
-```ts twoslash
+```ts title="src/index.ts" twoslash
 // @filename: voke.config.ts
 import { aws } from "@voke/aws";
 import { defineConfig } from "voke";
@@ -177,13 +177,13 @@ voke(functions, { config });
 
 Any other validator that implements Standard Schema works the same way, for example Valibot or ArkType. Install it in your project and pass its schemas to `input`, `output`, `params` or `body`. You can mix validators in one project.
 
-## Validation failures
+## Handle validation failures
 
 ### In functions.invoke
 
 When the payload fails the `input` schema, `functions.invoke(...)` rejects with an `InvokeError` with code `INVALID_PAYLOAD`. When the handler's result fails the `output` schema, the code is `INVALID_RESULT`. `error.issues` lists each problem with a `message` and a `path`:
 
-```ts twoslash
+```ts title="src/index.ts" twoslash
 // @filename: voke.config.ts
 import { aws } from "@voke/aws";
 import { defineConfig } from "voke";
@@ -256,7 +256,13 @@ Voke describes contracts as JSON Schema in two places: the [OpenAPI document](/d
 | `schema.optional(inner)`                   | The inner schema; the object leaves the key out of `required`                                |
 | `schema.undefined()`                       | None: JSON has no `undefined`, so the schema has no JSON Schema                              |
 
-`@voke/schema` supports the targets `draft-2020-12` and `draft-07` and throws for any other. A validator without Standard JSON Schema still validates; only the generated descriptions treat its values as "any value". Valibot and ArkType can work if their schemas expose Standard JSON Schema; Voke tests Zod and `@voke/schema`.
+`@voke/schema` supports the targets `draft-2020-12` and `draft-07` and throws for any other.
+
+<Callout type="info" title="Validators without Standard JSON Schema">
+  A validator without Standard JSON Schema still validates; only the generated
+  descriptions treat its values as "any value". Valibot and ArkType can work if
+  their schemas expose Standard JSON Schema; Voke tests Zod and `@voke/schema`.
+</Callout>
 
 ## Write your own validator
 
@@ -268,7 +274,7 @@ You can write a validator by hand when no library fits. A Standard Schema valida
 
 Each issue has a `message` and an optional `path`, a list of keys from the root of the value to the failing field. Type the schema with `StandardSchemaV1<Input, Output>` from `voke` so Voke can infer the payload type:
 
-```ts twoslash
+```ts title="src/index.ts" twoslash
 // @filename: voke.config.ts
 import { aws } from "@voke/aws";
 import { defineConfig } from "voke";
@@ -313,6 +319,22 @@ Prefer `@voke/schema` or a library for everyday schemas. Write your own only for
 
 ## Next steps
 
-- [Functions](/docs/guides/functions)
-- [HTTP routes](/docs/guides/http-routes)
-- [Errors reference](/docs/reference/errors)
+<Cards>
+  <Card
+    icon={<SquareFunction />}
+    href="/docs/guides/functions"
+    title="Functions"
+  >
+    Invokable Functions and the Function Registry.
+  </Card>
+  <Card icon={<Route />} href="/docs/guides/http-routes" title="HTTP routes">
+    Validate `params` and `body`, and shape the response.
+  </Card>
+  <Card
+    icon={<TriangleAlert />}
+    href="/docs/reference/errors"
+    title="Errors reference"
+  >
+    Identify a Voke error by its class and code.
+  </Card>
+</Cards>

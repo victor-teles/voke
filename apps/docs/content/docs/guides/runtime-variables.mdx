@@ -3,9 +3,7 @@ title: Runtime Variables
 description: Read secrets and parameters from AWS Secrets Manager and SSM Parameter Store in a Function, and override them in local runs and tests.
 ---
 
-After reading this page you can give a Function a secret or a parameter, read it in the handler,
-replace it with a local value in development and tests, and know which IAM permissions Voke grants
-for it.
+After this page you can give a Function a secret or a parameter, read it in the handler, and replace it with a local value in development and tests. It also lists the IAM permissions Voke grants for each one.
 
 A **Runtime Variable** is a value that a Function loads when it runs, from AWS Secrets Manager or
 SSM Parameter Store. You declare it on the Function that uses it. It is not part of the Function
@@ -111,8 +109,11 @@ At run time, Voke finds the deployed secret or parameter through the resource's 
 variable (`VOKE_RESOURCE_SIGNING_SECRET_ID`, `VOKE_RESOURCE_PUBLIC_CONFIG_NAME`). See
 [Resources and bindings](/docs/guides/resources).
 
-`secret` from `@voke/aws` builds a Runtime Variable. `secret` from `@voke/aws/cloudformation`
-declares a Secrets Manager resource. They are different functions with the same name.
+<Callout type="info" title="Two functions are named secret">
+  `secret` from `@voke/aws` builds a Runtime Variable. `secret` from
+  `@voke/aws/cloudformation` declares a Secrets Manager resource. They are
+  different functions with the same name.
+</Callout>
 
 ## Options
 
@@ -249,15 +250,39 @@ Function that declares a variable gets the statement for it. Other Functions in 
 
 Two limits apply:
 
-- Voke grants no KMS permissions. A `SecureString` parameter or a secret encrypted with a
-  customer-managed KMS key also needs `kms:Decrypt` on that key, which you must grant outside Voke.
-- Resources declared in `resources` are a separate case: every Function gets access to every declared
-  resource. A `secret()` resource is readable by all Functions, even those that do not declare
-  `secret.fromResource(...)`. See [Resources and bindings](/docs/guides/resources).
+<Callout type="warn" title="Voke grants no KMS permissions">
+  A `SecureString` parameter or a secret encrypted with a customer-managed KMS
+  key also needs `kms:Decrypt` on that key, which you must grant outside Voke.
+</Callout>
+
+<Callout type="warn" title="Declared resources are readable by every Function">
+  Resources declared in `resources` are a separate case: every Function gets
+  access to every declared resource. A `secret()` resource is readable by all
+  Functions, even those that do not declare `secret.fromResource(...)`. See
+  [Resources and bindings](/docs/guides/resources).
+</Callout>
 
 ## Next steps
 
-- [Resources and bindings](/docs/guides/resources): declare the secrets and parameters your stack creates.
-- [Testing](/docs/guides/testing): run Functions with overrides in tests.
-- [Errors](/docs/reference/errors): the error classes and codes.
-- [Config reference](/docs/reference/config): `environment` and the other settings.
+<Cards>
+  <Card
+    icon={<Database />}
+    href="/docs/guides/resources"
+    title="Resources and bindings"
+  >
+    Declare the secrets and parameters your stack creates.
+  </Card>
+  <Card icon={<FlaskConical />} href="/docs/guides/testing" title="Testing">
+    Run Functions with overrides in tests.
+  </Card>
+  <Card icon={<TriangleAlert />} href="/docs/reference/errors" title="Errors">
+    The error classes and codes.
+  </Card>
+  <Card
+    icon={<SlidersHorizontal />}
+    href="/docs/reference/config"
+    title="Config reference"
+  >
+    `environment` and the other settings.
+  </Card>
+</Cards>

@@ -3,7 +3,7 @@ title: Testing
 description: Choose the right test level for a Voke project, from a single Function call to smoke tests against a deployed stage.
 ---
 
-After reading this page you can test a Function, a route, an SQS Function and the whole Gateway with `bun test`, then run the same checks against local AWS resources and a deployed stage.
+After this page you can test a Function, a route, an SQS Function and the whole Gateway with `bun test`, then run the same checks against local AWS resources and a deployed stage.
 
 ```ts twoslash
 // ---cut---
@@ -195,7 +195,14 @@ const response = await gateway.request("/users", {
 });
 ```
 
-On a route protected by a Lambda authorizer, `gateway.request(...)` runs the request authorizer Function before the handler. A missing identity value returns `401`, a denied result returns `403`, and an invalid authorizer result returns `500`. A JWT authorizer is not checked in process: the route runs without validating the token. When the test only needs the route logic, inject the auth context with `functions.route(...)`.
+On a route protected by a Lambda authorizer, `gateway.request(...)` runs the request authorizer Function before the handler. A missing identity value returns `401`, a denied result returns `403`, and an invalid authorizer result returns `500`.
+
+<Callout type="warn" title="JWT authorizers are not checked in process">
+  A JWT authorizer is not checked in process: the route runs without validating
+  the token.
+</Callout>
+
+When the test only needs the route logic, inject the auth context with `functions.route(...)`.
 
 ## Use a fetch client
 
@@ -255,7 +262,8 @@ Prefer `functions.invoke(...)`, `functions.route(...)`, and `gateway.request(...
 
 When your Functions read or write real AWS resources (tables, queues, buckets), run the tests against a Local AWS Provider. Start it and create the resources first, as described in [Local AWS](/docs/guides/local-aws).
 
-### With the AWS Emulator
+<Tabs items={["AWS Emulator", "Floci"]}>
+<Tab value="AWS Emulator">
 
 `voke local bootstrap` writes the names of the created resources to `.voke/local/outputs.json`. `readLocalStackOutputs(expected, cwd?)` from `@voke/aws/local` reads that file and returns the `VOKE_RESOURCE_*` bindings. It returns `undefined` when the file is missing, or when it belongs to another provider, stack, or endpoint.
 
@@ -277,11 +285,12 @@ const tableName = bindings.VOKE_RESOURCE_ORDERS_TABLE_NAME;
 
 The stack name is `<name>-<stage>`, and the stage of `voke local` is `local` unless you set another one. Run such tests with the emulator's environment, as `voke dev` does, and create every AWS SDK client with `createAwsClientConfig()`.
 
-### With Floci
+</Tab>
+<Tab value="Floci">
 
 `createStackTestContext(options)` from `@voke/aws/testing` prepares the environment, the resource bindings, the stack outputs, and seed commands for a synthesized template.
 
-<Callout type="info">
+<Callout type="info" title="Floci only">
   `createStackTestContext` targets Floci. It is synchronous and derives resource
   names from the template's logical IDs. The AWS Emulator generates names at
   deploy time, so with the AWS Emulator use `readLocalStackOutputs` instead.
@@ -320,6 +329,9 @@ const seedPlan = context.createSeedPlan({
 `local` defaults to `floci()`. `seedPlan.commands` is a list of AWS CLI commands (`aws dynamodb put-item`, `aws sqs send-message`). Run each one with `seedPlan.environment` to seed Floci before the requests. Seed values for DynamoDB must be strings, numbers, booleans, or `null`.
 
 `context.output(name)` returns a stack output. Pass `outputs` to set or override outputs, for example the URL of a deployed API.
+
+</Tab>
+</Tabs>
 
 ## Smoke test a deployed stage
 
@@ -360,7 +372,21 @@ VOKE_E2E_API_URL=$(bun -e 'console.log((await Bun.file(".voke/outputs/dev.json")
 
 ## Next steps
 
-- [Local AWS](/docs/guides/local-aws): start the Local AWS Provider your tests use.
-- [Deploy](/docs/guides/deploy): create the stage your smoke tests call.
-- [HTTP routes](/docs/guides/http-routes): define the routes you test.
-- [Troubleshooting](/docs/guides/troubleshooting): fix common errors.
+<Cards>
+  <Card icon={<Boxes />} href="/docs/guides/local-aws" title="Local AWS">
+    Start the Local AWS Provider your tests use.
+  </Card>
+  <Card icon={<CloudUpload />} href="/docs/guides/deploy" title="Deploy">
+    Create the stage your smoke tests call.
+  </Card>
+  <Card icon={<Route />} href="/docs/guides/http-routes" title="HTTP routes">
+    Define the routes you test.
+  </Card>
+  <Card
+    icon={<LifeBuoy />}
+    href="/docs/guides/troubleshooting"
+    title="Troubleshooting"
+  >
+    Fix common errors.
+  </Card>
+</Cards>

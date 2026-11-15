@@ -3,7 +3,7 @@ title: Plugins
 description: Add a Plugin to voke.config.ts, or write one that wraps every Function, adds Gateway middleware, contributes deployed routes and resources, and adds voke commands.
 ---
 
-After reading this page you can add a **Plugin** to a project, write a Plugin that runs code around every Function, contributes routes, resources and permissions to the deployment, and adds a `voke` command, and test it.
+After reading this page you can add a **Plugin** to a project, and write and test your own. A Plugin can run code around every Function, contribute routes, resources and permissions to the deployment, and add a `voke` command.
 
 ## Use a Plugin
 
@@ -39,7 +39,11 @@ export default defineConfig({
 });
 ```
 
-`voke()` has no `plugins` option. The Gateway reads the Plugins from the config you pass to it, `voke(functions, { config })`, so `voke dev`, your tests and the deployed Functions run the same Plugins.
+<Callout type="info" title="voke() has no plugins option">
+
+The Gateway reads the Plugins from the config you pass to it, `voke(functions, { config })`, so `voke dev`, your tests and the deployed Functions run the same Plugins.
+
+</Callout>
 
 ## What a Plugin can do
 
@@ -89,7 +93,13 @@ The rules:
 - Input and output validation happen outside the wrap.
 - A wrap counts toward the invocation timeout of `functions.invoke(...)`.
 - Wraps apply to the Functions of a Gateway created with a config that declares the Plugin. A handler you call directly, or a registry you test with `createInvokeTestClient(functions)`, runs without Plugins.
-- A [Durable Function](/docs/guides/durable-functions) is replayed: Lambda invokes it again after each wait or retry, and the wrap runs again on every replay. Keep side effects in a wrap idempotent, or put them inside a durable `step`.
+
+<Callout type="warn" title="A wrap runs again on every Durable Function replay">
+  A [Durable Function](/docs/guides/durable-functions) is replayed: Lambda
+  invokes it again after each wait or retry, and the wrap runs again on every
+  replay. Keep side effects in a wrap idempotent, or put them inside a durable
+  `step`.
+</Callout>
 
 ## Add Gateway middleware
 
@@ -182,7 +192,13 @@ export const routes = (): VokePlugin => ({
 
 `voke routes`, `voke routes --help` and `voke routes list --help` print help, and `voke --help` lists Plugin commands under "Plugin commands:". `loadFunctions()` imports the project entrypoint and returns every Function, Plugin Functions included. Every command also accepts `--config`.
 
-Built-in commands win: a Plugin with `cli` cannot be named like a built-in command (`build`, `deploy`, `dev`, ...) or `help`. The config is imported by the deployed Functions too, so a command's dependencies end up in the Lambda bundle. Load command-only dependencies with `await import(...)` inside `run`.
+Built-in commands win: a Plugin with `cli` cannot be named like a built-in command (`build`, `deploy`, `dev`, ...) or `help`.
+
+<Callout type="warn" title="Command dependencies end up in the Lambda bundle">
+  The config is imported by the deployed Functions too, so a command's
+  dependencies end up in the Lambda bundle. Load command-only dependencies with
+  `await import(...)` inside `run`.
+</Callout>
 
 ## Test a Plugin
 
@@ -233,7 +249,21 @@ A Plugin cannot, in this version:
 
 ## Next steps
 
-- [HTTP routes](/docs/guides/http-routes)
-- [Testing](/docs/guides/testing)
-- [Configuration reference](/docs/reference/config)
-- [CLI reference](/docs/reference/cli)
+<Cards>
+  <Card icon={<Route />} href="/docs/guides/http-routes" title="HTTP routes">
+    Declare routes and add middleware to one Gateway.
+  </Card>
+  <Card icon={<FlaskConical />} href="/docs/guides/testing" title="Testing">
+    Test Functions and the Gateway without AWS.
+  </Card>
+  <Card
+    icon={<SlidersHorizontal />}
+    href="/docs/reference/config"
+    title="Configuration reference"
+  >
+    Every setting in `voke.config.ts`, its type and its default.
+  </Card>
+  <Card icon={<Terminal />} href="/docs/reference/cli" title="CLI reference">
+    Every `voke` command and its flags.
+  </Card>
+</Cards>

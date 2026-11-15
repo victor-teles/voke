@@ -3,8 +3,8 @@ title: SNS events
 description: Run a Function for each message published to an SNS topic, filter the messages, and test the Function locally.
 ---
 
-After reading this page you can declare an SNS topic, attach a Function to it as an **Event Source**,
-filter the messages it receives, and test the Function without AWS.
+After this page you can declare an SNS topic, attach a Function to it as an **Event Source**, filter
+the messages it receives, and test the Function without AWS.
 
 ## Declare the topic and the Function
 
@@ -70,10 +70,15 @@ SNS delivers one message per invocation. Voke parses the message body as JSON an
 
 The handler returns nothing.
 
+<Callout type="warn" title="Invalid payloads fail the invocation">
+
 A message whose body is not valid JSON, or does not match `message`, fails the invocation with an
-`InvokeError` with code `INVALID_PAYLOAD`. Your handler never sees it. SNS invokes the Function
-asynchronously, so Lambda retries a failed invocation and then drops the message. If the handler
-throws, the same retry applies.
+`InvokeError` with code `INVALID_PAYLOAD`. Your handler never sees it.
+
+</Callout>
+
+SNS invokes the Function asynchronously, so Lambda retries a failed invocation and then drops the
+message. If the handler throws, the same retry applies.
 
 ## Filter messages
 
@@ -103,9 +108,8 @@ export const onPaidOrder = sns({
 
 ## Test an SNS Function
 
-`voke dev` does not receive messages from topics. Test an SNS Function with
-`functions.sendEvent(name, { message })`. It runs the same parsing, validation and handler code as
-the deployed Lambda:
+Test an SNS Function with `functions.sendEvent(name, { message })`. It runs the same parsing,
+validation and handler code as the deployed Lambda:
 
 ```ts twoslash
 import { sns } from "@voke/aws";
@@ -133,7 +137,15 @@ await functions.sendEvent("onOrderCreated", {
 Only `message` is required. An object message is serialized to JSON; a string is used as it is, so you
 can test bodies that are not valid JSON. Voke fills in the SNS metadata: `id` defaults to `msg_1`,
 `topicArn` to a local ARN with the topic key, and `timestamp` to now. `id`, `subject` and `attributes`
-are optional. A filter policy is not applied locally.
+are optional.
+
+<Callout type="info" title="Local runs do not create the trigger">
+
+`voke dev` does not receive messages from topics, and a filter policy is not applied locally.
+`voke local bootstrap` creates the topic but not the subscription: the local stack holds resources
+only. See [Local AWS](/docs/guides/local-aws).
+
+</Callout>
 
 See [Testing](/docs/guides/testing) for test setup.
 
@@ -146,14 +158,9 @@ See [Testing](/docs/guides/testing) for test setup.
 - an `AWS::Lambda::Permission` that lets `sns.amazonaws.com` invoke the Function, only from that
   topic.
 
-`voke local bootstrap` creates the topic but not the subscription: the local stack holds resources
-only. See [Local AWS](/docs/guides/local-aws).
-
 ## Limits
 
-<Callout type="info">
-
-SNS support is intentionally small in v1:
+<Callout type="info" title="SNS support is intentionally small in v1">
 
 - One topic per Function, and only standard topics. Lambda cannot subscribe to FIFO topics.
 - There is no dead-letter queue, redrive policy or Lambda `OnFailure` destination.
@@ -163,6 +170,22 @@ SNS support is intentionally small in v1:
 
 ## Next steps
 
-- [EventBridge events](/docs/guides/eventbridge-events): react to events on an event bus.
-- [Resources and bindings](/docs/guides/resources): publish to the topic from another Function.
-- [Testing](/docs/guides/testing): test Functions and the Gateway.
+<Cards>
+  <Card
+    icon={<Radio />}
+    href="/docs/guides/eventbridge-events"
+    title="EventBridge events"
+  >
+    React to events on an event bus.
+  </Card>
+  <Card
+    icon={<Database />}
+    href="/docs/guides/resources"
+    title="Resources and bindings"
+  >
+    Publish to the topic from another Function.
+  </Card>
+  <Card icon={<FlaskConical />} href="/docs/guides/testing" title="Testing">
+    Test Functions and the Gateway.
+  </Card>
+</Cards>

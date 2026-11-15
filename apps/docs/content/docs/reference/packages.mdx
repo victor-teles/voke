@@ -10,6 +10,38 @@ Voke is split into a provider-neutral core, `voke`, and smaller packages for the
   packages share one version (now `0.0.0`) and are released together.
 </Callout>
 
+<Cards>
+  <Card icon={<Package />} href="#voke" title="voke">
+    Functions, the Gateway, the config, the error classes and the CLI.
+  </Card>
+  <Card icon={<CloudUpload />} href="#vokeaws" title="@voke/aws">
+    The AWS Provider and the AWS-specific authoring helpers.
+  </Card>
+  <Card icon={<Repeat />} href="#vokeidempotency" title="@voke/idempotency">
+    A Plugin that makes a retried handler run once.
+  </Card>
+  <Card icon={<ShieldCheck />} href="#vokeschema" title="@voke/schema">
+    Builders for Function Contracts.
+  </Card>
+  <Card icon={<Globe />} href="#vokehttp" title="@voke/http">
+    Response helpers for route handlers.
+  </Card>
+  <Card icon={<FlaskConical />} href="#voketesting" title="@voke/testing">
+    Provider-neutral test clients.
+  </Card>
+  <Card icon={<Network />} href="#vokeremote" title="@voke/remote">
+    Typed Remote Function Registries.
+  </Card>
+  <Card icon={<ScrollText />} href="#vokeopenapi" title="@voke/openapi">
+    The OpenAPI Document and the API Reference Page.
+  </Card>
+  <Card icon={<Boxes />} href="#vokebuild" title="@voke/build">
+    Lambda bundle planning for Provider packages.
+  </Card>
+</Cards>
+
+## A typical project
+
 A typical project imports from these packages:
 
 ```ts twoslash
@@ -113,6 +145,8 @@ Learn it in [Local AWS](/docs/guides/local-aws).
 
 ### @voke/aws/testing
 
+Test helpers for projects that use the AWS Provider.
+
 | Export                                                    | Use                                                                                                                                 |
 | --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | `createStackTestContext`                                  | The environment and resource bindings to test a project against a local stack. It targets Floci; the AWS Emulator is not supported. |
@@ -205,6 +239,18 @@ See [Config](/docs/reference/config#build) for the build settings.
 
 ## Next steps
 
-- [Getting started](/docs/getting-started): create a project that uses these packages.
-- [Concepts](/docs/concepts): the terms used on this page.
-- [Config](/docs/reference/config): every setting in `voke.config.ts`.
+<Cards>
+  <Card icon={<Rocket />} href="/docs/getting-started" title="Getting started">
+    Create a project that uses these packages.
+  </Card>
+  <Card icon={<BookOpen />} href="/docs/concepts" title="Concepts">
+    The terms used on this page.
+  </Card>
+  <Card
+    icon={<SlidersHorizontal />}
+    href="/docs/reference/config"
+    title="Config"
+  >
+    Every setting in `voke.config.ts`.
+  </Card>
+</Cards>

@@ -1,9 +1,9 @@
 ---
 title: Concepts
-description: Learn the terms Voke uses, how the parts of a project connect, and what each command produces.
+description: The terms Voke uses, how the parts of a project connect, and what each command produces.
 ---
 
-This page defines the words the rest of the documentation uses and shows how they fit together. After reading it, you know where each part of a Voke project lives and what `voke dev`, `voke build`, `voke synth` and `voke deploy` do with it.
+This page defines the words the rest of the documentation uses. After reading it, you know where each part of a Voke project lives and what `voke dev`, `voke build`, `voke synth` and `voke deploy` do with it.
 
 ## A project at a glance
 
@@ -115,7 +115,12 @@ The platform adapter that builds, synthesizes, deploys and runs local infrastruc
 
 ### Local AWS Provider
 
-A program that emulates AWS services on your machine, so the queues, tables and other resources the project declares exist during development. Voke supports the AWS Emulator (the default) and Floci; choose Floci with `aws({ local: floci() })` and `floci` from `@voke/aws/local`. `voke local start` starts it. It is not the Provider: the Provider decides where the project deploys, and the Local AWS Provider only emulates AWS locally. See [Local AWS](/docs/guides/local-aws).
+A program that emulates AWS services on your machine, so the queues, tables and other resources the project declares exist during development. Voke supports the AWS Emulator (the default) and Floci; choose Floci with `aws({ local: floci() })` and `floci` from `@voke/aws/local`. `voke local start` starts it. See [Local AWS](/docs/guides/local-aws).
+
+<Callout type="info" title="Not the Provider">
+  The Provider decides where the project deploys. The Local AWS Provider only
+  emulates AWS locally.
+</Callout>
 
 ### Runtime Variable
 
@@ -134,7 +139,12 @@ A trigger where an AWS service invokes a Function. Voke supports SQS: `sqs({ que
 | `voke synth`  | Imports the entrypoint and asks the Provider for a deployment template.                                   | A CloudFormation template, by default `dist/cloudformation.json`.                                                                         |
 | `voke deploy` | Builds the project, uploads the bundle and the template, and creates or updates the stack.                | A CloudFormation stack named `<name>-<stage>`, the outputs printed to the terminal (the API URL first), and `.voke/outputs/<stage>.json`. |
 
-`voke deploy` refuses the stage `local`, which is reserved for local development. See the [CLI reference](/docs/reference/cli) for every flag.
+See the [CLI reference](/docs/reference/cli) for every flag.
+
+<Callout type="warn" title="The local stage is reserved">
+  `voke deploy` refuses the stage `local`, which is reserved for local
+  development.
+</Callout>
 
 ## How Functions become Lambda handlers
 
@@ -164,7 +174,21 @@ Deployed Lambda function names are `<name>-<stage>-<key>`, where `<name>` and `<
 
 ## Next steps
 
-- [Getting Started](/docs/getting-started): create and deploy a project.
-- [Functions](/docs/guides/functions): invokable Functions and the Function Registry in detail.
-- [HTTP routes](/docs/guides/http-routes): build routes with the Route Builder.
-- [Deploy](/docs/guides/deploy): stages, regions and removing a stage.
+<Cards>
+  <Card icon={<Rocket />} href="/docs/getting-started" title="Quickstart">
+    Create and deploy a project.
+  </Card>
+  <Card
+    icon={<SquareFunction />}
+    href="/docs/guides/functions"
+    title="Functions"
+  >
+    Invokable Functions and the Function Registry in detail.
+  </Card>
+  <Card icon={<Route />} href="/docs/guides/http-routes" title="HTTP routes">
+    Build routes with the Route Builder.
+  </Card>
+  <Card icon={<CloudUpload />} href="/docs/guides/deploy" title="Deploy">
+    Stages, regions and removing a stage.
+  </Card>
+</Cards>

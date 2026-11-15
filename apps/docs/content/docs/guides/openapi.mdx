@@ -3,17 +3,27 @@ title: OpenAPI and API reference
 description: Generate an OpenAPI 3.1 document from your route contracts, browse it on a Scalar API reference page, and write it to a file in CI.
 ---
 
-After reading this page you can add the `openapi()` Plugin to a project, browse your HTTP API at `/docs` under `voke dev`, describe routes with `meta`, publish the reference from the deployed API, and write the **OpenAPI Document** to a file with `voke openapi generate`.
+After reading this page you can add the `openapi()` Plugin to a project and browse your HTTP API at `/docs` under `voke dev`. You can also describe routes with `meta`, publish the reference from the deployed API, and write the **OpenAPI Document** to a file with `voke openapi generate`.
 
 ## Add the Plugin
 
-Install `@voke/openapi` and add `openapi()` to `plugins` in `voke.config.ts`:
+<Steps>
+<Step>
+
+### Install the package
 
 ```bash
 bun add @voke/openapi
 ```
 
-```ts twoslash
+</Step>
+<Step>
+
+### Declare it in the config
+
+Add `openapi()` to `plugins` in `voke.config.ts`:
+
+```ts title="voke.config.ts" twoslash
 import { aws } from "@voke/aws";
 import { openapi } from "@voke/openapi";
 import { defineConfig } from "voke";
@@ -25,12 +35,24 @@ export default defineConfig({
 });
 ```
 
+</Step>
+<Step>
+
+### Open the reference
+
 Run `voke dev` and open:
 
 - `http://localhost:3000/openapi.json`: the OpenAPI 3.1 document of every route of the Gateway.
 - `http://localhost:3000/docs`: the **API Reference Page**, which renders that document with [Scalar](https://scalar.com).
 
-Both are served under `voke dev` only. Nothing is deployed, and `voke deploy` does not change. Under `voke dev` they answer before your routes, so if your API has its own `/docs` route, set `uiPath` to another path.
+</Step>
+</Steps>
+
+<Callout type="info" title="Served under voke dev only">
+  Nothing is deployed, and `voke deploy` does not change. Under `voke dev` the
+  document and the page answer before your routes, so if your API has its own
+  `/docs` route, set `uiPath` to another path.
+</Callout>
 
 ## Describe routes
 
@@ -92,7 +114,7 @@ The `Error` schema is the `{ "error": { "message", "code", "details", "issues" }
 
 An API description tells an attacker every route and field, so the deployed API does not serve it unless you ask. `expose: true` adds the **Plugin Function** `openapi-docs`, which serves both routes locally and is deployed with your Functions:
 
-```ts twoslash
+```ts title="voke.config.ts" twoslash
 import { aws } from "@voke/aws";
 import { openapi } from "@voke/openapi";
 import { defineConfig } from "voke";
@@ -104,7 +126,12 @@ export default defineConfig({
 });
 ```
 
-Both routes are public (`authorizer: "none"`), even when your Functions have a Default HTTP Authorizer. The document lists the request's origin as its server, unless you set `servers`.
+<Callout type="warn" title="The exposed routes are public">
+  Both routes are public (`authorizer: "none"`), even when your Functions have a
+  Default HTTP Authorizer.
+</Callout>
+
+The document lists the request's origin as its server, unless you set `servers`.
 
 ## Options
 
@@ -165,7 +192,21 @@ console.info(Object.keys(document.paths));
 
 ## Next steps
 
-- [HTTP routes](/docs/guides/http-routes)
-- [Schemas and validation](/docs/guides/schemas)
-- [Plugins](/docs/guides/plugins)
-- [CLI reference](/docs/reference/cli)
+<Cards>
+  <Card icon={<Route />} href="/docs/guides/http-routes" title="HTTP routes">
+    Declare routes, validate requests and shape responses.
+  </Card>
+  <Card
+    icon={<ShieldCheck />}
+    href="/docs/guides/schemas"
+    title="Schemas and validation"
+  >
+    The schemas the document reads, and their JSON Schema.
+  </Card>
+  <Card icon={<Plug />} href="/docs/guides/plugins" title="Plugins">
+    Add a Plugin to a project, or write your own.
+  </Card>
+  <Card icon={<Terminal />} href="/docs/reference/cli" title="CLI reference">
+    Every `voke` command and its flags.
+  </Card>
+</Cards>

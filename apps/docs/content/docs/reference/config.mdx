@@ -22,6 +22,8 @@ The file must use a default export. `defineConfig()` validates the input, applie
 
 ## Project
 
+The top-level settings.
+
 | Setting       | Type                     | Default                          | Description                                                                                                                                   |
 | ------------- | ------------------------ | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | `name`        | `string`                 | Required                         | Service name. Voke uses it for generated resource names; the deployed stack is `<name>-<stage>`.                                              |
@@ -34,9 +36,17 @@ The file must use a default export. `defineConfig()` validates the input, applie
 | `remotes`     | `Record<string, ...>`    | None                             | Remote Function Registry targets, read by `voke remote generate` and `voke dev`. See [Remotes](#remotes).                                     |
 | `plugins`     | `VokePlugin[]`           | `[]`                             | Plugins, in wrap order: the first is the outermost. Their resources and environment join the ones above. See [Plugins](/docs/guides/plugins). |
 
-The stage `local` is reserved for local development: `voke deploy` refuses it unless `AWS_ENDPOINT_URL` or `VOKE_AWS_ENDPOINT_URL` points at a local endpoint. On the command line, `voke deploy` and `voke remove` pick the stage from `--stage`, then `VOKE_STAGE`, then `stage` in the config.
+<Callout type="warn" title="The stage local is reserved">
+  The stage `local` is reserved for local development: `voke deploy` refuses it
+  unless `AWS_ENDPOINT_URL` or `VOKE_AWS_ENDPOINT_URL` points at a local
+  endpoint.
+</Callout>
+
+On the command line, `voke deploy` and `voke remove` pick the stage from `--stage`, then `VOKE_STAGE`, then `stage` in the config.
 
 ## API
+
+Settings of the HTTP API.
 
 | Setting                  | Type                | Default | Description                                                                                     |
 | ------------------------ | ------------------- | ------- | ----------------------------------------------------------------------------------------------- |
@@ -52,6 +62,8 @@ The same CORS value configures the local Gateway (`voke dev`, `gateway.request(.
 
 ## Build
 
+Settings of the bundle that `voke build` writes.
+
 | Setting             | Type       | Default          | Description                                                                                                                        |
 | ------------------- | ---------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | `build.entrypoints` | `string[]` | `[entrypoint]`   | Bundle entrypoints recorded in the model. The AWS Provider does not read it: it bundles one generated module from `entrypoint`.    |
@@ -62,11 +74,15 @@ Voke always builds an ESM bundle for the Lambda Node.js runtime and writes a `pa
 
 ## CloudFormation
 
+Settings of the template that `voke synth` writes.
+
 | Setting              | Type     | Default                        | Description                             |
 | -------------------- | -------- | ------------------------------ | --------------------------------------- |
 | `cloudFormation.out` | `string` | `"./dist/cloudformation.json"` | Where `voke synth` writes the template. |
 
 ## Dev
+
+Settings that apply to `voke dev` only.
 
 | Setting           | Type                     | Default      | Description                                                                   |
 | ----------------- | ------------------------ | ------------ | ----------------------------------------------------------------------------- |
@@ -74,6 +90,8 @@ Voke always builds an ESM bundle for the Lambda Node.js runtime and writes a `pa
 | `dev.environment` | `Record<string, string>` | `{}`         | Extra environment variables for `voke dev` only. They override `environment`. |
 
 ## Runtime
+
+Memory and timeout for every Function.
 
 | Setting           | Type     | Default | Description                                                          |
 | ----------------- | -------- | ------- | -------------------------------------------------------------------- |
@@ -91,7 +109,7 @@ Each key of `remotes` names one remote Voke Project. Voke selects the target for
 | `remotes.<name>.contract`                 | `string`                                          | The target's `contract`        | Contract metadata URL for every target.                                                                                    |
 | `remotes.<name>.out`                      | `string`                                          | `"src/voke/remotes/<name>.ts"` | Module that `voke remote generate` writes.                                                                                 |
 
-```ts twoslash
+```ts title="voke.config.ts" twoslash
 import { aws } from "@voke/aws";
 import { defineConfig } from "voke";
 
@@ -176,7 +194,12 @@ export const report = fn({
 });
 ```
 
-The AWS Provider checks the Lambda limits when it builds the model: memory 128–10240 MB, timeout 1–900 seconds, and at most 30 seconds for a Function with HTTP routes (the API Gateway HTTP API integration limit). A value outside these limits is a `VokeModelError`.
+<Callout type="warn" title="Lambda limits">
+  The AWS Provider checks the Lambda limits when it builds the model: memory
+  128–10240 MB, timeout 1–900 seconds, and at most 30 seconds for a Function
+  with HTTP routes (the API Gateway HTTP API integration limit). A value outside
+  these limits is a `VokeModelError`.
+</Callout>
 
 ## Defaults
 
@@ -235,7 +258,17 @@ Invalid Voke config at functions: Functions are declared in the project entrypoi
 
 ## Next steps
 
-- [CLI](/docs/reference/cli): the commands that read this file.
-- [Deploy](/docs/guides/deploy): deploy a stage and remove it.
-- [Resources](/docs/guides/resources): declare queues, tables and buckets.
-- [Errors](/docs/reference/errors): what a `VokeConfigError` contains.
+<Cards>
+  <Card icon={<Terminal />} href="/docs/reference/cli" title="CLI">
+    The commands that read this file.
+  </Card>
+  <Card icon={<CloudUpload />} href="/docs/guides/deploy" title="Deploy">
+    Deploy a stage and remove it.
+  </Card>
+  <Card icon={<Database />} href="/docs/guides/resources" title="Resources">
+    Declare queues, tables and buckets.
+  </Card>
+  <Card icon={<TriangleAlert />} href="/docs/reference/errors" title="Errors">
+    What a `VokeConfigError` contains.
+  </Card>
+</Cards>

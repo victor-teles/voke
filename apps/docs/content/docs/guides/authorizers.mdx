@@ -9,7 +9,7 @@ After reading this page you can protect HTTP routes with API Gateway HTTP API au
 
 An authorizer decides whether API Gateway lets a request reach a route. You declare named authorizers with `createAuthorizers` from `@voke/aws`, pass them to `http(...)`, and pick a default and per-route overrides:
 
-```ts twoslash
+```ts title="src/index.ts" twoslash
 // @filename: voke.config.ts
 import { aws } from "@voke/aws";
 import { defineConfig } from "voke";
@@ -67,7 +67,14 @@ export default voke(functions, { config });
 - `GET /me` overrides the default with `session`, a Lambda authorizer.
 - `GET /health` sets `authorizer: "none"`, so it is public.
 
-Registering an authorizer does not protect any route by itself. A route is protected only when its `http(...)` Function sets a default `authorizer`, or when the route names one. Without either, every route is public.
+<Callout
+  type="warn"
+  title="Registering an authorizer protects nothing by itself"
+>
+  A route is protected only when its `http(...)` Function sets a default
+  `authorizer`, or when the route names one. Without either, every route is
+  public.
+</Callout>
 
 A default applies only to the routes of the `http(...)` Function that declares it. A route can name only an authorizer from its own `http(...)` registry, or `"none"`. To share authorizers between several `http(...)` Functions, pass the same `createAuthorizers(...)` value to each one. Authorizer names are shared by the whole HTTP API, so two `http(...)` Functions cannot use one name for different definitions.
 
@@ -125,7 +132,7 @@ const authorizeSession = requestAuthorizer({
 
 The handler's second argument is the invoke context, with Runtime Variables (see [Runtime Variables](/docs/guides/runtime-variables)). A Request Authorizer Function also accepts `name`, `synthesis` and `variables`, like other Functions. Register it in `createFunctions(...)` and reference it by its registry key in `lambdaAuthorizer({ function })`.
 
-## External Lambda authorizers
+## Use an external Lambda authorizer
 
 A Lambda authorizer can call a Lambda that is not part of your project. Pass its ARN or its deployed name:
 
@@ -146,7 +153,7 @@ const authorizers = createAuthorizers({
 
 Prefer the ARN: it states the account and the region. A deployed name resolves in the stack's own account and region.
 
-<Callout type="warn">
+<Callout type="warn" title="Grant the invoke permission yourself">
   External authorizers are bring-your-own-permission. Voke adds the permission
   for API Gateway to call a Request Authorizer Function from your own project,
   but not for an external Lambda. Grant API Gateway permission to invoke that
@@ -163,13 +170,13 @@ Prefer the ARN: it states the account and the region. A deployed name resolves i
 | Lambda authorizer → external ARN or name        | Returns `500` with `External authorizers are not available locally`.                                                                               |
 | JWT authorizer                                  | Not checked. The route runs, and `request.auth.context` is empty.                                                                                  |
 
-<Callout type="info">
-  JWTs are not validated locally, not even their presence. A route protected
-  only by a JWT authorizer is open under `voke dev`. Test JWT rules against a
-  deployed stage.
+<Callout type="warn" title="JWTs are not validated locally">
+  The local Gateway does not validate JWTs, not even their presence. A route
+  protected only by a JWT authorizer is open under `voke dev`. Test JWT rules
+  against a deployed stage.
 </Callout>
 
-```ts twoslash
+```ts title="src/index.ts" twoslash
 // @filename: voke.config.ts
 import { aws } from "@voke/aws";
 import { defineConfig } from "voke";
@@ -255,6 +262,14 @@ const profile = await functions.route("GET", "/profile", {
 
 ## Next steps
 
-- [HTTP routes](/docs/guides/http-routes)
-- [Testing](/docs/guides/testing)
-- [Deploy](/docs/guides/deploy)
+<Cards>
+  <Card icon={<Route />} href="/docs/guides/http-routes" title="HTTP routes">
+    Declare routes, validate requests and shape responses.
+  </Card>
+  <Card icon={<FlaskConical />} href="/docs/guides/testing" title="Testing">
+    Test Functions and the Gateway without AWS.
+  </Card>
+  <Card icon={<CloudUpload />} href="/docs/guides/deploy" title="Deploy">
+    Stages, outputs and removing a stack.
+  </Card>
+</Cards>

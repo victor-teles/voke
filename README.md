@@ -57,7 +57,7 @@ export default voke(functions, { config });
 
 The documentation lives in `apps/docs` (run it with `bun run --filter @voke/docs dev`):
 
-- Start: [Introduction](apps/docs/content/docs/index.mdx), [Getting Started](apps/docs/content/docs/getting-started.mdx), [Concepts](apps/docs/content/docs/concepts.mdx)
+- Start: [Introduction](apps/docs/content/docs/index.mdx), [Quickstart](apps/docs/content/docs/getting-started.mdx), [Concepts](apps/docs/content/docs/concepts.mdx)
 - Guides: [Functions](apps/docs/content/docs/guides/functions.mdx), [HTTP routes](apps/docs/content/docs/guides/http-routes.mdx), [Schemas](apps/docs/content/docs/guides/schemas.mdx), [Authorizers](apps/docs/content/docs/guides/authorizers.mdx), [SQS events](apps/docs/content/docs/guides/sqs-events.mdx), [Runtime Variables](apps/docs/content/docs/guides/runtime-variables.mdx), [Resources](apps/docs/content/docs/guides/resources.mdx), [Calling other projects](apps/docs/content/docs/guides/remote-functions.mdx), [Testing](apps/docs/content/docs/guides/testing.mdx), [Local AWS](apps/docs/content/docs/guides/local-aws.mdx), [Deploy](apps/docs/content/docs/guides/deploy.mdx), [Migrate from Serverless Framework](apps/docs/content/docs/guides/serverless-migration.mdx), [Troubleshooting](apps/docs/content/docs/guides/troubleshooting.mdx)
 - Reference: [Config](apps/docs/content/docs/reference/config.mdx), [CLI](apps/docs/content/docs/reference/cli.mdx), [Errors](apps/docs/content/docs/reference/errors.mdx), [Packages](apps/docs/content/docs/reference/packages.mdx)
 

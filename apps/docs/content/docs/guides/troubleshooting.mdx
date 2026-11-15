@@ -3,7 +3,7 @@ title: Troubleshooting
 description: Check your setup with voke doctor and fix the most common Voke errors from their exact messages.
 ---
 
-After reading this page you can check your toolchain and project with `voke doctor`, and fix the errors Voke users meet most often. Search this page for the first words of your error message.
+After this page you can check your toolchain and project with `voke doctor`, and fix the errors Voke users meet most often. Search this page for the first words of your error message.
 
 ## Check your setup with `voke doctor`
 
@@ -48,6 +48,8 @@ The last two rows come from the AWS Provider. The credentials check calls CloudF
 
 ## Common errors
 
+Each entry starts with the message Voke prints, then gives the cause and the fix.
+
 ### No provider configured
 
 ```txt
@@ -57,9 +59,11 @@ Invalid CLI usage: No provider configured. Add a provider to voke.config.ts, for
   export default defineConfig({ name: "hello-api", provider: aws() });
 ```
 
-Commands that build, synthesize, deploy, or run local AWS need a Provider. Add `provider: aws()` to `voke.config.ts`:
+**Cause:** Commands that build, synthesize, deploy, or run local AWS need a Provider.
 
-```ts twoslash
+**Fix:** Add `provider: aws()` to `voke.config.ts`:
+
+```ts title="voke.config.ts" twoslash
 import { aws } from "@voke/aws";
 import { defineConfig } from "voke";
 
@@ -76,35 +80,37 @@ Invalid CLI usage: Unknown flag --stge for "deploy". Did you mean --stage?
 Usage: voke deploy [--stage dev] [--region us-east-1] [--config voke.config.ts] [--dry-run]
 ```
 
-The flag is not one the command reads. When a known flag is close, Voke suggests it. Run `voke <command> --help` for the flags of a command, or see the [CLI reference](/docs/reference/cli). `voke local` also accepts the flags of your Local AWS Provider, such as `--rebuild`.
+**Cause:** The flag is not one the command reads. When a known flag is close, Voke suggests it.
+
+**Fix:** Run `voke <command> --help` for the flags of a command, or see the [CLI reference](/docs/reference/cli). `voke local` also accepts the flags of your Local AWS Provider, such as `--rebuild`.
 
 ### A config setting was removed
 
-Voke fails on settings it no longer reads, instead of ignoring them. Every message starts with `Invalid Voke config at <path>:`, and several issues are joined with `;`.
+**Cause:** Voke fails on settings it no longer reads, instead of ignoring them. Every message starts with `Invalid Voke config at <path>:`, and several issues are joined with `;`.
 
 ```txt
 Invalid Voke config at local: local AWS settings moved to the provider: aws({ local: floci() }) from "@voke/aws" and "@voke/aws/local"
 ```
 
-Move the Local AWS Provider into the AWS Provider: `provider: aws({ local: floci() })`. See [Local AWS](/docs/guides/local-aws).
+**Fix:** Move the Local AWS Provider into the AWS Provider: `provider: aws({ local: floci() })`. See [Local AWS](/docs/guides/local-aws).
 
 ```txt
 Invalid Voke config at runtime.lambda: "runtime.lambda" moved to the AWS provider; use aws({ lambda: { runtime } })
 ```
 
-Set Lambda settings on the Provider: `provider: aws({ lambda: { runtime: "nodejs22.x" } })`.
+**Fix:** Set Lambda settings on the Provider: `provider: aws({ lambda: { runtime: "nodejs22.x" } })`.
 
 ```txt
 Invalid Voke config at cloudFormation.resources: "cloudFormation.resources" was removed; declare resources at the top level: resources: { ... }
 ```
 
-Move the resources to the top-level `resources` setting. The same applies to `cloudFormation.environment`. See [Resources](/docs/guides/resources).
+**Fix:** Move the resources to the top-level `resources` setting. The same applies to `cloudFormation.environment`. See [Resources](/docs/guides/resources).
 
 ```txt
 Invalid Voke config at functions: Functions are declared in the project entrypoint, not in voke.config.ts. Export them from the entrypoint: export default voke(functions, { config }) or export const functions = createFunctions({ ... })
 ```
 
-Remove `functions` from `voke.config.ts`. Declare them in the entrypoint (`src/index.ts` by default) and export the Gateway. See [Functions](/docs/guides/functions).
+**Fix:** Remove `functions` from `voke.config.ts`. Declare them in the entrypoint (`src/index.ts` by default) and export the Gateway. See [Functions](/docs/guides/functions).
 
 ### AWS credentials were not found
 
@@ -112,7 +118,9 @@ Remove `functions` from `voke.config.ts`. Declare them in the entrypoint (`src/i
 AWS credentials were not found or have expired. Configure a profile (AWS_PROFILE), run your SSO login, or set environment credentials, then retry.
 ```
 
-`voke deploy`, `voke remove`, and `voke doctor` use the standard AWS credential chain. Set `AWS_PROFILE`, run `aws sso login` for an SSO profile, or set environment credentials, then retry. See [Deploy](/docs/guides/deploy).
+**Cause:** `voke deploy`, `voke remove`, and `voke doctor` use the standard AWS credential chain.
+
+**Fix:** Set `AWS_PROFILE`, run `aws sso login` for an SSO profile, or set environment credentials, then retry. See [Deploy](/docs/guides/deploy).
 
 ### AWS Emulator is not running
 
@@ -120,7 +128,9 @@ AWS credentials were not found or have expired. Configure a profile (AWS_PROFILE
 AWS Emulator is not running (no state in /path/to/project/.voke/local/aws-emulator/9297). Start it with: voke local start
 ```
 
-`voke dev` and `voke local bootstrap` need a running AWS Emulator when it is the Local AWS Provider (the default for `aws()`). Run `voke local start`, then `voke local bootstrap`. If the start fails, check that Docker is running. If bootstrap fails, check that the AWS CLI is installed: bootstrap runs `aws cloudformation deploy`.
+**Cause:** `voke dev` and `voke local bootstrap` need a running AWS Emulator when it is the Local AWS Provider (the default for `aws()`).
+
+**Fix:** Run `voke local start`, then `voke local bootstrap`. If the start fails, check that Docker is running. If bootstrap fails, check that the AWS CLI is installed: bootstrap runs `aws cloudformation deploy`.
 
 ### Could not import the project entrypoint
 
@@ -128,7 +138,9 @@ AWS Emulator is not running (no state in /path/to/project/.voke/local/aws-emulat
 Could not import the project entrypoint /path/to/project/src/index.ts: <reason>. Voke imports your entrypoint to discover Functions; guard side effects with process.env.VOKE_SYNTH.
 ```
 
-Commands such as `voke build`, `voke synth`, and `voke deploy` import your entrypoint to find its Functions. `<reason>` is the original error. Fix that error first, for example a missing module or a top-level call that needs the network. While Voke imports the entrypoint, `process.env.VOKE_SYNTH` is `"1"`. Skip side effects such as servers and connections when it is set:
+**Cause:** Commands such as `voke build`, `voke synth`, and `voke deploy` import your entrypoint to find its Functions. `<reason>` is the original error.
+
+**Fix:** Resolve that error first, for example a missing module or a top-level call that needs the network. While Voke imports the entrypoint, `process.env.VOKE_SYNTH` is `"1"`. Skip side effects such as servers and connections when it is set:
 
 ```ts twoslash
 // ---cut---
@@ -143,7 +155,9 @@ if (process.env.VOKE_SYNTH !== "1") {
 Invalid Voke model at functions.api.synthesis.timeout: Function "api" timeout 60s exceeds the 30s API Gateway HTTP API integration limit; lower synthesis.timeout to 30 or less, or move the work to an SQS Function
 ```
 
-API Gateway HTTP APIs wait at most 30 seconds for a Lambda integration. A Function with routes cannot have a longer timeout. Lower the Function's `synthesis.timeout` to 30 seconds or less. For longer work, send a message to a queue and do the work in an SQS Function. See [SQS events](/docs/guides/sqs-events).
+**Cause:** API Gateway HTTP APIs wait at most 30 seconds for a Lambda integration. A Function with routes cannot have a longer timeout.
+
+**Fix:** Lower the Function's `synthesis.timeout` to 30 seconds or less. For longer work, send a message to a queue and do the work in an SQS Function. See [SQS events](/docs/guides/sqs-events).
 
 ### Local Function invocation requires Gateway activation
 
@@ -151,7 +165,9 @@ API Gateway HTTP APIs wait at most 30 seconds for a Lambda integration. A Functi
 Local Function invocation requires Gateway activation. Call voke(functions) before invoking local functions.
 ```
 
-A local `functions.invoke(...)` needs a Function Registry that a Gateway has activated. In app code, export the Gateway from the entrypoint: `export default voke(functions, { config })`. In tests, call `voke(functions, { config })` before the first invocation, or use `createInvokeTestClient(functions)`. See [Testing](/docs/guides/testing#invoke-a-function).
+**Cause:** A local `functions.invoke(...)` needs a Function Registry that a Gateway has activated.
+
+**Fix:** In app code, export the Gateway from the entrypoint: `export default voke(functions, { config })`. In tests, call `voke(functions, { config })` before the first invocation, or use `createInvokeTestClient(functions)`. See [Testing](/docs/guides/testing#invoke-a-function).
 
 A Function Registry belongs to one Gateway. Activating it again with a different name, stage, or region fails with `Function Registry is already activated with a different Gateway context`.
 
@@ -161,11 +177,19 @@ A Function Registry belongs to one Gateway. Activating it again with a different
 Function FulfilOrderFunction must be replaced, which CloudFormation cannot do for a named Lambda. Lambda sets durable execution only when it creates a function, so adding or removing durable(...) needs a new Function: give it a new registry key or name, deploy, then remove the old one.
 ```
 
-`voke deploy` stops before it changes anything. Voke gives every Lambda a fixed name, and CloudFormation cannot replace a resource with a fixed name. Changing an existing Function to `durable()`, or back to `fn()`, needs a new Lambda. Give the Function a new registry key or `name`, deploy, check that it works, then remove the old Function and deploy again. `voke deploy --dry-run` prints the same message as a warning. See [Durable Functions](/docs/guides/durable-functions#deploy).
+`voke deploy` stops before it changes anything.
+
+**Cause:** Voke gives every Lambda a fixed name, and CloudFormation cannot replace a resource with a fixed name. Changing an existing Function to `durable()`, or back to `fn()`, needs a new Lambda.
+
+**Fix:** Give the Function a new registry key or `name`, deploy, check that it works, then remove the old Function and deploy again. `voke deploy --dry-run` prints the same message as a warning. See [Durable Functions](/docs/guides/durable-functions#deploy).
 
 ### A durable function needs a qualified name or ARN
 
-Lambda rejects an invocation of a durable function by its unqualified name or ARN. Voke invokes Durable Functions through their `live` alias, so this happens only when you call the Lambda from outside Voke, for example with the AWS CLI or from another service. Add the alias to the name: `<deployed-name>:live`. IAM policies for durable execution APIs also need a qualified ARN pattern, such as `arn:aws:lambda:<region>:<account>:function:<deployed-name>:*`.
+**Symptom:** Lambda rejects an invocation of a durable function by its unqualified name or ARN.
+
+**Cause:** Voke invokes Durable Functions through their `live` alias, so this happens only when you call the Lambda from outside Voke, for example with the AWS CLI or from another service.
+
+**Fix:** Add the alias to the name: `<deployed-name>:live`. IAM policies for durable execution APIs also need a qualified ARN pattern, such as `arn:aws:lambda:<region>:<account>:function:<deployed-name>:*`.
 
 ### executionName on a Function that is not durable
 
@@ -173,11 +197,33 @@ Lambda rejects an invocation of a durable function by its unqualified name or AR
 invoke("lookupOrder") cannot use executionName: the Provider accepts it only for Functions whose executions it names
 ```
 
-The `InvokeError` has code `INVALID_OPTIONS`. Only Durable Functions accept `executionName`. Remove the option, or declare the Function with `durable()`.
+The `InvokeError` has code `INVALID_OPTIONS`.
+
+**Cause:** Only Durable Functions accept `executionName`.
+
+**Fix:** Remove the option, or declare the Function with `durable()`.
 
 ## Next steps
 
-- [Errors reference](/docs/reference/errors): error classes and codes.
-- [CLI reference](/docs/reference/cli): commands and flags.
-- [Config reference](/docs/reference/config): settings and defaults.
-- [Local AWS](/docs/guides/local-aws): set up a Local AWS Provider.
+<Cards>
+  <Card
+    icon={<TriangleAlert />}
+    href="/docs/reference/errors"
+    title="Errors reference"
+  >
+    Error classes and codes.
+  </Card>
+  <Card icon={<Terminal />} href="/docs/reference/cli" title="CLI reference">
+    Commands and flags.
+  </Card>
+  <Card
+    icon={<SlidersHorizontal />}
+    href="/docs/reference/config"
+    title="Config reference"
+  >
+    Settings and defaults.
+  </Card>
+  <Card icon={<Boxes />} href="/docs/guides/local-aws" title="Local AWS">
+    Set up a Local AWS Provider.
+  </Card>
+</Cards>
