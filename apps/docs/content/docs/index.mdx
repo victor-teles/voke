@@ -1,16 +1,34 @@
 ---
 title: Introduction
-description: Learn what Voke is, who it is for, and what a minimal Voke project looks like.
+description: What Voke is, who it is for, and where to start.
 ---
 
-Voke is a TypeScript framework for HTTP APIs and workers that run on AWS Lambda. You declare typed Functions in one entrypoint, and Voke runs them locally with Bun, tests them in process, and deploys them to AWS with one command.
+Voke is a TypeScript framework for HTTP APIs and workers that run on AWS Lambda. You declare typed **Functions** in one entrypoint and say what calls each one: an HTTP route, a queue, a schedule, a stream. Voke runs them locally with Bun, tests them in process, and deploys them to AWS with one command.
 
-Voke is for TypeScript developers who build HTTP APIs and workers on AWS Lambda and want one typed codebase for local development, tests and deployment.
+It is for TypeScript developers who want one typed codebase for local development, tests and deployment, without writing handler glue or infrastructure templates.
 
-<Callout type="info">
-  Voke is not published yet, and the published package names are not final. To
-  try it now, see [Getting Started](/docs/getting-started).
+<Callout type="info" title="Voke is not published yet">
+  The published package names (`voke`, `@voke/*`) are not final. Until then, you
+  can [try it from the
+  repository](/docs/getting-started#try-it-from-the-repository).
 </Callout>
+
+## Start here
+
+<PlateCards>
+  <PlateCard art="deploy" href="/docs/getting-started" title="Quickstart">
+    Create a project, run it locally, test it, and deploy it to AWS.
+  </PlateCard>
+  <PlateCard art="reference" href="/docs/concepts" title="Concepts">
+    The vocabulary: Functions, the Gateway, Event Sources and the Provider.
+  </PlateCard>
+  <PlateCard art="http" href="/docs/guides/http-routes" title="HTTP routes">
+    Methods, parameters, bodies and responses, validated by schemas.
+  </PlateCard>
+  <PlateCard art="events" href="/docs/guides/sqs-events" title="Event Sources">
+    Run a Function from a queue, a topic, a schedule, a stream or a bucket.
+  </PlateCard>
+</PlateCards>
 
 ## The smallest project
 
@@ -48,19 +66,47 @@ export default voke(functions, { config });
 
 `route.get(...)` is the **Route Builder**. The `params` schema validates the path parameters, so `request.params.id` is typed as `string`. When the input does not match the schema, Voke responds with status 400 and your handler does not run.
 
-[Concepts](/docs/concepts) defines each of these terms and shows how they connect.
-
 ## What you get
 
-- **Local development.** `voke dev` runs your entrypoint with hot reload on `http://localhost:3000`.
-- **Typed invocation.** Project code calls a Function by its registry key with `functions.invoke("key", payload)`. The payload and the result are typed from the Function's input and output schemas.
-- **Tests without a server.** In `bun test`, send requests to the Gateway in process with `gateway.request("/path")`.
-- **One-command deploy.** `voke deploy --stage dev` builds one Lambda handler per Function, deploys a CloudFormation stack, and prints the API URL.
-- **Local AWS.** `voke local start` runs a **Local AWS Provider** (the AWS Emulator or Floci) for the DynamoDB tables, SQS queues and other resources that your project declares.
+|                            |                                                                                                                                     |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| **Local development**      | `voke dev` runs your entrypoint with hot reload on `http://localhost:3000`.                                                         |
+| **Typed invocation**       | Call a Function by its registry key with `functions.invoke("key", payload)`. The payload and the result are typed from its schemas. |
+| **Tests without a server** | In `bun test`, send requests to the Gateway in process with `gateway.request("/path")`.                                             |
+| **One-command deploy**     | `voke deploy --stage dev` builds one Lambda handler per Function, deploys a CloudFormation stack, and prints the API URL.           |
+| **Local AWS**              | `voke local start` runs a **Local AWS Provider** for the tables, queues and other resources your project declares.                  |
 
-## Next steps
+## Explore by task
 
-- [Getting Started](/docs/getting-started): create, run, test and deploy a project.
-- [Concepts](/docs/concepts): the vocabulary and what each command produces.
-- [HTTP routes](/docs/guides/http-routes): methods, parameters, bodies and responses.
-- [Functions](/docs/guides/functions): invokable Functions and the Function Registry.
+<Cards>
+  <Card
+    icon={<SquareFunction />}
+    href="/docs/guides/functions"
+    title="Functions"
+  >
+    Invokable Functions and the Function Registry.
+  </Card>
+  <Card
+    icon={<ShieldCheck />}
+    href="/docs/guides/schemas"
+    title="Schemas and validation"
+  >
+    Zod, Valibot or the built-in schema helpers.
+  </Card>
+  <Card
+    icon={<Workflow />}
+    href="/docs/guides/durable-functions"
+    title="Durable Functions"
+  >
+    Steps, waits and retries that survive a crash.
+  </Card>
+  <Card icon={<Database />} href="/docs/guides/resources" title="Resources">
+    Tables, queues and buckets, with typed bindings.
+  </Card>
+  <Card icon={<FlaskConical />} href="/docs/guides/testing" title="Testing">
+    Test Functions and the Gateway without AWS.
+  </Card>
+  <Card icon={<CloudUpload />} href="/docs/guides/deploy" title="Deploy">
+    Stages, outputs and removing a stack.
+  </Card>
+</Cards>

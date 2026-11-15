@@ -20,8 +20,8 @@ export const GET = async (
 
   return generateOGImage({
     description: page.data.description,
-    primaryColor: "rgba(116, 211, 197, 0.35)",
-    primaryTextColor: "rgb(116, 211, 197)",
+    primaryColor: "rgba(255, 178, 36, 0.28)",
+    primaryTextColor: "rgb(255, 178, 36)",
     site: siteName,
     title: page.data.title,
   });

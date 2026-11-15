@@ -1,57 +1,86 @@
 @import "tailwindcss";
 @source "./**/*.{ts,tsx,mdx}";
+@source "../components/**/*.{ts,tsx}";
 @source "../content/**/*.{md,mdx}";
 @import "fumadocs-ui/css/neutral.css";
 @import "fumadocs-ui/css/preset.css";
 @import "fumadocs-twoslash/twoslash.css";
 
+/*
+ * The Voke palette is a greyscale switchboard with one colour: a bakelite panel, bone-white and
+ * grey inks, and amber indicator lamps. Amber is the only hue on the site, so it always means
+ * "this is live" or "act here": a lamp, a signal, a link, the primary button.
+ */
+@theme {
+  --color-voke-bakelite: #0c0e12;
+  --color-voke-panel: #12151b;
+  --color-voke-bone: #e8e9e4;
+  --color-voke-ink: #8a909c;
+  --color-voke-lamp-deep: #8a5300;
+  --color-voke-lamp: #ffb224;
+
+  --font-sans:
+    "Instrument Sans Variable", "Instrument Sans", ui-sans-serif, system-ui,
+    sans-serif;
+  --font-display:
+    "Bricolage Grotesque Variable", "Bricolage Grotesque",
+    "Instrument Sans Variable", ui-sans-serif, sans-serif;
+  --font-mono:
+    "IBM Plex Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+}
+
 :root {
-  --color-fd-background: #fbfaf6;
-  --color-fd-foreground: #17140f;
-  --color-fd-muted: #f1eee7;
-  --color-fd-muted-foreground: #62594c;
-  --color-fd-card: #fffdf8;
-  --color-fd-card-foreground: #17140f;
-  --color-fd-border: #ded7c8;
-  --color-fd-primary: #0f5f59;
-  --color-fd-primary-foreground: #fbfaf6;
+  --color-fd-background: #fafaf8;
+  --color-fd-foreground: #111318;
+  --color-fd-muted: #f0f1ee;
+  --color-fd-muted-foreground: #585e6b;
+  --color-fd-popover: #ffffff;
+  --color-fd-popover-foreground: #111318;
+  --color-fd-card: #ffffff;
+  --color-fd-card-foreground: #111318;
+  --color-fd-border: #e1e3df;
+  --color-fd-primary: #8a5300;
+  --color-fd-primary-foreground: #ffffff;
   /* Fumadocs draws subtle surfaces (search box, tab lists, buttons) with "secondary". */
-  --color-fd-secondary: #ede9df;
-  --color-fd-secondary-foreground: #17140f;
-  --color-fd-accent: #d6f1e7;
-  --color-fd-accent-foreground: #0f3f3b;
-  --font-sans: "Avenir Next", Avenir, "Segoe UI", sans-serif;
-  --font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  --color-fd-secondary: #f0f1ee;
+  --color-fd-secondary-foreground: #111318;
+  --color-fd-accent: #ecede9;
+  --color-fd-accent-foreground: #111318;
+  --color-fd-ring: #b36b00;
 }
 
 .dark {
-  --color-fd-background: #101412;
-  --color-fd-foreground: #f7f1e5;
-  --color-fd-muted: #1b211f;
-  --color-fd-muted-foreground: #c7bfae;
-  --color-fd-card: #151a18;
-  --color-fd-card-foreground: #f7f1e5;
-  --color-fd-border: #2d3834;
-  --color-fd-primary: #74d3c5;
-  --color-fd-primary-foreground: #0b1d1a;
-  --color-fd-secondary: #1d2422;
-  --color-fd-secondary-foreground: #f7f1e5;
-  --color-fd-accent: #20332f;
-  --color-fd-accent-foreground: #c6f3eb;
+  --color-fd-background: #0c0e12;
+  --color-fd-foreground: #ecede8;
+  --color-fd-muted: #151920;
+  --color-fd-muted-foreground: #9aa0ad;
+  --color-fd-popover: #12151b;
+  --color-fd-popover-foreground: #ecede8;
+  --color-fd-card: #12151b;
+  --color-fd-card-foreground: #ecede8;
+  --color-fd-border: #232832;
+  --color-fd-primary: #ffb224;
+  --color-fd-primary-foreground: #0c0e12;
+  --color-fd-secondary: #191d25;
+  --color-fd-secondary-foreground: #ecede8;
+  --color-fd-accent: #1c2028;
+  --color-fd-accent-foreground: #ecede8;
+  --color-fd-ring: #ffb224;
+}
+
+/* The sidebar keeps the page palette instead of the preset's neutral greys. */
+.dark #nd-sidebar {
+  --color-fd-muted: #151920;
+  --color-fd-secondary: #191d25;
+  --color-fd-muted-foreground: #9aa0ad;
 }
 
 body {
   min-height: 100vh;
   font-family: var(--font-sans);
-  background:
-    linear-gradient(135deg, rgb(15 95 89 / 0.08), transparent 36rem),
-    radial-gradient(
-      circle at 90% 12%,
-      rgb(240 184 107 / 0.22),
-      transparent 24rem
-    ),
-    var(--color-fd-background);
+  background: var(--color-fd-background);
   color: var(--color-fd-foreground);
+  text-rendering: optimizeLegibility;
 }
 
 code,
@@ -61,33 +90,481 @@ samp {
   font-family: var(--font-mono);
 }
 
-.voke-hero {
-  position: relative;
-  overflow: hidden;
-  border-bottom: 1px solid var(--color-fd-border);
+::selection {
+  background: color-mix(in srgb, var(--color-voke-lamp) 36%, transparent);
 }
 
-.voke-hero::before {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  content: "";
-  background-image:
-    linear-gradient(rgb(15 95 89 / 0.09) 1px, transparent 1px),
-    linear-gradient(90deg, rgb(15 95 89 / 0.09) 1px, transparent 1px);
-  background-size: 42px 42px;
-  mask-image: linear-gradient(to bottom, black, transparent 72%);
+/* ---------------------------------------------------------------- Docs pages */
+
+/* Page titles and section headings use the display face; body copy stays in the text face. */
+#nd-page h1,
+#nd-page .prose :is(h2, h3) {
+  font-family: var(--font-display);
+  font-variation-settings: "wdth" 92;
+  letter-spacing: -0.015em;
 }
 
-.voke-card {
+#nd-page h1 {
+  font-size: clamp(2rem, 1.5rem + 1.6vw, 2.6rem);
+  font-weight: 650;
+  line-height: 1.08;
+}
+
+#nd-page .prose h2 {
+  margin-top: 2.6em;
+  font-size: 1.55rem;
+  font-weight: 620;
+}
+
+#nd-page .prose h3 {
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+#nd-page .prose {
+  font-size: 1rem;
+  line-height: 1.75;
+}
+
+#nd-page .prose :is(p, li) {
+  text-wrap: pretty;
+}
+
+/* Inline code reads as a label plate: quiet surface, no heavy border. */
+#nd-page .prose :not(pre) > code {
   border: 1px solid var(--color-fd-border);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--color-fd-card) 86%, transparent);
-  box-shadow: 0 24px 60px rgb(23 20 15 / 0.08);
+  border-radius: 6px;
+  background: var(--color-fd-muted);
+  padding: 0.1em 0.36em;
+  font-size: 0.86em;
+  font-weight: 500;
+}
+
+#nd-page .prose a:not([data-card]) {
+  text-decoration-color: color-mix(
+    in srgb,
+    var(--color-fd-primary) 45%,
+    transparent
+  );
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
+  transition: text-decoration-color 150ms ease;
+}
+
+#nd-page .prose a:not([data-card]):hover {
+  text-decoration-color: var(--color-fd-primary);
+}
+
+#nd-page .prose table {
+  font-size: 0.92rem;
+}
+
+.voke-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
 }
 
 /* The Twoslash popup's positioner forms its own stacking context, which the sticky docs sidebar
    (z-index 20) would paint over. Lift the positioner to the popup's own level. */
 :has(> .fd-twoslash-popover) {
   z-index: 50;
+}
+
+/* ---------------------------------------------------------------- Illustrated cards */
+
+.voke-plate {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--color-fd-border);
+  border-radius: 14px;
+  background: var(--color-voke-bakelite);
+}
+
+/* A panel grid behind every illustration, like the drilled face of a jack field. */
+.voke-plate::before {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  content: "";
+  background-image: radial-gradient(
+    circle,
+    rgb(232 233 228 / 0.13) 1px,
+    transparent 1.4px
+  );
+  background-size: 22px 22px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 78%);
+}
+
+.voke-plate img {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 500ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+a:hover > .voke-plate img,
+a:focus-visible > .voke-plate img {
+  transform: scale(1.045);
+}
+
+/* ---------------------------------------------------------------- Home page */
+
+.voke-home {
+  --home-max: 76rem;
+  font-feature-settings: "ss01", "cv05";
+}
+
+.voke-display {
+  font-family: var(--font-display);
+  font-variation-settings: "wdth" 86;
+  font-weight: 700;
+  letter-spacing: -0.028em;
+  line-height: 0.94;
+  text-wrap: balance;
+}
+
+.voke-h2 {
+  font-family: var(--font-display);
+  font-variation-settings: "wdth" 90;
+  font-size: clamp(1.9rem, 1.2rem + 2.4vw, 3.1rem);
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1.02;
+  text-wrap: balance;
+}
+
+/* The hero is a dark plate in both themes: the illustration is printed on bakelite. */
+.voke-hero {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background: var(--color-voke-bakelite);
+  color: var(--color-voke-bone);
+}
+
+.voke-hero-art {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+}
+
+/* The drilled face of a jack field, fading out toward the headline. */
+.voke-hero-art::before {
+  position: absolute;
+  inset: 0;
+  content: "";
+  background-image: radial-gradient(
+    circle,
+    rgb(232 233 228 / 0.1) 1px,
+    transparent 1.5px
+  );
+  background-size: 26px 26px;
+  mask-image: radial-gradient(
+    ellipse 55% 75% at 78% 50%,
+    black 10%,
+    transparent 72%
+  );
+}
+
+.voke-hero-svg {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  height: min(86%, 42rem);
+  aspect-ratio: 900 / 800;
+  overflow: visible;
+  translate: 0 -50%;
+}
+
+/* Each line is drawn once, in order; its plug and lamp appear when the line arrives. */
+.voke-lane {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: voke-draw 1100ms cubic-bezier(0.5, 0, 0.2, 1) forwards;
+  animation-delay: calc(var(--i, 0) * 140ms + 300ms);
+}
+
+.voke-plug {
+  opacity: 0;
+  animation: voke-fade 260ms ease-out forwards;
+  animation-delay: calc(var(--i, 0) * 140ms + 1300ms);
+}
+
+/* On narrow screens the artwork sits under the copy instead of beside it. */
+@media (max-width: 900px) {
+  .voke-hero {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .voke-hero-art {
+    position: relative;
+    inset: auto;
+    z-index: 0;
+    order: 2;
+    height: 21rem;
+    margin-bottom: 2.5rem;
+  }
+
+  .voke-hero-svg {
+    top: 0;
+    right: -8%;
+    height: 100%;
+    translate: none;
+  }
+}
+
+/* An indicator lamp: a small amber light that is on while its line is live. It does not pulse. */
+.voke-lamp {
+  position: relative;
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  flex: none;
+  border-radius: 999px;
+  background: var(--color-voke-lamp);
+  box-shadow:
+    0 0 0 3px rgb(255 178 36 / 0.16),
+    0 0 10px 1px rgb(255 178 36 / 0.4);
+}
+
+.voke-lamp[data-off] {
+  background: #3a3f4a;
+  box-shadow: none;
+}
+
+.voke-rise {
+  opacity: 0;
+  transform: translateY(14px);
+  animation: voke-rise 720ms cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+  animation-delay: calc(var(--i, 0) * 90ms + 80ms);
+}
+
+/* Sections fade up once when they scroll into view (see components/home/reveal.tsx). */
+.voke-reveal[data-armed] {
+  opacity: 0;
+  transform: translateY(22px);
+  transition:
+    opacity 700ms cubic-bezier(0.2, 0.7, 0.2, 1),
+    transform 700ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  transition-delay: calc(var(--i, 0) * 80ms);
+}
+
+.voke-reveal[data-armed][data-shown] {
+  opacity: 1;
+  transform: none;
+}
+
+.voke-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 10px;
+  padding: 0.72rem 1.15rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1;
+  transition:
+    background-color 160ms ease,
+    transform 160ms ease,
+    border-color 160ms ease;
+}
+
+.voke-button:active {
+  transform: translateY(1px);
+}
+
+.voke-button:focus-visible {
+  outline: 2px solid var(--color-voke-bone);
+  outline-offset: 3px;
+}
+
+.voke-button[data-kind="primary"] {
+  background: var(--color-voke-lamp);
+  color: var(--color-voke-bakelite);
+}
+
+.voke-button[data-kind="primary"]:hover {
+  background: #ffc657;
+}
+
+.voke-button[data-kind="primary"] svg {
+  transition: transform 200ms ease;
+}
+
+.voke-button[data-kind="primary"]:hover svg {
+  transform: translateX(3px);
+}
+
+/* The wiring demo: event sources on a jack field, one cord patched into a Function. */
+.voke-jack {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.75rem;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 0.62rem 0.8rem;
+  text-align: left;
+  color: var(--color-fd-muted-foreground);
+  transition:
+    background-color 180ms ease,
+    color 180ms ease,
+    border-color 180ms ease;
+}
+
+.voke-jack:hover {
+  background: var(--color-fd-muted);
+  color: var(--color-fd-foreground);
+}
+
+.voke-jack:focus-visible {
+  outline: 2px solid var(--color-fd-ring);
+  outline-offset: 2px;
+}
+
+.voke-jack[aria-selected="true"] {
+  border-color: var(--color-fd-border);
+  background: var(--color-fd-card);
+  color: var(--color-fd-foreground);
+  box-shadow: 0 1px 0 rgb(0 0 0 / 0.04);
+}
+
+.voke-socket {
+  display: grid;
+  width: 1.05rem;
+  height: 1.05rem;
+  flex: none;
+  place-items: center;
+  border: 1.5px solid currentcolor;
+  border-radius: 999px;
+  opacity: 0.55;
+  transition: opacity 180ms ease;
+}
+
+.voke-socket::after {
+  width: 0.36rem;
+  height: 0.36rem;
+  border-radius: 999px;
+  background: transparent;
+  content: "";
+  transition: background-color 180ms ease;
+}
+
+.voke-jack[aria-selected="true"] .voke-socket {
+  border-color: currentcolor;
+  opacity: 1;
+}
+
+.voke-jack[aria-selected="true"] .voke-socket::after {
+  background: var(--color-voke-lamp);
+  box-shadow: 0 0 10px 1px rgb(255 178 36 / 0.6);
+}
+
+.voke-cord {
+  fill: none;
+  stroke: var(--color-fd-foreground);
+  stroke-linecap: round;
+  stroke-width: 2.5;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: voke-draw 620ms cubic-bezier(0.3, 0.7, 0.2, 1) forwards;
+}
+
+.voke-signal {
+  fill: var(--color-voke-lamp);
+  filter: drop-shadow(0 0 5px rgb(255 178 36 / 0.9));
+}
+
+.voke-code-swap {
+  animation: voke-swap 380ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+/* Code blocks inside home panels sit flush with the panel instead of in their own card. */
+.voke-flush figure {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.voke-terminal {
+  font-family: var(--font-mono);
+  font-size: 0.84rem;
+  line-height: 1.75;
+}
+
+.voke-caret {
+  display: inline-block;
+  width: 0.55em;
+  height: 1.05em;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  background: var(--color-voke-lamp);
+  animation: voke-blink 1s steps(1) infinite;
+}
+
+@keyframes voke-fade {
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes voke-rise {
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes voke-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes voke-swap {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@keyframes voke-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voke-rise,
+  .voke-reveal,
+  .voke-plug {
+    opacity: 1;
+    transform: none;
+    animation: none;
+    transition: none;
+  }
+
+  .voke-caret,
+  .voke-code-swap {
+    animation: none;
+  }
+
+  .voke-cord,
+  .voke-lane {
+    stroke-dashoffset: 0;
+    animation: none;
+  }
+
+  .voke-plate img {
+    transition: none;
+  }
 }

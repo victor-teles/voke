@@ -1,17 +1,12 @@
 import type { BaseLayoutProps } from "fumadocs-ui/layouts/shared";
 
-import { githubUrl, siteName } from "./site";
+import { Logo } from "@/components/logo";
+
+import { githubUrl } from "./site";
 
 export const baseOptions = (): BaseLayoutProps => ({
   githubUrl,
-  links: [
-    {
-      active: "nested-url",
-      text: "Docs",
-      url: "/docs",
-    },
-  ],
   nav: {
-    title: siteName,
+    title: <Logo />,
   },
 });
