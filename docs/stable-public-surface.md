@@ -71,6 +71,7 @@ These packages are stable, but should be used only when the caller needs the spe
 - `@voke/build`
 - `@voke/http`
 - `@voke/openapi`
+- `@voke/idempotency`
 - `@voke/remote`
 - `@voke/schema`
 - `@voke/testing`

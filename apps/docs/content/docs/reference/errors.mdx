@@ -132,6 +132,19 @@ Unsupported Serverless event kafka on function worker: kafka is not an automatic
 
 The message names the Function and the failure, for example `Invalid payload for getUser: id: Expected string length to be at least 1`.
 
+## Idempotency errors
+
+`IdempotencyError` is exported by `@voke/idempotency`. `idempotent(...)` throws it when a call cannot run or be replayed. It extends `Error` (not `VokeError`) and has a `code`. The message names the Function and the record status, never the key, the payload or the stored result. In a route, an uncaught `IdempotencyError` becomes the Gateway's generic 500 response; catch it to answer with another status. See [Idempotency](/docs/guides/idempotency).
+
+| `code`                                | Thrown when                                                                                               |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `IDEMPOTENCY_IN_PROGRESS`             | Another call with the same key is still running, and its Function timeout has not passed. Retry later.    |
+| `IDEMPOTENCY_PAYLOAD_MISMATCH`        | A call with the same key already completed with a different payload (the part that `validate` selects).   |
+| `IDEMPOTENCY_KEY_MISSING`             | `key` returned `undefined` or `""` and the handler uses `onMissingKey: "throw"`.                          |
+| `IDEMPOTENCY_RESULT_NOT_SERIALIZABLE` | The handler returned a value that cannot be stored as JSON, such as a `Response`. The record is released. |
+
+`idempotent(...)` throws a `VokeConfigError` when the `idempotency()` Plugin is not in `voke.config.ts` and no `store` is passed, and a `VokeResourceBindingError` when the table binding is missing at run time.
+
 ## HTTP error responses
 
 When a route fails, the Gateway answers with this JSON body, locally and on AWS:

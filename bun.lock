@@ -36,6 +36,7 @@
         "@typescript/native-preview": "catalog:",
         "@voke/aws": "workspace:*",
         "@voke/http": "workspace:*",
+        "@voke/idempotency": "workspace:*",
         "@voke/openapi": "workspace:*",
         "@voke/remote": "workspace:*",
         "@voke/schema": "workspace:*",
@@ -131,6 +132,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@voke/aws": "workspace:*",
+        "@voke/idempotency": "workspace:*",
         "@voke/schema": "workspace:*",
         "hono": "^4.0.0",
         "voke": "workspace:*",
@@ -211,6 +213,21 @@
       "devDependencies": {
         "@types/bun": "latest",
         "@typescript/native-preview": "catalog:",
+      },
+    },
+    "packages/idempotency": {
+      "name": "@voke/idempotency",
+      "version": "0.0.0",
+      "dependencies": {
+        "@aws-sdk/client-dynamodb": "^3.1053.0",
+        "@voke/aws": "workspace:*",
+        "voke": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "@typescript/native-preview": "catalog:",
+        "@voke/http": "workspace:*",
+        "@voke/schema": "workspace:*",
       },
     },
     "packages/openapi": {
@@ -790,6 +807,8 @@
     "@voke/hello-api": ["@voke/hello-api@workspace:examples/hello-api"],
 
     "@voke/http": ["@voke/http@workspace:packages/http"],
+
+    "@voke/idempotency": ["@voke/idempotency@workspace:packages/idempotency"],
 
     "@voke/openapi": ["@voke/openapi@workspace:packages/openapi"],
 
@@ -1425,6 +1444,8 @@
 
     "@voke/event-sources/@types/bun": ["@types/bun@1.4.4", "", { "dependencies": { "bun-types": "1.4.4" } }, "sha512-9wkRDXUXK124pEnAutE6n/l18j+i9GC5IAHK8TmX/2nlySETmky0OU6yL5U8pW1AoKh++AN9auDCr647BfurjQ=="],
 
+    "@voke/idempotency/@types/bun": ["@types/bun@1.4.4", "", { "dependencies": { "bun-types": "1.4.4" } }, "sha512-9wkRDXUXK124pEnAutE6n/l18j+i9GC5IAHK8TmX/2nlySETmky0OU6yL5U8pW1AoKh++AN9auDCr647BfurjQ=="],
+
     "@voke/openapi/@types/bun": ["@types/bun@1.4.4", "", { "dependencies": { "bun-types": "1.4.4" } }, "sha512-9wkRDXUXK124pEnAutE6n/l18j+i9GC5IAHK8TmX/2nlySETmky0OU6yL5U8pW1AoKh++AN9auDCr647BfurjQ=="],
 
     "@voke/stream-events/@types/bun": ["@types/bun@1.4.4", "", { "dependencies": { "bun-types": "1.4.4" } }, "sha512-9wkRDXUXK124pEnAutE6n/l18j+i9GC5IAHK8TmX/2nlySETmky0OU6yL5U8pW1AoKh++AN9auDCr647BfurjQ=="],
@@ -1540,6 +1561,8 @@
     "@voke/durable-workflow/@types/bun/bun-types": ["bun-types@1.4.4", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-yjrJh5oGX7mMPKGd19YXyIjmEuj4G4zNC30bs7PM9Az7NQ3ndF3j6hbeRdvJTRQEhJ/FYQwW0a2moweEi2hMxQ=="],
 
     "@voke/event-sources/@types/bun/bun-types": ["bun-types@1.4.4", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-yjrJh5oGX7mMPKGd19YXyIjmEuj4G4zNC30bs7PM9Az7NQ3ndF3j6hbeRdvJTRQEhJ/FYQwW0a2moweEi2hMxQ=="],
+
+    "@voke/idempotency/@types/bun/bun-types": ["bun-types@1.4.4", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-yjrJh5oGX7mMPKGd19YXyIjmEuj4G4zNC30bs7PM9Az7NQ3ndF3j6hbeRdvJTRQEhJ/FYQwW0a2moweEi2hMxQ=="],
 
     "@voke/openapi/@types/bun/bun-types": ["bun-types@1.4.4", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-yjrJh5oGX7mMPKGd19YXyIjmEuj4G4zNC30bs7PM9Az7NQ3ndF3j6hbeRdvJTRQEhJ/FYQwW0a2moweEi2hMxQ=="],
 

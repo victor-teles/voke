@@ -12,6 +12,7 @@
     "guides/schemas",
     "guides/authorizers",
     "guides/sqs-events",
+    "guides/idempotency",
     "guides/sns-events",
     "guides/eventbridge-events",
     "guides/scheduled-functions",

@@ -34,20 +34,25 @@ in the Local AWS Provider. See [Local AWS](/docs/guides/local-aws).
 
 ## Builders
 
-| Builder                          | AWS resource                  | Options                                                                                                                     | Binding attribute |
-| -------------------------------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ----------------- |
-| `dynamodbTable(options?)`        | `AWS::DynamoDB::Table`        | `partitionKey` (default `"id"`), `sortKey`. Both are string (`S`) keys. Billing is on demand (`PAY_PER_REQUEST`).           | `name`            |
-| `sqsQueue(options?)`             | `AWS::SQS::Queue`             | `visibilityTimeoutSeconds`. See [SQS events](/docs/guides/sqs-events#queue-visibility-timeout).                             | `url`             |
-| `kinesisStream(options?)`        | `AWS::Kinesis::Stream`        | `shardCount` (provisioned mode; on demand by default), `retentionHours`. See [Kinesis events](/docs/guides/kinesis-events). | `name`            |
-| `snsTopic()`                     | `AWS::SNS::Topic`             | None. See [SNS events](/docs/guides/sns-events).                                                                            | `arn`             |
-| `eventBus()`                     | `AWS::Events::EventBus`       | None. See [EventBridge events](/docs/guides/eventbridge-events).                                                            | `name`            |
-| `s3Bucket()`                     | `AWS::S3::Bucket`             | None. See [S3 events](/docs/guides/s3-events).                                                                              | `name`            |
-| `secret()`                       | `AWS::SecretsManager::Secret` | None. AWS generates the secret value.                                                                                       | `id`              |
-| `ssmParameter({ value, type? })` | `AWS::SSM::Parameter`         | `value` (required), `type`: `"String"` (default) or `"StringList"`.                                                         | `name`            |
+| Builder                          | AWS resource                  | Options                                                                                                                                     | Binding attribute |
+| -------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- |
+| `dynamodbTable(options?)`        | `AWS::DynamoDB::Table`        | `partitionKey` (default `"id"`), `sortKey`. Both are string (`S`) keys. Billing is on demand (`PAY_PER_REQUEST`). `stream`, `ttlAttribute`. | `name`            |
+| `sqsQueue(options?)`             | `AWS::SQS::Queue`             | `visibilityTimeoutSeconds`. See [SQS events](/docs/guides/sqs-events#queue-visibility-timeout).                                             | `url`             |
+| `kinesisStream(options?)`        | `AWS::Kinesis::Stream`        | `shardCount` (provisioned mode; on demand by default), `retentionHours`. See [Kinesis events](/docs/guides/kinesis-events).                 | `name`            |
+| `snsTopic()`                     | `AWS::SNS::Topic`             | None. See [SNS events](/docs/guides/sns-events).                                                                                            | `arn`             |
+| `eventBus()`                     | `AWS::Events::EventBus`       | None. See [EventBridge events](/docs/guides/eventbridge-events).                                                                            | `name`            |
+| `s3Bucket()`                     | `AWS::S3::Bucket`             | None. See [S3 events](/docs/guides/s3-events).                                                                                              | `name`            |
+| `secret()`                       | `AWS::SecretsManager::Secret` | None. AWS generates the secret value.                                                                                                       | `id`              |
+| `ssmParameter({ value, type? })` | `AWS::SSM::Parameter`         | `value` (required), `type`: `"String"` (default) or `"StringList"`.                                                                         | `name`            |
 
 `dynamodbTable({ stream })` also turns on the table's stream, with a view type such as
 `"NEW_AND_OLD_IMAGES"`, so a Function can consume it. See
 [DynamoDB stream events](/docs/guides/dynamodb-stream-events).
+
+`dynamodbTable({ ttlAttribute: "expiresAt" })` turns on time to live: DynamoDB deletes an item some
+time after the epoch-seconds value in that attribute has passed. Deletion runs in the background,
+usually within a few days, so reads can still return expired items. The attribute is not a key, so
+it needs no declaration. The [idempotency Plugin](/docs/guides/idempotency) uses it for its table.
 
 AWS generates the physical names. Your code never hard-codes a table name or a queue URL: it reads
 them from bindings.

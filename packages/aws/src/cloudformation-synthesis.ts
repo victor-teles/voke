@@ -113,6 +113,12 @@ export const dynamodbTable = (
     billingMode?: "PAY_PER_REQUEST" | "PROVISIONED";
     /** Turns on the table's stream with this view type, so `dynamodbStream()` can consume it. */
     stream?: DynamodbStreamViewType;
+    /**
+     * Turns on time to live: DynamoDB deletes an item some time after the epoch-seconds value
+     * in this attribute has passed. Deletion runs in the background, so reads can still see
+     * expired items.
+     */
+    ttlAttribute?: string;
   } = {}
 ): StackResourceDefinition => {
   const partitionKey = options.partitionKey ?? "id";
@@ -147,6 +153,14 @@ export const dynamodbTable = (
       ...(options.stream === undefined
         ? {}
         : { StreamSpecification: { StreamViewType: options.stream } }),
+      ...(options.ttlAttribute === undefined
+        ? {}
+        : {
+            TimeToLiveSpecification: {
+              AttributeName: options.ttlAttribute,
+              Enabled: true,
+            },
+          }),
     },
   });
 };

@@ -31,6 +31,7 @@ const teachingSurfaceFiles = [
   "../../../apps/docs/content/docs/guides/schemas.mdx",
   "../../../apps/docs/content/docs/guides/authorizers.mdx",
   "../../../apps/docs/content/docs/guides/sqs-events.mdx",
+  "../../../apps/docs/content/docs/guides/idempotency.mdx",
   "../../../apps/docs/content/docs/guides/sns-events.mdx",
   "../../../apps/docs/content/docs/guides/eventbridge-events.mdx",
   "../../../apps/docs/content/docs/guides/scheduled-functions.mdx",
@@ -253,6 +254,20 @@ test("keeps OpenAPI helpers in @voke/openapi", async () => {
   ]);
   expect("openapi" in voke).toBe(false);
   expect("createOpenApiDocument" in voke).toBe(false);
+});
+
+test("keeps idempotency helpers in @voke/idempotency", async () => {
+  const idempotencyHelpers = await importPackage("@voke/idempotency");
+
+  expect(Object.keys(idempotencyHelpers).toSorted()).toEqual([
+    "IdempotencyError",
+    "dynamoDbStore",
+    "idempotency",
+    "idempotent",
+    "idempotentBatch",
+    "memoryStore",
+  ]);
+  expect("idempotent" in voke).toBe(false);
 });
 
 test("keeps local AWS provider helpers in @voke/aws/local", async () => {

@@ -340,22 +340,48 @@ const eventSourceFromQueueInput = (
   });
 };
 
-export const sqs = <
+type SqsFunctionDefinition<
+  TMessageSchema extends AnyStandardSchema,
+  TInvalidMessageBody extends SqsInvalidMessageBodyMode,
+  TVariables extends RuntimeVariableCatalog,
+> = EventFunctionDefinition<
+  string,
+  SqsMessageBatchSchema<TMessageSchema, TInvalidMessageBody>,
+  TVariables,
+  SqsBatchResult
+>;
+
+// One overload per invalidMessageBody mode, so the batch type never depends on an unresolved
+// mode: a handler built by a generic helper (`handler: helper((message) => ...)`) is then
+// contextually typed with the message body. The default mode comes last, so a call that matches
+// neither overload reports its errors against the default.
+export function sqs<
   const TMessageSchema extends AnyStandardSchema,
-  const TInvalidMessageBody extends SqsInvalidMessageBodyMode = "fail",
   const TVariables extends RuntimeVariableCatalog = Record<never, never>,
+>(
+  definition: SqsFunctionDefinitionInput<
+    TMessageSchema,
+    "include",
+    TVariables
+  > & { readonly invalidMessageBody: "include" }
+): SqsFunctionDefinition<TMessageSchema, "include", TVariables>;
+export function sqs<
+  const TMessageSchema extends AnyStandardSchema,
+  const TVariables extends RuntimeVariableCatalog = Record<never, never>,
+>(
+  definition: SqsFunctionDefinitionInput<TMessageSchema, "fail", TVariables>
+): SqsFunctionDefinition<TMessageSchema, "fail", TVariables>;
+export function sqs<
+  TMessageSchema extends AnyStandardSchema,
+  TInvalidMessageBody extends SqsInvalidMessageBodyMode,
+  TVariables extends RuntimeVariableCatalog,
 >(
   definition: SqsFunctionDefinitionInput<
     TMessageSchema,
     TInvalidMessageBody,
     TVariables
   >
-): EventFunctionDefinition<
-  string,
-  SqsMessageBatchSchema<TMessageSchema, TInvalidMessageBody>,
-  TVariables,
-  SqsBatchResult
-> => {
+): SqsFunctionDefinition<TMessageSchema, TInvalidMessageBody, TVariables> {
   if (definition.queue !== undefined && definition.queues !== undefined) {
     throw new VokeConfigError("Pass either queue or queues to sqs(), not both");
   }
@@ -389,13 +415,12 @@ export const sqs = <
     routes: [],
     synthesis: definition.synthesis,
     variables: definition.variables,
-  }) as unknown as EventFunctionDefinition<
-    string,
-    SqsMessageBatchSchema<TMessageSchema, TInvalidMessageBody>,
-    TVariables,
-    SqsBatchResult
+  }) as unknown as SqsFunctionDefinition<
+    TMessageSchema,
+    TInvalidMessageBody,
+    TVariables
   >;
-};
+}
 
 const sqsInvocationFromAwsEvent = (
   event: SqsAwsEvent

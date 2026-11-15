@@ -248,6 +248,18 @@ _Avoid_: Plugin config, raw template patch
 A route-backed **Function** contributed by a **Plugin**, keyed `<plugin name>-<function name>` and deployed like the project's own.
 _Avoid_: Plugin route, internal endpoint
 
+**Idempotency Key**:
+The application value that identifies one logical operation, chosen by the handler author, such as an order id or a client-sent request id.
+_Avoid_: request id, message id as a default
+
+**Idempotency Record**:
+What an **Idempotency Store** keeps for one **Function** and **Idempotency Key**: the status (`INPROGRESS` or `COMPLETED`), the expiry, a hash of the validated input and the stored result.
+_Avoid_: lock, cache entry
+
+**Idempotency Store**:
+Where **Idempotency Records** live: the DynamoDB table the idempotency **Plugin** provisions, or memory in tests.
+_Avoid_: idempotency cache, persistence layer
+
 ## Relationships
 
 - A **Voke Project** has exactly one `voke.config.ts` as its project source of truth.
@@ -437,6 +449,10 @@ _Avoid_: Plugin route, internal endpoint
 - **Plugin Functions** are route-backed and sit outside the typed **Function Registry**; a **Gateway** serves them and the **Provider** deploys them.
 - A **Plugin** cannot change a **Function Contract** or the input a handler receives.
 - A **Plugin**'s provider-specific contributions are **Provider Extension Records** that the configured **Provider** validates and interprets.
+- Idempotency is opt-in per handler: the idempotency **Plugin** provides the **Idempotency Store** and a **Function Wrap**, and `idempotent(...)` marks a handler.
+- An **Idempotency Record** belongs to one **Function** and one **Idempotency Key**; two **Functions** with the same key value do not share a record.
+- An **SQS Message Batch** handled with `idempotentBatch(...)` has one **Idempotency Record** per message.
+- A **Durable Function** start uses `executionName` as its idempotency, not an **Idempotency Record**.
 
 ## Flagged ambiguities
 

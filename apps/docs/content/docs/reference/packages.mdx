@@ -120,6 +120,21 @@ Learn it in [Local AWS](/docs/guides/local-aws).
 
 Learn it in [Testing](/docs/guides/testing).
 
+## @voke/idempotency
+
+A [Plugin](/docs/guides/plugins) that makes a retried handler run once. It provisions a DynamoDB table and depends on `@voke/aws`.
+
+| Export                                                                | Use                                                                                                          |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `idempotency`                                                         | The Plugin for `voke.config.ts`: `plugins: [idempotency()]`. It contributes the `idempotencyTable` resource. |
+| `idempotent`                                                          | Wrap a Function or route handler so it runs once per **Idempotency Key**.                                    |
+| `idempotentBatch`                                                     | Build an SQS handler that runs each message once.                                                            |
+| `memoryStore`, `dynamoDbStore`                                        | **Idempotency Stores**: in memory for tests, and the DynamoDB store the Plugin uses.                         |
+| `IdempotencyError`                                                    | Thrown when a call is in progress, its payload differs, its key is missing or its result is not JSON.        |
+| `IdempotencyOptions`, `IdempotencyStore`, `IdempotencyRecord` (types) | Options of `idempotent`, and the store contract.                                                             |
+
+Learn it in [Idempotency](/docs/guides/idempotency).
+
 ## @voke/schema
 
 Builders for **Function Contracts** that follow the Standard Schema interface.

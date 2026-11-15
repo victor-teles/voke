@@ -347,7 +347,7 @@ Follow-ups:
 
 - Prove the deployed path on real AWS (deploy, wait, redeploy while an execution is paused).
 - `voke executions` (list, inspect, stop), callback helpers, pruning retained versions, KMS keys for execution state.
-- Idempotency helpers should treat `executionName` as the idempotent start for Durable Functions.
+- Idempotency helpers should treat `executionName` as the idempotent start for Durable Functions. Done in `@voke/idempotency` (plan 021, ADR 0017): it writes no record for a Durable Function start, and its guide points at `executionName`.
 
 ## Explicit Non-Goals
 

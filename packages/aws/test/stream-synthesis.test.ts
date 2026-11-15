@@ -124,6 +124,19 @@ test("dynamodbTable({ stream }) emits a StreamSpecification and is unchanged wit
   ]);
 });
 
+test("dynamodbTable({ ttlAttribute }) turns on time to live without declaring the attribute", () => {
+  const table = dynamodbTable({ ttlAttribute: "expiration" });
+
+  expect(table.properties).toEqual({
+    ...dynamodbTable().properties,
+    TimeToLiveSpecification: { AttributeName: "expiration", Enabled: true },
+  });
+  expect(table.properties.AttributeDefinitions).toEqual([
+    { AttributeName: "id", AttributeType: "S" },
+  ]);
+  expect("TimeToLiveSpecification" in dynamodbTable().properties).toBe(false);
+});
+
 test("matches the CloudFormation snapshot for stream event source mappings", async () => {
   const snapshot = await Bun.file(
     `${import.meta.dir}/fixtures/stream-event-sources-cloudformation.json`

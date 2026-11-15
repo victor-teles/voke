@@ -225,6 +225,39 @@ is, so you can test bodies that are not valid JSON. Voke fills in the SQS metada
 
 See [Testing](/docs/guides/testing) for test setup.
 
+## Run each message once
+
+SQS delivers a message at least once: a timeout or a partial batch failure sends it again, and a
+producer can send the same business event twice with a new message id. To run each message once,
+wrap a per-message function with `idempotentBatch` from `@voke/idempotency` and add the
+`idempotency()` Plugin to `voke.config.ts`:
+
+```ts twoslash
+import { sqs } from "@voke/aws";
+import { idempotentBatch } from "@voke/idempotency";
+import { schema } from "@voke/schema";
+
+const settlePayment = async (paymentId: string): Promise<void> => {
+  // Charge or record the payment.
+};
+
+// ---cut---
+export const settle = sqs({
+  queue: "paymentsQueue",
+  message: schema.object({
+    paymentId: schema.string(),
+    amount: schema.number(),
+  }),
+  handler: idempotentBatch(
+    async (message) => await settlePayment(message.body.paymentId),
+    { key: (message) => message.body.paymentId }
+  ),
+});
+```
+
+A message that throws is reported as a batch item failure, and a message that was already processed
+counts as a success. See [Idempotency](/docs/guides/idempotency).
+
 ## Queue visibility timeout
 
 The visibility timeout is how long SQS hides a received message from other consumers. If it is
