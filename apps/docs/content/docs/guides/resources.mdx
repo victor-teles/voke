@@ -34,15 +34,20 @@ in the Local AWS Provider. See [Local AWS](/docs/guides/local-aws).
 
 ## Builders
 
-| Builder                          | AWS resource                  | Options                                                                                                           | Binding attribute |
-| -------------------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------- | ----------------- |
-| `dynamodbTable(options?)`        | `AWS::DynamoDB::Table`        | `partitionKey` (default `"id"`), `sortKey`. Both are string (`S`) keys. Billing is on demand (`PAY_PER_REQUEST`). | `name`            |
-| `sqsQueue(options?)`             | `AWS::SQS::Queue`             | `visibilityTimeoutSeconds`. See [SQS events](/docs/guides/sqs-events#queue-visibility-timeout).                   | `url`             |
-| `snsTopic()`                     | `AWS::SNS::Topic`             | None. See [SNS events](/docs/guides/sns-events).                                                                  | `arn`             |
-| `eventBus()`                     | `AWS::Events::EventBus`       | None. See [EventBridge events](/docs/guides/eventbridge-events).                                                  | `name`            |
-| `s3Bucket()`                     | `AWS::S3::Bucket`             | None.                                                                                                             | `name`            |
-| `secret()`                       | `AWS::SecretsManager::Secret` | None. AWS generates the secret value.                                                                             | `id`              |
-| `ssmParameter({ value, type? })` | `AWS::SSM::Parameter`         | `value` (required), `type`: `"String"` (default) or `"StringList"`.                                               | `name`            |
+| Builder                          | AWS resource                  | Options                                                                                                                     | Binding attribute |
+| -------------------------------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ----------------- |
+| `dynamodbTable(options?)`        | `AWS::DynamoDB::Table`        | `partitionKey` (default `"id"`), `sortKey`. Both are string (`S`) keys. Billing is on demand (`PAY_PER_REQUEST`).           | `name`            |
+| `sqsQueue(options?)`             | `AWS::SQS::Queue`             | `visibilityTimeoutSeconds`. See [SQS events](/docs/guides/sqs-events#queue-visibility-timeout).                             | `url`             |
+| `kinesisStream(options?)`        | `AWS::Kinesis::Stream`        | `shardCount` (provisioned mode; on demand by default), `retentionHours`. See [Kinesis events](/docs/guides/kinesis-events). | `name`            |
+| `snsTopic()`                     | `AWS::SNS::Topic`             | None. See [SNS events](/docs/guides/sns-events).                                                                            | `arn`             |
+| `eventBus()`                     | `AWS::Events::EventBus`       | None. See [EventBridge events](/docs/guides/eventbridge-events).                                                            | `name`            |
+| `s3Bucket()`                     | `AWS::S3::Bucket`             | None.                                                                                                                       | `name`            |
+| `secret()`                       | `AWS::SecretsManager::Secret` | None. AWS generates the secret value.                                                                                       | `id`              |
+| `ssmParameter({ value, type? })` | `AWS::SSM::Parameter`         | `value` (required), `type`: `"String"` (default) or `"StringList"`.                                                         | `name`            |
+
+`dynamodbTable({ stream })` also turns on the table's stream, with a view type such as
+`"NEW_AND_OLD_IMAGES"`, so a Function can consume it. See
+[DynamoDB stream events](/docs/guides/dynamodb-stream-events).
 
 AWS generates the physical names. Your code never hard-codes a table name or a queue URL: it reads
 them from bindings.
@@ -168,6 +173,7 @@ Voke synthesizes one IAM role per Function. Each role gets the AWS managed polic
 | ----------------- | ----------------------------------------------------------------------------------------- | ------------------------------------- |
 | `dynamodbTable()` | `dynamodb:GetItem`, `PutItem`, `UpdateItem`, `DeleteItem`, `Query`, `Scan`                | The table ARN.                        |
 | `sqsQueue()`      | `sqs:SendMessage`, `ReceiveMessage`, `DeleteMessage`, `GetQueueAttributes`                | The queue ARN.                        |
+| `kinesisStream()` | `kinesis:PutRecord`, `kinesis:PutRecords`                                                 | The stream ARN.                       |
 | `snsTopic()`      | `sns:Publish`                                                                             | The topic ARN.                        |
 | `eventBus()`      | `events:PutEvents`                                                                        | The event bus ARN.                    |
 | `s3Bucket()`      | `s3:ListBucket` on the bucket; `s3:GetObject`, `PutObject`, `DeleteObject` on its objects | The bucket ARN, and `<bucket ARN>/*`. |
@@ -181,10 +187,16 @@ uses the resource. Voke has no way yet to bind a resource to some Functions only
 [Runtime Variables](/docs/guides/runtime-variables#iam-permissions) are different: only the Function
 that declares one gets its permission.
 
+Stream **Event Sources** are different too: only the Function that consumes a stream gets read access
+to it. A [Kinesis](/docs/guides/kinesis-events#what-gets-deployed) consumer gets the stream-read
+actions on the stream ARN. A [DynamoDB stream](/docs/guides/dynamodb-stream-events#what-gets-deployed)
+consumer gets them on the table's stream ARN, plus `dynamodb:ListStreams` on `*`.
+
 ## Next steps
 
 - [SQS events](/docs/guides/sqs-events): consume a declared queue with a Function.
 - [SNS events](/docs/guides/sns-events) and [EventBridge events](/docs/guides/eventbridge-events): run a Function for each message on a declared topic or event bus.
+- [Kinesis events](/docs/guides/kinesis-events) and [DynamoDB stream events](/docs/guides/dynamodb-stream-events): consume a declared stream with a Function.
 - [Runtime Variables](/docs/guides/runtime-variables): read a declared secret or parameter.
 - [Local AWS](/docs/guides/local-aws): create the resources locally.
 - [Config reference](/docs/reference/config): every `voke.config.ts` setting.

@@ -128,6 +128,43 @@ export {
   type ScheduleEventSourceDefinition,
   type ScheduleFunctionDefinitionInput,
 } from "./schedule";
+export {
+  kinesis,
+  type KinesisAwsEvent,
+  type KinesisEventInvocationInput,
+  type KinesisEventInvocationRecord,
+  type KinesisEventSourceDefinition,
+  type KinesisFunctionDefinitionInput,
+  type KinesisInvalidRecord,
+  type KinesisRecord,
+  type KinesisRecordBatch,
+  type KinesisRecordBatchIncludeInvalid,
+  type KinesisRecordBatchSchema,
+  type KinesisValidRecord,
+} from "./kinesis";
+export {
+  dynamodbStream,
+  type DynamodbStreamAwsEvent,
+  type DynamodbStreamAwsRecord,
+  type DynamodbStreamEventInvocationInput,
+  type DynamodbStreamEventInvocationRecord,
+  type DynamodbStreamEventName,
+  type DynamodbStreamEventSourceDefinition,
+  type DynamodbStreamFunctionDefinitionInput,
+  type DynamodbStreamInvalidRecord,
+  type DynamodbStreamRecordBatch,
+  type DynamodbStreamRecordBatchIncludeInvalid,
+  type DynamodbStreamRecordBatchSchema,
+  type DynamodbStreamValidRecord,
+  type DynamodbStreamViewType,
+} from "./dynamodb-stream";
+export type {
+  StreamBatchResult,
+  StreamBatchResultBuilder,
+  StreamEventSourceOptions,
+  StreamInvalidRecordMode,
+  StreamStartingPosition,
+} from "./stream-batch";
 
 const validateAwsModel = (model: VokeModel): void => {
   const issues: VokeIssue[] = [];

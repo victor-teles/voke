@@ -73,6 +73,7 @@ The AWS Provider and the AWS-specific authoring helpers.
 | `awsLambda`                                                                      | Per-Function Lambda runtime and architecture, for `synthesis.provider`.                               |
 | `sqs`, `createSqsEventHandler`                                                   | SQS **Event Sources**.                                                                                |
 | `sns`, `eventBridge`, `schedule`                                                 | SNS, EventBridge and schedule **Event Sources**.                                                      |
+| `kinesis`, `dynamodbStream`                                                      | Kinesis and DynamoDB stream **Event Sources**, with the `StreamBatchResult` type.                     |
 | `secret`, `parameter`                                                            | **Runtime Variables** from Secrets Manager and SSM Parameter Store.                                   |
 | `createAuthorizers`, `jwtAuthorizer`, `lambdaAuthorizer`, `requestAuthorizer`    | API Gateway authorizers.                                                                              |
 | `bindResource`, `createAwsClientConfig`, `createResourceBindingName`, `toEnvKey` | Read resource bindings and configure AWS SDK clients at runtime.                                      |
@@ -87,6 +88,7 @@ CloudFormation resource builders for `resources` in `voke.config.ts`, and the te
 | Export                                                                                    | Use                                                                           |
 | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
 | `dynamodbTable`, `sqsQueue`, `snsTopic`, `eventBus`, `s3Bucket`, `secret`, `ssmParameter` | Declare infrastructure resources.                                             |
+| `kinesisStream`                                                                           | Declare a Kinesis data stream.                                                |
 | `synthesizeCloudFormation`                                                                | Synthesize a CloudFormation template in code. `voke synth` does this for you. |
 
 Learn it in [Resources](/docs/guides/resources).

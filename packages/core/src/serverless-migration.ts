@@ -1298,7 +1298,7 @@ const eventManualReason = (event: ServerlessFunctionEvent): string => {
       return "Rewrite it with `sns()` from `@voke/aws` and declare the topic with `snsTopic()`; review the filter policy.";
     }
     case "stream": {
-      return "Stream event source mappings need batching, starting position, and source permissions reviewed manually.";
+      return "Rewrite it with kinesis() or dynamodbStream() from @voke/aws, then review the starting position, batching and retry settings.";
     }
     case "unsupported": {
       return `${event.name} is not an automatic Voke migration target. Recreate the trigger, permissions, batching, and failure behavior manually before cutting over.`;

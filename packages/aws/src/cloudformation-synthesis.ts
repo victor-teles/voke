@@ -1,4 +1,4 @@
-import { createVokeModel, VokeModelError } from "voke";
+import { createVokeModel, VokeConfigError, VokeModelError } from "voke";
 import type {
   VokeConfigInput,
   VokeCorsConfig,
@@ -18,6 +18,7 @@ import type {
   CloudFormationTemplate,
   CloudFormationValue,
 } from "./cloudformation-template";
+import type { DynamodbStreamViewType } from "./dynamodb-stream";
 import { requireAwsEventSourceAdapter } from "./event-sources";
 import type {
   AwsEventSourceAdapter,
@@ -103,6 +104,8 @@ export const dynamodbTable = (
     partitionKey?: string;
     sortKey?: string;
     billingMode?: "PAY_PER_REQUEST" | "PROVISIONED";
+    /** Turns on the table's stream with this view type, so `dynamodbStream()` can consume it. */
+    stream?: DynamodbStreamViewType;
   } = {}
 ): StackResourceDefinition => {
   const partitionKey = options.partitionKey ?? "id";
@@ -134,6 +137,64 @@ export const dynamodbTable = (
       AttributeDefinitions: attributes,
       BillingMode: options.billingMode ?? "PAY_PER_REQUEST",
       KeySchema: keySchema,
+      ...(options.stream === undefined
+        ? {}
+        : { StreamSpecification: { StreamViewType: options.stream } }),
+    },
+  });
+};
+
+export interface KinesisStreamOptions {
+  /** How long records stay readable, in hours, 24 to 8760. Kinesis defaults to 24. */
+  retentionHours?: number;
+  /** Switches the stream from on-demand to provisioned capacity with this many shards. */
+  shardCount?: number;
+}
+
+const maxKinesisRetentionHours = 8760;
+const minKinesisRetentionHours = 24;
+
+export const kinesisStream = (
+  options: KinesisStreamOptions = {}
+): StackResourceDefinition => {
+  const { retentionHours, shardCount } = options;
+
+  if (
+    shardCount !== undefined &&
+    (!Number.isInteger(shardCount) || shardCount < 1)
+  ) {
+    throw new VokeConfigError(
+      `kinesisStream() shardCount must be a positive integer, got ${shardCount}`
+    );
+  }
+
+  if (
+    retentionHours !== undefined &&
+    (!Number.isInteger(retentionHours) ||
+      retentionHours < minKinesisRetentionHours ||
+      retentionHours > maxKinesisRetentionHours)
+  ) {
+    throw new VokeConfigError(
+      `kinesisStream() retentionHours must be an integer from ${minKinesisRetentionHours} to ${maxKinesisRetentionHours}, got ${retentionHours}`
+    );
+  }
+
+  return awsCloudFormationResource({
+    // What a producing Function needs; consuming Functions get read access on their own role.
+    actions: ["kinesis:PutRecord", "kinesis:PutRecords"],
+    bindingAttribute: "name",
+    bindingValue: "ref",
+    cloudFormationType: "AWS::Kinesis::Stream",
+    outputName: "Name",
+    policyResource: "getAttArn",
+    properties: {
+      ...(retentionHours === undefined
+        ? {}
+        : { RetentionPeriodHours: retentionHours }),
+      ...(shardCount === undefined ? {} : { ShardCount: shardCount }),
+      StreamModeDetails: {
+        StreamMode: shardCount === undefined ? "ON_DEMAND" : "PROVISIONED",
+      },
     },
   });
 };
@@ -409,6 +470,25 @@ const toRuntimeVariablePolicyStatements = (
 
   return statements;
 };
+
+/** The statements each of a Function's Event Sources adds to that Function's role only. */
+const toEventSourcePolicyStatements = (
+  functionKey: string,
+  definition: VokeModel["functions"][string],
+  model: VokeModel
+): CloudFormationValue[] =>
+  definition.eventSources.flatMap(
+    (eventSource, eventSourceIndex) =>
+      requireAwsEventSourceAdapter(
+        eventSource.type,
+        functionKey
+      ).roleStatements?.({
+        eventSource,
+        eventSourceIndex,
+        functionKey,
+        model,
+      }) ?? []
+  );
 
 const functionRoleLogicalId = (
   functionName: string,
@@ -907,6 +987,7 @@ export const synthesizeCloudFormationFromModel = (
         definition.variables,
         model.resources
       ),
+      ...toEventSourcePolicyStatements(name, definition, model),
     ]);
     const environmentVariables: Record<string, CloudFormationValue> = {
       ...definition.environment,

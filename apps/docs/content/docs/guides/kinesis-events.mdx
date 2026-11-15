@@ -1,0 +1,264 @@
+---
+title: Kinesis events
+description: Run a Function for each batch of records on a Kinesis data stream, report the first failed record, and test the Function locally.
+---
+
+After reading this page you can declare a Kinesis data stream, attach a Function to it as an
+**Event Source**, report failed records, and test the Function without AWS.
+
+## Declare the stream and the Function
+
+Declare the stream in `resources` in `voke.config.ts` with `kinesisStream()` from
+`@voke/aws/cloudformation`. Then create the Function with `kinesis()` from `@voke/aws`, and pass the
+stream's resource key as `stream`:
+
+```ts twoslash
+// @filename: voke.config.ts
+import { aws } from "@voke/aws";
+import { kinesisStream } from "@voke/aws/cloudformation";
+import { defineConfig } from "voke";
+
+export default defineConfig({
+  name: "clicks",
+  provider: aws(),
+  resources: {
+    clicksStream: kinesisStream(),
+  },
+});
+
+// @filename: src/index.ts
+import { kinesis } from "@voke/aws";
+import { schema } from "@voke/schema";
+import { createFunctions } from "voke";
+
+const click = schema.object({
+  page: schema.string(),
+  userId: schema.string(),
+});
+
+export const functions = createFunctions({
+  ingestClicks: kinesis({
+    stream: "clicksStream",
+    record: click,
+    handler: async (batch) => {
+      for (const record of batch.records) {
+        console.info(`${record.data.userId} viewed ${record.data.page}`);
+      }
+
+      return batch.ok();
+    },
+  }),
+});
+```
+
+- `stream` is the key of a resource in `resources`. Model validation fails if no resource has that
+  key, or if the resource is not a `kinesisStream()`.
+- `record` is a Function Contract for one record payload, which producers write as JSON. Any
+  [Standard Schema](/docs/guides/schemas) validator works.
+- `kinesisStream()` creates an on-demand stream. Pass `shardCount` for a provisioned stream, and
+  `retentionHours` (24 to 8760) to keep records longer than the default 24 hours.
+
+`voke build` generates the Lambda handler, and `voke synth` creates an
+`AWS::Lambda::EventSourceMapping` from the stream to the Function. You do not write the Lambda
+handler.
+
+## Work with a batch
+
+The handler receives one batch, not the raw AWS event. Voke decodes each record's base64 payload as
+UTF-8, parses it as JSON, and validates it with `record` before your handler runs.
+
+`batch.records` is the list of valid records, in stream order. Each record has:
+
+| Field            | Value                                                |
+| ---------------- | ---------------------------------------------------- |
+| `data`           | The decoded, validated payload, typed from `record`. |
+| `sequenceNumber` | The record's sequence number in its shard.           |
+| `partitionKey`   | The partition key the producer chose.                |
+| `arrivedAt`      | When Kinesis received the record, as a `Date`.       |
+| `id`             | The Lambda event id, `<shard id>:<sequence number>`. |
+| `raw`            | The original Kinesis record.                         |
+| `valid`          | `true`.                                              |
+
+## Report failed records
+
+The handler returns a **Stream Batch Result**. Every mapping has `ReportBatchItemFailures` turned
+on, so Lambda reads the failures you report.
+
+A stream is not a queue: records in a shard are processed in order. Lambda takes the lowest failed
+sequence number as the checkpoint and delivers that record again **with every record after it in the
+batch**, including records that succeeded. Make the handler idempotent, and stop at the first
+failure when later records depend on earlier ones:
+
+```ts twoslash
+import { kinesis } from "@voke/aws";
+import { schema } from "@voke/schema";
+
+const recordClick = async (userId: string): Promise<void> => {
+  if (userId === "") {
+    throw new Error("missing user id");
+  }
+};
+
+// ---cut---
+export const ingestClicks = kinesis({
+  stream: "clicksStream",
+  record: schema.object({ userId: schema.string() }),
+  handler: async (batch) => {
+    const result = batch.batchResult();
+
+    for (const record of batch.records) {
+      try {
+        await recordClick(record.data.userId);
+      } catch {
+        result.fail(record);
+        break;
+      }
+    }
+
+    return result;
+  },
+});
+```
+
+- `batch.ok()` reports success for every record, except the records that failed validation.
+- `batch.batchResult()` returns a builder. Call `.fail(record)` for a record that failed, then return
+  the builder.
+
+If the handler throws, Lambda fails the whole batch. With `bisectOnError` (on by default), Lambda
+splits a failed batch in two and retries each half, which isolates a record that makes the handler
+throw.
+
+## Invalid records
+
+A record whose payload is not base64, not UTF-8, not JSON, or does not match `record` is invalid. By
+default Voke reports it as a failed record and leaves it out of `batch.records`, so the batch result
+already includes it.
+
+Set `invalidRecord: "include"` to receive invalid records too, for example to read payloads that are
+not JSON. Check `record.valid` to tell them apart:
+
+```ts twoslash
+import { kinesis } from "@voke/aws";
+import { schema } from "@voke/schema";
+
+// ---cut---
+export const ingestClicks = kinesis({
+  stream: "clicksStream",
+  record: schema.object({ userId: schema.string() }),
+  invalidRecord: "include",
+  handler: (batch) => {
+    for (const record of batch.records) {
+      if (!record.valid) {
+        console.error(
+          `record ${record.sequenceNumber}: ${record.error.message}`
+        );
+        console.error(record.rawData);
+        continue;
+      }
+
+      console.info(record.data.userId);
+    }
+
+    return batch.ok();
+  },
+});
+```
+
+An invalid record has `valid: false`, `rawData` (the payload as Kinesis delivered it, still base64)
+and `error` (an `InvokeError` with code `INVALID_PAYLOAD`). `batch.ok()` and `batch.batchResult()`
+still report it as failed. To move past a record you have handled, return a result without it, such
+as `{ batchItemFailures: [] }`.
+
+## Mapping options
+
+`kinesis()` accepts these options for the Event Source mapping:
+
+| Option                     | Default         | Effect                                                                                       |
+| -------------------------- | --------------- | -------------------------------------------------------------------------------------------- |
+| `startingPosition`         | `"trimHorizon"` | Where a new mapping starts: the oldest record, or `"latest"` for new ones.                   |
+| `batchSize`                | `100`           | The largest number of records in one batch, 1 to 10000.                                      |
+| `maxBatchingWindowSeconds` | `0`             | How long Lambda gathers records before it calls the Function, 0 to 300.                      |
+| `bisectOnError`            | `true`          | Split a batch in two and retry when the handler throws.                                      |
+| `maxRetryAttempts`         | not set         | Retries before Lambda discards a batch, -1 to 10000. Unset retries until the record expires. |
+| `enabled`                  | `true`          | `false` creates the mapping turned off.                                                      |
+
+`startingPosition` only applies when the mapping is created. Changing it replaces the mapping, which
+starts reading again from the new position.
+
+## When a record can never succeed
+
+A record that always fails blocks its shard: Lambda delivers it again until it succeeds or expires
+from the stream (24 hours by default, `retentionHours` at most). Records behind it in the shard wait,
+and the `IteratorAge` metric grows.
+
+Voke leaves `maxRetryAttempts` unset on purpose. A capped mapping discards a record after its last
+attempt, and Voke has no failure destination to keep it yet, so a short outage downstream could lose
+data within seconds. A stalled shard is visible and loses nothing until the retention period ends.
+
+To stop a record from blocking the shard, handle it in your code: log it, store it, and return a
+result that does not fail it. If losing records is acceptable, set `maxRetryAttempts`.
+
+## Test a Kinesis Function
+
+`voke dev` does not read records from streams. Test a Kinesis Function with
+`functions.sendEvent(name, { records })`. It runs the same decoding, validation and handler code as
+the deployed Lambda, and returns the batch result:
+
+```ts twoslash
+import { kinesis } from "@voke/aws";
+import { schema } from "@voke/schema";
+import { createFunctions } from "voke";
+
+const functions = createFunctions({
+  ingestClicks: kinesis({
+    stream: "clicksStream",
+    record: schema.object({ userId: schema.string() }),
+    handler: (batch) => batch.ok(),
+  }),
+});
+
+// ---cut---
+const result = await functions.sendEvent("ingestClicks", {
+  records: [{ data: { userId: "u1" } }, { data: { userId: "u2" } }],
+});
+
+console.info(result);
+// { batchItemFailures: [] }
+```
+
+Each record needs only `data`, a plain value that Voke encodes as a producer would. Voke fills in the
+Kinesis metadata: `sequenceNumber` defaults to `"1"`, `"2"`, and so on, and `partitionKey` to
+`"local"`.
+
+## What gets deployed
+
+For each `kinesis()` Function, `voke synth` adds:
+
+- An `AWS::Lambda::EventSourceMapping` from the stream ARN to the Function, with
+  `ReportBatchItemFailures`, `StartingPosition: TRIM_HORIZON`, `BatchSize: 100` and
+  `BisectBatchOnFunctionError: true` by default.
+- Read access on the Function's own role only, scoped to the stream: `kinesis:DescribeStream`,
+  `kinesis:DescribeStreamSummary`, `kinesis:GetRecords`, `kinesis:GetShardIterator` and
+  `kinesis:ListShards`.
+
+Every Function role gets `kinesis:PutRecord` and `kinesis:PutRecords` on the stream, so any Function
+can produce to it. See [Resources and bindings](/docs/guides/resources).
+
+## Limits
+
+<Callout type="info">
+
+Kinesis support is intentionally small in v1:
+
+- One stream per Function, read through a shared-throughput (standard) iterator. Enhanced fan-out,
+  `ParallelizationFactor`, tumbling windows, `AT_TIMESTAMP` and event filtering are not supported.
+- There is no failure destination for discarded records.
+- Payloads must be JSON. Read aggregated or binary payloads with `invalidRecord: "include"`.
+
+</Callout>
+
+## Next steps
+
+- [DynamoDB stream events](/docs/guides/dynamodb-stream-events): react to table changes.
+- [Resources and bindings](/docs/guides/resources): write records to the stream from another Function.
+- [Testing](/docs/guides/testing): test Functions and the Gateway.

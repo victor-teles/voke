@@ -8,6 +8,7 @@ import type { ProviderCommandRunOptions } from "voke";
 
 import {
   dynamodbTable,
+  kinesisStream,
   s3Bucket,
   sqsQueue,
   synthesizeCloudFormation,
@@ -231,6 +232,18 @@ test("derives local resource bindings from a synthesized stack", () => {
       "http://localhost:4566/000000000000/OrdersQueue",
     VOKE_RESOURCE_ORDERS_TABLE_NAME: "OrdersTable",
     VOKE_RESOURCE_UPLOADS_BUCKET_NAME: "UploadsBucket",
+  });
+});
+
+test("derives the local name binding of a Kinesis stream", () => {
+  const template = synthesizeCloudFormation({
+    name: "clicks-api",
+    resources: { clicksStream: kinesisStream() },
+    stage: "local",
+  });
+
+  expect(createLocalResourceBindings(template)).toEqual({
+    VOKE_RESOURCE_CLICKS_STREAM_NAME: "ClicksStream",
   });
 });
 

@@ -731,9 +731,9 @@ test("reports expanded event coverage and unknown fields deterministically", () 
     "sqs event on apiHandler requires manual implementation. Queue source OrdersQueue is not generated as a Voke SQS queue resource.",
     "s3 event on apiHandler requires manual implementation. S3 notifications require bucket notification wiring and permissions that Voke does not generate in this migration phase.",
     "schedule event on apiHandler requires manual implementation. Rewrite it with `schedule()` from `@voke/aws`; review the expression and time zone.",
-    "stream event on apiHandler requires manual implementation. Stream event source mappings need batching, starting position, and source permissions reviewed manually.",
+    "stream event on apiHandler requires manual implementation. Rewrite it with kinesis() or dynamodbStream() from @voke/aws, then review the starting position, batching and retry settings.",
     "Unsupported Serverless event kafka on function apiHandler: kafka is not an automatic Voke migration target. Recreate the trigger, permissions, batching, and failure behavior manually before cutting over.",
-    "stream event on kinesisWorker requires manual implementation. Stream event source mappings need batching, starting position, and source permissions reviewed manually.",
+    "stream event on kinesisWorker requires manual implementation. Rewrite it with kinesis() or dynamodbStream() from @voke/aws, then review the starting position, batching and retry settings.",
   ]);
   expect(migration.report.unknownFields).toEqual([
     {

@@ -33,6 +33,8 @@ const teachingSurfaceFiles = [
   "../../../apps/docs/content/docs/guides/sns-events.mdx",
   "../../../apps/docs/content/docs/guides/eventbridge-events.mdx",
   "../../../apps/docs/content/docs/guides/scheduled-functions.mdx",
+  "../../../apps/docs/content/docs/guides/kinesis-events.mdx",
+  "../../../apps/docs/content/docs/guides/dynamodb-stream-events.mdx",
   "../../../apps/docs/content/docs/guides/runtime-variables.mdx",
   "../../../apps/docs/content/docs/guides/resources.mdx",
   "../../../apps/docs/content/docs/guides/remote-functions.mdx",
@@ -60,6 +62,7 @@ const firstPartyExampleFiles = [
   "../../../examples/hello-api/src/middleware/request-info.ts",
   "../../../examples/sqs-events/src/functions.ts",
   "../../../examples/event-sources/src/functions.ts",
+  "../../../examples/stream-events/src/functions.ts",
 ];
 
 const readPackageFile = async (path: string): Promise<string> =>
@@ -125,8 +128,10 @@ test("keeps AWS authoring in @voke/aws", async () => {
     "createLambdaHandlers",
     "createResourceBindingName",
     "createSqsEventHandler",
+    "dynamodbStream",
     "eventBridge",
     "jwtAuthorizer",
+    "kinesis",
     "lambdaAuthorizer",
     "parameter",
     "requestAuthorizer",
@@ -146,6 +151,7 @@ test("keeps CloudFormation synthesis and resource builders in @voke/aws/cloudfor
   expect(Object.keys(cloudformation).toSorted()).toEqual([
     "dynamodbTable",
     "eventBus",
+    "kinesisStream",
     "s3Bucket",
     "secret",
     "snsTopic",

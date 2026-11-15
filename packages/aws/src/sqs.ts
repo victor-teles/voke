@@ -11,6 +11,7 @@ import type {
   StandardSchemaV1,
 } from "voke";
 
+import { createBatchResult } from "./batch-result";
 import { resourceProvider, toLogicalId } from "./cloudformation-template";
 import { parseJsonEventPayload } from "./event-payload";
 import type {
@@ -179,27 +180,12 @@ export interface SqsEventHandlerOptions<TFunctions> {
 
 const createSqsBatchResult = (
   failures: SqsBatchItemFailure[] = []
-): SqsBatchResultBuilder => {
-  const result: SqsBatchResultBuilder = {
-    batchItemFailures: failures,
-    fail(message) {
-      if (
-        !this.batchItemFailures.some(
-          (failure) => failure.itemIdentifier === message.id
-        )
-      ) {
-        this.batchItemFailures.push({ itemIdentifier: message.id });
-      }
-    },
-  };
-  // Handlers return the builder itself; keep `fail` out of the serialized batch response.
-  Object.defineProperty(result, "fail", {
-    enumerable: false,
-    value: result.fail,
-  });
-
-  return result;
-};
+): SqsBatchResultBuilder =>
+  createBatchResult(
+    (message: Pick<SqsInvalidMessage | SqsValidMessage<unknown>, "id">) =>
+      message.id,
+    failures
+  );
 
 const createSqsRecord = (
   message: SqsEventInvocationMessage<unknown>,
@@ -285,7 +271,7 @@ const parseSqsMessageBatch = async <
   }
 
   return {
-    batchResult: () => createSqsBatchResult([...failures]),
+    batchResult: () => createSqsBatchResult(failures),
     messages,
     ok: () => ({ batchItemFailures: [...failures] }),
     source: "sqs",

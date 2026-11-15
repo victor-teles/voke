@@ -4,8 +4,13 @@
 import { VokeConfigError } from "voke";
 import type { VokeModel, VokeModelEventSource, VokeModelError } from "voke";
 
-import type { CloudFormationResource } from "./cloudformation-template";
+import type {
+  CloudFormationResource,
+  CloudFormationValue,
+} from "./cloudformation-template";
+import { dynamodbStreamEventSourceAdapter } from "./dynamodb-stream";
 import { eventBridgeEventSourceAdapter } from "./eventbridge";
+import { kinesisEventSourceAdapter } from "./kinesis";
 import { scheduleEventSourceAdapter } from "./schedule";
 import { snsEventSourceAdapter } from "./sns";
 import { sqsEventSourceAdapter } from "./sqs";
@@ -45,6 +50,11 @@ export interface AwsEventSourceAdapter {
   synthesizeStack?(contexts: readonly AwsEventSourceSynthesisContext[]): {
     resources: Record<string, CloudFormationResource>;
   };
+  /**
+   * IAM statements for the role of the Function the Event Source triggers, and no other role:
+   * for example, reading the stream a mapping polls.
+   */
+  roleStatements?(context: AwsEventSourceContext): CloudFormationValue[];
 }
 
 const adapters: ReadonlyMap<string, AwsEventSourceAdapter> = new Map(
@@ -53,6 +63,8 @@ const adapters: ReadonlyMap<string, AwsEventSourceAdapter> = new Map(
     snsEventSourceAdapter,
     eventBridgeEventSourceAdapter,
     scheduleEventSourceAdapter,
+    kinesisEventSourceAdapter,
+    dynamodbStreamEventSourceAdapter,
   ].map((adapter) => [adapter.source, adapter])
 );
 

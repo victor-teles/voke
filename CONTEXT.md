@@ -180,6 +180,22 @@ _Avoid_: EventBridge worker, event bus resource, scheduled rule
 An AWS **Event Source** where an EventBridge Scheduler schedule invokes a **Function** on a recurring `rate(...)` or `cron(...)` expression.
 _Avoid_: Cron job, scheduled rule, timer
 
+**Kinesis Event Source**:
+An AWS **Event Source** where a Kinesis data stream invokes a **Function** with ordered batches of records through a Lambda event source mapping.
+_Avoid_: Kinesis worker, stream route
+
+**DynamoDB Stream Event Source**:
+An AWS **Event Source** where a DynamoDB table's stream invokes a **Function** with ordered batches of item changes through a Lambda event source mapping.
+_Avoid_: Table trigger, change handler as a separate concept
+
+**Stream Record Batch**:
+The normalized input delivered to a **Function** by a **Kinesis Event Source** or a **DynamoDB Stream Event Source**, where each record exposes decoded data (a parsed payload, or plain keys and item images) plus its sequence number and raw provider metadata.
+_Avoid_: Raw stream event as primary contract, shard batch
+
+**Stream Batch Result**:
+The handler result that tells a stream Event Source the first record to deliver again.
+_Avoid_: SQS Batch Result for streams, checkpoint response
+
 **Event Invocation**:
 The local test/runtime path that delivers an event-shaped payload to an Event Source Function.
 _Avoid_: Function invocation, route invocation
@@ -265,6 +281,11 @@ _Avoid_: AWS secret name, parameter path, resource key
 - For an **SNS Event Source** or an **EventBridge Event Source**, an invalid payload fails the invocation, so the provider's retry and failure handling apply.
 - A **Schedule Event Source** delivers a Voke-defined scheduled event, and every **Schedule Event Source** in a stack shares one scheduler role.
 - An SNS, EventBridge or schedule Function has exactly one **Event Source** in v1.
+- A **Kinesis Event Source** and a **DynamoDB Stream Event Source** are authored through the **AWS Provider** package and deliver a **Stream Record Batch**.
+- A stream Function has exactly one stream Event Source in v1.
+- A stream Event Source uses partial batch failure reporting by default, and its handler returns a **Stream Batch Result**.
+- A stream Event Source redelivers every record from the lowest failed sequence number.
+- A stream Event Source configures Lambda trigger behavior; stream capacity, retention and view type belong to the stream or table resource.
 - Project code primarily invokes **Functions** through its imported **Function Registry**.
 - A **Function Registry** is activated for local invocation by a **Gateway**.
 - A **Gateway** accepts a **Function Registry** as top-level app composition.

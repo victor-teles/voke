@@ -78,7 +78,7 @@ builds the site machinery; 013 rewrites the content on top of both.
 | ---- | ------------------------------------------------------------------------------------------------------------------------------------ | -------- | ------ | -------------- | ------------- |
 | 014  | A Provider package can add an Event Source without changing core                                                                     | P1       | M      | —              | DONE (PR #63) |
 | 015  | A Function can be triggered by an SNS topic, an EventBridge rule or a schedule                                                       | P1       | L      | 014            | DONE          |
-| 016  | A Function can consume a Kinesis stream or a DynamoDB table stream in typed batches                                                  | P2       | L      | 014 (015)      | TODO          |
+| 016  | A Function can consume a Kinesis stream or a DynamoDB table stream in typed batches                                                  | P2       | L      | 014 (015)      | DONE          |
 | 017  | A Function can react to objects created or deleted in an S3 bucket                                                                   | P2       | M      | 014, 015 (016) | TODO          |
 | 018  | A Function declared with `durable(...)` runs as an AWS Lambda durable function, locally and when deployed                            | P1       | L      | (014)          | TODO          |
 | 019  | A Plugin declared in `voke.config.ts` can wrap every Function, extend the Gateway, contribute to the deployment and add CLI commands | P1       | L      | (014, 018)     | TODO          |
