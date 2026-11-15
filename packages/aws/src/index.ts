@@ -158,6 +158,17 @@ export {
   type DynamodbStreamValidRecord,
   type DynamodbStreamViewType,
 } from "./dynamodb-stream";
+export {
+  s3,
+  type S3AwsEvent,
+  type S3AwsEventDetail,
+  type S3EventInvocationInput,
+  type S3EventKind,
+  type S3EventSourceDefinition,
+  type S3FunctionDefinitionInput,
+  type S3ObjectEvent,
+  type S3ObjectEventSchema,
+} from "./s3";
 export type {
   StreamBatchResult,
   StreamBatchResultBuilder,

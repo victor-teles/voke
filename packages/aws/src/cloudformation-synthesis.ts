@@ -885,6 +885,30 @@ const withDerivedVisibilityTimeout = (
     : { ...resource.properties, VisibilityTimeout: derived };
 };
 
+/** Lets an Event Source's adapter change the properties of the resource it references. */
+const patchEventSourceResource = (
+  adapter: AwsEventSourceAdapter,
+  context: AwsEventSourceSynthesisContext,
+  templateResources: Record<string, CloudFormationResource>
+): void => {
+  const resourceKey = context.eventSource.resource;
+
+  if (adapter.resourceProperties === undefined || resourceKey === undefined) {
+    return;
+  }
+
+  const resource = templateResources[toLogicalId(resourceKey)];
+
+  if (resource === undefined) {
+    throw new Error(`Missing resource model for Event Source: ${resourceKey}`);
+  }
+
+  resource.Properties = adapter.resourceProperties(
+    context,
+    resource.Properties
+  );
+};
+
 export interface SynthesisArtifact {
   bucket: string;
   key: string;
@@ -1068,6 +1092,7 @@ export const synthesizeCloudFormationFromModel = (
         templateResources,
         adapter.synthesize(eventSourceContext).resources
       );
+      patchEventSourceResource(adapter, eventSourceContext, templateResources);
       stackEventSources.set(adapter, [
         ...(stackEventSources.get(adapter) ?? []),
         eventSourceContext,

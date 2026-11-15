@@ -1,5 +1,5 @@
 import { aws } from "@voke/aws";
-import { eventBus, snsTopic } from "@voke/aws/cloudformation";
+import { eventBus, s3Bucket, snsTopic } from "@voke/aws/cloudformation";
 import { defineConfig } from "voke";
 
 export default defineConfig({
@@ -9,5 +9,6 @@ export default defineConfig({
   resources: {
     ordersBus: eventBus(),
     ordersTopic: snsTopic(),
+    uploadsBucket: s3Bucket(),
   },
 });

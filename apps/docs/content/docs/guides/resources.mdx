@@ -41,7 +41,7 @@ in the Local AWS Provider. See [Local AWS](/docs/guides/local-aws).
 | `kinesisStream(options?)`        | `AWS::Kinesis::Stream`        | `shardCount` (provisioned mode; on demand by default), `retentionHours`. See [Kinesis events](/docs/guides/kinesis-events). | `name`            |
 | `snsTopic()`                     | `AWS::SNS::Topic`             | None. See [SNS events](/docs/guides/sns-events).                                                                            | `arn`             |
 | `eventBus()`                     | `AWS::Events::EventBus`       | None. See [EventBridge events](/docs/guides/eventbridge-events).                                                            | `name`            |
-| `s3Bucket()`                     | `AWS::S3::Bucket`             | None.                                                                                                                       | `name`            |
+| `s3Bucket()`                     | `AWS::S3::Bucket`             | None. See [S3 events](/docs/guides/s3-events).                                                                              | `name`            |
 | `secret()`                       | `AWS::SecretsManager::Secret` | None. AWS generates the secret value.                                                                                       | `id`              |
 | `ssmParameter({ value, type? })` | `AWS::SSM::Parameter`         | `value` (required), `type`: `"String"` (default) or `"StringList"`.                                                         | `name`            |
 
@@ -197,6 +197,7 @@ consumer gets them on the table's stream ARN, plus `dynamodb:ListStreams` on `*`
 - [SQS events](/docs/guides/sqs-events): consume a declared queue with a Function.
 - [SNS events](/docs/guides/sns-events) and [EventBridge events](/docs/guides/eventbridge-events): run a Function for each message on a declared topic or event bus.
 - [Kinesis events](/docs/guides/kinesis-events) and [DynamoDB stream events](/docs/guides/dynamodb-stream-events): consume a declared stream with a Function.
+- [S3 events](/docs/guides/s3-events): run a Function for each object created in or deleted from a declared bucket.
 - [Runtime Variables](/docs/guides/runtime-variables): read a declared secret or parameter.
 - [Local AWS](/docs/guides/local-aws): create the resources locally.
 - [Config reference](/docs/reference/config): every `voke.config.ts` setting.

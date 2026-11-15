@@ -1289,7 +1289,7 @@ const createGeneratedFiles = (
 const eventManualReason = (event: ServerlessFunctionEvent): string => {
   switch (event.type) {
     case "s3": {
-      return "S3 notifications require bucket notification wiring and permissions that Voke does not generate in this migration phase.";
+      return "Rewrite it with `s3()` from `@voke/aws`; the bucket must be a Voke resource declared with `s3Bucket()`.";
     }
     case "schedule": {
       return "Rewrite it with `schedule()` from `@voke/aws`; review the expression and time zone.";

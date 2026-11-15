@@ -35,6 +35,36 @@ test("runs the scheduled Function locally", async () => {
   expect(log).toEqual(["cleanup 2024-03-01T06:00:00Z attempt 1"]);
 });
 
+test("handles an S3 object event locally through the typed Function Registry", async () => {
+  await functions.sendEvent("imageUploaded", {
+    key: "incoming/cat.jpg",
+    size: 2048,
+  });
+
+  expect(log).toEqual(["uploaded incoming/cat.jpg (2048 bytes)"]);
+});
+
+test("the deployed S3 handler receives the object key exactly as delivered", async () => {
+  await handlers.imageUploaded?.({
+    account: "123456789012",
+    detail: {
+      bucket: { name: "event-sources-uploadsbucket-1a2b3c" },
+      object: { key: "incoming/red flower+1.jpg", size: 5 },
+      reason: "PutObject",
+      version: "0",
+    },
+    "detail-type": "Object Created",
+    id: "event-2",
+    region: "us-east-1",
+    resources: ["arn:aws:s3:::event-sources-uploadsbucket-1a2b3c"],
+    source: "aws.s3",
+    time: "2024-03-01T12:00:00Z",
+    version: "0",
+  });
+
+  expect(log).toEqual(["uploaded incoming/red flower+1.jpg (5 bytes)"]);
+});
+
 test("the deployed SNS handler fails the invocation for an invalid message", async () => {
   await expect(
     handlers.orderCreated?.({

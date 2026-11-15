@@ -36,6 +36,7 @@ Use `@voke/aws` for AWS-specific authoring and runtime binding helpers:
 - Runtime Variable builders: `secret`, `parameter` (each with `.fromResource(...)`)
 - Event Source Function helpers: `sqs`, `createSqsEventHandler`, `sns`, `eventBridge`, `schedule`, and their input and event types (`SnsMessage`, `SnsEventInvocationInput`, `EventBridgeEvent`, `EventBridgeEventInvocationInput`, `EventBridgePattern`, `ScheduledEvent`, `ScheduleEventInvocationInput`)
 - Stream Event Source Function helpers: `kinesis`, `dynamodbStream` (handlers return a `StreamBatchResult`)
+- S3 Event Source Function helper: `s3`, with `S3ObjectEvent`, `S3EventInvocationInput` and `S3EventKind`
 - Generated Lambda handlers: `createLambdaHandlers` (used by the entry module `voke build` generates)
 - API Gateway authorizer helpers: `createAuthorizers`, `jwtAuthorizer`, `lambdaAuthorizer`, `requestAuthorizer`
 - Runtime binding helpers: `bindResource`, `createAwsClientConfig`

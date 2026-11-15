@@ -1,0 +1,463 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Voke stack for uploads (prod)",
+  "Outputs": {
+    "ImageDeletedFunctionName": {
+      "Description": "imageDeleted Lambda function name",
+      "Value": {
+        "Ref": "ImageDeletedFunction"
+      }
+    },
+    "ImageUploadedFunctionName": {
+      "Description": "imageUploaded Lambda function name",
+      "Value": {
+        "Ref": "ImageUploadedFunction"
+      }
+    },
+    "ReportFunctionName": {
+      "Description": "report Lambda function name",
+      "Value": {
+        "Ref": "ReportFunction"
+      }
+    },
+    "ArchiveBucketName": {
+      "Description": "archiveBucket name",
+      "Value": {
+        "Ref": "ArchiveBucket"
+      }
+    },
+    "UploadsBucketName": {
+      "Description": "uploadsBucket name",
+      "Value": {
+        "Ref": "UploadsBucket"
+      }
+    }
+  },
+  "Resources": {
+    "ArchiveBucket": {
+      "Metadata": {
+        "VokeBinding": {
+          "Attribute": "name",
+          "Resource": "archiveBucket"
+        }
+      },
+      "Properties": {},
+      "Type": "AWS::S3::Bucket"
+    },
+    "UploadsBucket": {
+      "Metadata": {
+        "VokeBinding": {
+          "Attribute": "name",
+          "Resource": "uploadsBucket"
+        }
+      },
+      "Properties": {
+        "NotificationConfiguration": {
+          "EventBridgeConfiguration": {
+            "EventBridgeEnabled": true
+          }
+        }
+      },
+      "Type": "AWS::S3::Bucket"
+    },
+    "ImageDeletedFunctionRole": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "ManagedPolicyArns": [
+          "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        ],
+        "Policies": [
+          {
+            "PolicyDocument": {
+              "Statement": [
+                {
+                  "Action": ["s3:ListBucket"],
+                  "Effect": "Allow",
+                  "Resource": {
+                    "Fn::GetAtt": ["ArchiveBucket", "Arn"]
+                  }
+                },
+                {
+                  "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+                  "Effect": "Allow",
+                  "Resource": {
+                    "Fn::Sub": ["${ArchiveBucket.Arn}/*", {}]
+                  }
+                },
+                {
+                  "Action": ["s3:ListBucket"],
+                  "Effect": "Allow",
+                  "Resource": {
+                    "Fn::GetAtt": ["UploadsBucket", "Arn"]
+                  }
+                },
+                {
+                  "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+                  "Effect": "Allow",
+                  "Resource": {
+                    "Fn::Sub": ["${UploadsBucket.Arn}/*", {}]
+                  }
+                }
+              ],
+              "Version": "2012-10-17"
+            },
+            "PolicyName": "VokeResourceAccess"
+          }
+        ]
+      },
+      "Type": "AWS::IAM::Role"
+    },
+    "ImageDeletedFunction": {
+      "Metadata": {
+        "VokeDeployedName": "uploads-prod-imageDeleted",
+        "VokeEntrypoint": "./src/index.ts",
+        "VokeFunction": "imageDeleted",
+        "VokeInvokable": false,
+        "VokeRoutes": []
+      },
+      "Properties": {
+        "Architectures": ["arm64"],
+        "Code": {
+          "ZipFile": "exports.handler = async () => ({ statusCode: 501, body: \"Build and upload this Voke function before deploying.\" });"
+        },
+        "Environment": {
+          "Variables": {
+            "VOKE_RESOURCE_ARCHIVE_BUCKET_NAME": {
+              "Ref": "ArchiveBucket"
+            },
+            "VOKE_RESOURCE_UPLOADS_BUCKET_NAME": {
+              "Ref": "UploadsBucket"
+            }
+          }
+        },
+        "FunctionName": "uploads-prod-imageDeleted",
+        "Handler": "index.imageDeleted",
+        "LoggingConfig": {
+          "LogGroup": {
+            "Ref": "ImageDeletedFunctionLogGroup"
+          }
+        },
+        "MemorySize": 1024,
+        "Role": {
+          "Fn::GetAtt": ["ImageDeletedFunctionRole", "Arn"]
+        },
+        "Runtime": "nodejs22.x",
+        "Timeout": 15
+      },
+      "Type": "AWS::Lambda::Function"
+    },
+    "ImageDeletedFunctionLogGroup": {
+      "Properties": {
+        "LogGroupName": "/aws/lambda/uploads-prod-imageDeleted",
+        "RetentionInDays": 14
+      },
+      "Type": "AWS::Logs::LogGroup"
+    },
+    "ImageDeletedFunctionUploadsBucketRule": {
+      "Properties": {
+        "EventPattern": {
+          "source": ["aws.s3"],
+          "detail-type": ["Object Deleted"],
+          "detail": {
+            "bucket": {
+              "name": [
+                {
+                  "Ref": "UploadsBucket"
+                }
+              ]
+            }
+          }
+        },
+        "State": "ENABLED",
+        "Targets": [
+          {
+            "Arn": {
+              "Fn::GetAtt": ["ImageDeletedFunction", "Arn"]
+            },
+            "Id": "VokeFunction"
+          }
+        ]
+      },
+      "Type": "AWS::Events::Rule"
+    },
+    "ImageDeletedFunctionUploadsBucketRulePermission": {
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Ref": "ImageDeletedFunction"
+        },
+        "Principal": "events.amazonaws.com",
+        "SourceArn": {
+          "Fn::GetAtt": ["ImageDeletedFunctionUploadsBucketRule", "Arn"]
+        }
+      },
+      "Type": "AWS::Lambda::Permission"
+    },
+    "ImageUploadedFunctionRole": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "ManagedPolicyArns": [
+          "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        ],
+        "Policies": [
+          {
+            "PolicyDocument": {
+              "Statement": [
+                {
+                  "Action": ["s3:ListBucket"],
+                  "Effect": "Allow",
+                  "Resource": {
+                    "Fn::GetAtt": ["ArchiveBucket", "Arn"]
+                  }
+                },
+                {
+                  "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+                  "Effect": "Allow",
+                  "Resource": {
+                    "Fn::Sub": ["${ArchiveBucket.Arn}/*", {}]
+                  }
+                },
+                {
+                  "Action": ["s3:ListBucket"],
+                  "Effect": "Allow",
+                  "Resource": {
+                    "Fn::GetAtt": ["UploadsBucket", "Arn"]
+                  }
+                },
+                {
+                  "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+                  "Effect": "Allow",
+                  "Resource": {
+                    "Fn::Sub": ["${UploadsBucket.Arn}/*", {}]
+                  }
+                }
+              ],
+              "Version": "2012-10-17"
+            },
+            "PolicyName": "VokeResourceAccess"
+          }
+        ]
+      },
+      "Type": "AWS::IAM::Role"
+    },
+    "ImageUploadedFunction": {
+      "Metadata": {
+        "VokeDeployedName": "uploads-prod-imageUploaded",
+        "VokeEntrypoint": "./src/index.ts",
+        "VokeFunction": "imageUploaded",
+        "VokeInvokable": false,
+        "VokeRoutes": []
+      },
+      "Properties": {
+        "Architectures": ["arm64"],
+        "Code": {
+          "ZipFile": "exports.handler = async () => ({ statusCode: 501, body: \"Build and upload this Voke function before deploying.\" });"
+        },
+        "Environment": {
+          "Variables": {
+            "VOKE_RESOURCE_ARCHIVE_BUCKET_NAME": {
+              "Ref": "ArchiveBucket"
+            },
+            "VOKE_RESOURCE_UPLOADS_BUCKET_NAME": {
+              "Ref": "UploadsBucket"
+            }
+          }
+        },
+        "FunctionName": "uploads-prod-imageUploaded",
+        "Handler": "index.imageUploaded",
+        "LoggingConfig": {
+          "LogGroup": {
+            "Ref": "ImageUploadedFunctionLogGroup"
+          }
+        },
+        "MemorySize": 1024,
+        "Role": {
+          "Fn::GetAtt": ["ImageUploadedFunctionRole", "Arn"]
+        },
+        "Runtime": "nodejs22.x",
+        "Timeout": 15
+      },
+      "Type": "AWS::Lambda::Function"
+    },
+    "ImageUploadedFunctionLogGroup": {
+      "Properties": {
+        "LogGroupName": "/aws/lambda/uploads-prod-imageUploaded",
+        "RetentionInDays": 14
+      },
+      "Type": "AWS::Logs::LogGroup"
+    },
+    "ImageUploadedFunctionUploadsBucketRule": {
+      "Properties": {
+        "EventPattern": {
+          "source": ["aws.s3"],
+          "detail-type": ["Object Created"],
+          "detail": {
+            "bucket": {
+              "name": [
+                {
+                  "Ref": "UploadsBucket"
+                }
+              ]
+            },
+            "object": {
+              "key": [
+                {
+                  "wildcard": "incoming/*.jpg"
+                }
+              ]
+            }
+          }
+        },
+        "State": "ENABLED",
+        "Targets": [
+          {
+            "Arn": {
+              "Fn::GetAtt": ["ImageUploadedFunction", "Arn"]
+            },
+            "Id": "VokeFunction"
+          }
+        ]
+      },
+      "Type": "AWS::Events::Rule"
+    },
+    "ImageUploadedFunctionUploadsBucketRulePermission": {
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Ref": "ImageUploadedFunction"
+        },
+        "Principal": "events.amazonaws.com",
+        "SourceArn": {
+          "Fn::GetAtt": ["ImageUploadedFunctionUploadsBucketRule", "Arn"]
+        }
+      },
+      "Type": "AWS::Lambda::Permission"
+    },
+    "ReportFunctionRole": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "ManagedPolicyArns": [
+          "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        ],
+        "Policies": [
+          {
+            "PolicyDocument": {
+              "Statement": [
+                {
+                  "Action": ["s3:ListBucket"],
+                  "Effect": "Allow",
+                  "Resource": {
+                    "Fn::GetAtt": ["ArchiveBucket", "Arn"]
+                  }
+                },
+                {
+                  "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+                  "Effect": "Allow",
+                  "Resource": {
+                    "Fn::Sub": ["${ArchiveBucket.Arn}/*", {}]
+                  }
+                },
+                {
+                  "Action": ["s3:ListBucket"],
+                  "Effect": "Allow",
+                  "Resource": {
+                    "Fn::GetAtt": ["UploadsBucket", "Arn"]
+                  }
+                },
+                {
+                  "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+                  "Effect": "Allow",
+                  "Resource": {
+                    "Fn::Sub": ["${UploadsBucket.Arn}/*", {}]
+                  }
+                }
+              ],
+              "Version": "2012-10-17"
+            },
+            "PolicyName": "VokeResourceAccess"
+          }
+        ]
+      },
+      "Type": "AWS::IAM::Role"
+    },
+    "ReportFunction": {
+      "Metadata": {
+        "VokeDeployedName": "uploads-prod-report",
+        "VokeEntrypoint": "./src/index.ts",
+        "VokeFunction": "report",
+        "VokeInvokable": true,
+        "VokeRoutes": []
+      },
+      "Properties": {
+        "Architectures": ["arm64"],
+        "Code": {
+          "ZipFile": "exports.handler = async () => ({ statusCode: 501, body: \"Build and upload this Voke function before deploying.\" });"
+        },
+        "Environment": {
+          "Variables": {
+            "VOKE_RESOURCE_ARCHIVE_BUCKET_NAME": {
+              "Ref": "ArchiveBucket"
+            },
+            "VOKE_RESOURCE_UPLOADS_BUCKET_NAME": {
+              "Ref": "UploadsBucket"
+            }
+          }
+        },
+        "FunctionName": "uploads-prod-report",
+        "Handler": "index.report",
+        "LoggingConfig": {
+          "LogGroup": {
+            "Ref": "ReportFunctionLogGroup"
+          }
+        },
+        "MemorySize": 1024,
+        "Role": {
+          "Fn::GetAtt": ["ReportFunctionRole", "Arn"]
+        },
+        "Runtime": "nodejs22.x",
+        "Timeout": 15
+      },
+      "Type": "AWS::Lambda::Function"
+    },
+    "ReportFunctionLogGroup": {
+      "Properties": {
+        "LogGroupName": "/aws/lambda/uploads-prod-report",
+        "RetentionInDays": 14
+      },
+      "Type": "AWS::Logs::LogGroup"
+    }
+  }
+}

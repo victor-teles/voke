@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 
 import {
   eventBus,
+  s3Bucket,
   snsTopic,
   synthesizeCloudFormation,
 } from "@voke/aws/cloudformation";
@@ -12,7 +13,11 @@ test("synthesizes one trigger per Event Source and one shared Scheduler role", (
   const template = synthesizeCloudFormation({
     functions,
     name: "event-sources",
-    resources: { ordersBus: eventBus(), ordersTopic: snsTopic() },
+    resources: {
+      ordersBus: eventBus(),
+      ordersTopic: snsTopic(),
+      uploadsBucket: s3Bucket(),
+    },
   });
   const triggerTypes = Object.values(template.Resources)
     .map(({ Type }) => Type)
@@ -27,8 +32,12 @@ test("synthesizes one trigger per Event Source and one shared Scheduler role", (
 
   expect(triggerTypes).toEqual([
     "AWS::Events::Rule",
+    "AWS::Events::Rule",
     "AWS::SNS::Subscription",
     "AWS::Scheduler::Schedule",
   ]);
   expect(template.Resources.VokeSchedulerRole?.Type).toBe("AWS::IAM::Role");
+  expect(
+    template.Resources.UploadsBucket?.Properties.NotificationConfiguration
+  ).toEqual({ EventBridgeConfiguration: { EventBridgeEnabled: true } });
 });

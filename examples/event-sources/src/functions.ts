@@ -1,4 +1,4 @@
-import { eventBridge, schedule, sns } from "@voke/aws";
+import { eventBridge, s3, schedule, sns } from "@voke/aws";
 import { schema } from "@voke/schema";
 import { createFunctions } from "voke";
 
@@ -37,7 +37,18 @@ export const nightlyCleanup = schedule({
   timezone: "America/Sao_Paulo",
 });
 
+// Runs for each .jpg object created under incoming/ in the uploadsBucket S3 bucket.
+export const imageUploaded = s3({
+  bucket: "uploadsBucket",
+  handler: (event) => {
+    log.push(`uploaded ${event.key} (${event.size ?? 0} bytes)`);
+  },
+  prefix: "incoming/",
+  suffix: ".jpg",
+});
+
 export const functions = createFunctions({
+  imageUploaded,
   nightlyCleanup,
   orderCreated,
   orderPaid,

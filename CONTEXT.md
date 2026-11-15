@@ -188,6 +188,10 @@ _Avoid_: Kinesis worker, stream route
 An AWS **Event Source** where a DynamoDB table's stream invokes a **Function** with ordered batches of item changes through a Lambda event source mapping.
 _Avoid_: Table trigger, change handler as a separate concept
 
+**S3 Event Source**:
+An AWS **Event Source** where object changes in a bucket invoke a **Function** through an EventBridge rule.
+_Avoid_: Bucket notification, S3 trigger
+
 **Stream Record Batch**:
 The normalized input delivered to a **Function** by a **Kinesis Event Source** or a **DynamoDB Stream Event Source**, where each record exposes decoded data (a parsed payload, or plain keys and item images) plus its sequence number and raw provider metadata.
 _Avoid_: Raw stream event as primary contract, shard batch
@@ -285,6 +289,8 @@ _Avoid_: AWS secret name, parameter path, resource key
 - A stream Function has exactly one stream Event Source in v1.
 - A stream Event Source uses partial batch failure reporting by default, and its handler returns a **Stream Batch Result**.
 - A stream Event Source redelivers every record from the lowest failed sequence number.
+- An **S3 Event Source** is authored through the **AWS Provider** package with `s3()`, delivers one object event per invocation, and references its bucket by Voke resource key.
+- An **S3 Event Source** passes the object key through exactly as EventBridge delivers it; Voke never URL-decodes it.
 - A stream Event Source configures Lambda trigger behavior; stream capacity, retention and view type belong to the stream or table resource.
 - Project code primarily invokes **Functions** through its imported **Function Registry**.
 - A **Function Registry** is activated for local invocation by a **Gateway**.

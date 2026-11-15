@@ -11,6 +11,7 @@ import type {
 import { dynamodbStreamEventSourceAdapter } from "./dynamodb-stream";
 import { eventBridgeEventSourceAdapter } from "./eventbridge";
 import { kinesisEventSourceAdapter } from "./kinesis";
+import { s3EventSourceAdapter } from "./s3";
 import { scheduleEventSourceAdapter } from "./schedule";
 import { snsEventSourceAdapter } from "./sns";
 import { sqsEventSourceAdapter } from "./sqs";
@@ -55,6 +56,17 @@ export interface AwsEventSourceAdapter {
    * for example, reading the stream a mapping polls.
    */
   roleStatements?(context: AwsEventSourceContext): CloudFormationValue[];
+  /**
+   * The properties of the resource the Event Source references (`eventSource.resource`), given its
+   * current properties: for example, turning on a bucket's EventBridge delivery. Return every
+   * property, merging rather than replacing what is there. Synthesis calls it after `synthesize`
+   * for each Event Source of this type, so it must give the same result when called again; it is
+   * not called for a resources-only template.
+   */
+  resourceProperties?(
+    context: AwsEventSourceContext,
+    properties: Readonly<Record<string, CloudFormationValue>>
+  ): Record<string, CloudFormationValue>;
 }
 
 const adapters: ReadonlyMap<string, AwsEventSourceAdapter> = new Map(
@@ -65,6 +77,7 @@ const adapters: ReadonlyMap<string, AwsEventSourceAdapter> = new Map(
     scheduleEventSourceAdapter,
     kinesisEventSourceAdapter,
     dynamodbStreamEventSourceAdapter,
+    s3EventSourceAdapter,
   ].map((adapter) => [adapter.source, adapter])
 );
 
