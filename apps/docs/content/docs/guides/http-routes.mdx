@@ -11,13 +11,13 @@ After reading this page you can serve HTTP routes from a Function, validate what
 
 ```ts title="src/index.ts" twoslash
 // @filename: voke.config.ts
-import { aws } from "@voke/aws";
+import { aws } from "@vokejs/aws";
 import { defineConfig } from "voke";
 
 export default defineConfig({ name: "users-api", provider: aws() });
 // @filename: src/index.ts
 // ---cut---
-import { schema } from "@voke/schema";
+import { schema } from "@vokejs/schema";
 import { createFunctions, http, route, voke } from "voke";
 import config from "../voke.config";
 
@@ -90,7 +90,7 @@ const functions = createFunctions({
 Declare a `query` or `headers` schema to validate and convert them. The handler then gets the schema's output:
 
 ```ts twoslash
-import { schema } from "@voke/schema";
+import { schema } from "@vokejs/schema";
 import { createFunctions, http, route } from "voke";
 import { z } from "zod";
 
@@ -114,12 +114,12 @@ These rules apply to `query` and `headers`:
 
 - Values are strings. Convert them in the schema or in the handler.
 - A repeated query key or header is one string, joined with a comma: `?tag=a&tag=b` gives `"a,b"`. Split on `,` and trim each part. Cookies are joined with `; `.
-- Header names are lower-case. A `@voke/schema` `headers` object with a name in another case makes `voke(...)` throw a `VokeConfigError`.
-- A `@voke/schema` object rejects a query parameter it does not declare, with the issue `Unexpected property`.
+- Header names are lower-case. A `@vokejs/schema` `headers` object with a name in another case makes `voke(...)` throw a `VokeConfigError`.
+- A `@vokejs/schema` object rejects a query parameter it does not declare, with the issue `Unexpected property`.
 - A `headers` schema checks the headers it names. Clients, proxies and API Gateway add other headers, so a strict object schema from another validator, such as `z.strictObject`, cannot be used for headers.
 - `request.raw` is the original `Request`, with the exact URL and the `Headers` object.
 
-When a `params` schema is a `@voke/schema` object, its keys must match the parameters in the path. `voke(...)` throws a `VokeConfigError` at startup when they differ.
+When a `params` schema is a `@vokejs/schema` object, its keys must match the parameters in the path. `voke(...)` throws a `VokeConfigError` at startup when they differ.
 
 ### The body
 
@@ -144,11 +144,11 @@ Voke turns the handler's return value into the HTTP response:
 | `undefined`     | `204` with no body                             |
 | A `Response`    | That response, unchanged                       |
 
-To set another status or an error body, return a response built with `@voke/http`:
+To set another status or an error body, return a response built with `@vokejs/http`:
 
 ```ts twoslash
-import { created, error, noContent, ok } from "@voke/http";
-import { schema } from "@voke/schema";
+import { created, error, noContent, ok } from "@vokejs/http";
+import { schema } from "@vokejs/schema";
 import { createFunctions, http, route } from "voke";
 
 const functions = createFunctions({
@@ -257,7 +257,7 @@ CORS is off by default. Set `api.cors` in `voke.config.ts` to let browsers on ot
 ```ts title="voke.config.ts" twoslash
 // @filename: voke.config.ts
 // ---cut---
-import { aws } from "@voke/aws";
+import { aws } from "@vokejs/aws";
 import { defineConfig } from "voke";
 
 export default defineConfig({
@@ -293,13 +293,13 @@ You can call a route in two ways.
 
 ```ts title="src/index.ts" twoslash
 // @filename: voke.config.ts
-import { aws } from "@voke/aws";
+import { aws } from "@vokejs/aws";
 import { defineConfig } from "voke";
 
 export default defineConfig({ name: "users-api", provider: aws() });
 // @filename: src/index.ts
 // ---cut---
-import { schema } from "@voke/schema";
+import { schema } from "@vokejs/schema";
 import { createFunctions, http, route, voke } from "voke";
 import config from "../voke.config";
 
@@ -338,7 +338,7 @@ See [Testing](/docs/guides/testing) for test setups.
 `meta` documents a route for generated API documentation, such as the [OpenAPI document](/docs/guides/openapi). The Gateway ignores it when it serves requests:
 
 ```ts twoslash
-import { schema } from "@voke/schema";
+import { schema } from "@vokejs/schema";
 import { createFunctions, http, route } from "voke";
 
 const functions = createFunctions({

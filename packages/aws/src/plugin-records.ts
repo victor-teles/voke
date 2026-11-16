@@ -63,7 +63,7 @@ const recordIssues = (
   if (record.type !== iamPolicyRecordType) {
     return [
       {
-        message: `expected "${iamPolicyRecordType}" (use awsPolicy() from "@voke/aws"); received ${JSON.stringify(record.type)}`,
+        message: `expected "${iamPolicyRecordType}" (use awsPolicy() from "@vokejs/aws"); received ${JSON.stringify(record.type)}`,
         path: `${path}.type`,
       },
     ];

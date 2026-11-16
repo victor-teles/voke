@@ -1,6 +1,6 @@
 import { beforeEach, expect, test } from "bun:test";
 
-import { createLambdaHandlers } from "@voke/aws";
+import { createLambdaHandlers } from "@vokejs/aws";
 
 import { functions, log } from "../src/functions";
 

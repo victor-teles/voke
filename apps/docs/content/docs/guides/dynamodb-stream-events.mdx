@@ -8,7 +8,7 @@ report failed records, and test the Function without AWS.
 
 ## Turn on the stream and declare the Function
 
-Pass `stream` to `dynamodbTable()` from `@voke/aws/cloudformation`. It sets the table's stream view
+Pass `stream` to `dynamodbTable()` from `@vokejs/aws/cloudformation`. It sets the table's stream view
 type, which decides what each change record carries:
 
 | `stream`               | Each record carries                      |
@@ -18,13 +18,13 @@ type, which decides what each change record carries:
 | `"OLD_IMAGE"`          | The keys and the item before the change. |
 | `"KEYS_ONLY"`          | The keys only.                           |
 
-Then create the Function with `dynamodbStream()` from `@voke/aws`, and pass the table's resource key
+Then create the Function with `dynamodbStream()` from `@vokejs/aws`, and pass the table's resource key
 as `table`:
 
 ```ts twoslash
 // @filename: voke.config.ts
-import { aws } from "@voke/aws";
-import { dynamodbTable } from "@voke/aws/cloudformation";
+import { aws } from "@vokejs/aws";
+import { dynamodbTable } from "@vokejs/aws/cloudformation";
 import { defineConfig } from "voke";
 
 export default defineConfig({
@@ -36,8 +36,8 @@ export default defineConfig({
 });
 
 // @filename: src/index.ts
-import { dynamodbStream } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { dynamodbStream } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 import { createFunctions } from "voke";
 
 const order = schema.object({
@@ -104,7 +104,7 @@ delivers that record again **with every record after it in the batch**, includin
 succeeded. Make the handler idempotent:
 
 ```ts twoslash
-import { dynamodbStream } from "@voke/aws";
+import { dynamodbStream } from "@vokejs/aws";
 
 const updateSearchIndex = async (
   keys: Record<string, unknown>
@@ -178,8 +178,8 @@ values; Voke converts them to attribute-value JSON and runs the same conversion,
 handler code as the deployed Lambda:
 
 ```ts twoslash
-import { dynamodbStream } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { dynamodbStream } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 import { createFunctions } from "voke";
 
 const functions = createFunctions({

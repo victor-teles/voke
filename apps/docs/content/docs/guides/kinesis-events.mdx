@@ -9,13 +9,13 @@ Source**, report failed records, and test the Function without AWS.
 ## Declare the stream and the Function
 
 Declare the stream in `resources` in `voke.config.ts` with `kinesisStream()` from
-`@voke/aws/cloudformation`. Then create the Function with `kinesis()` from `@voke/aws`, and pass the
+`@vokejs/aws/cloudformation`. Then create the Function with `kinesis()` from `@vokejs/aws`, and pass the
 stream's resource key as `stream`:
 
 ```ts twoslash
 // @filename: voke.config.ts
-import { aws } from "@voke/aws";
-import { kinesisStream } from "@voke/aws/cloudformation";
+import { aws } from "@vokejs/aws";
+import { kinesisStream } from "@vokejs/aws/cloudformation";
 import { defineConfig } from "voke";
 
 export default defineConfig({
@@ -27,8 +27,8 @@ export default defineConfig({
 });
 
 // @filename: src/index.ts
-import { kinesis } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { kinesis } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 import { createFunctions } from "voke";
 
 const click = schema.object({
@@ -90,8 +90,8 @@ batch**, including records that succeeded. Make the handler idempotent, and stop
 failure when later records depend on earlier ones:
 
 ```ts twoslash
-import { kinesis } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { kinesis } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 
 const recordClick = async (userId: string): Promise<void> => {
   if (userId === "") {
@@ -138,8 +138,8 @@ Set `invalidRecord: "include"` to receive invalid records too, for example to re
 not JSON. Check `record.valid` to tell them apart:
 
 ```ts twoslash
-import { kinesis } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { kinesis } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 
 // ---cut---
 export const ingestClicks = kinesis({
@@ -211,8 +211,8 @@ Test a Kinesis Function with `functions.sendEvent(name, { records })`. It runs t
 validation and handler code as the deployed Lambda, and returns the batch result:
 
 ```ts twoslash
-import { kinesis } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { kinesis } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 import { createFunctions } from "voke";
 
 const functions = createFunctions({

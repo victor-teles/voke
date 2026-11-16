@@ -10,8 +10,8 @@ import {
   parameter as runtimeParameter,
   secret as runtimeSecret,
   sqs,
-} from "@voke/aws";
-import type { SqsMessageBatch } from "@voke/aws";
+} from "@vokejs/aws";
+import type { SqsMessageBatch } from "@vokejs/aws";
 import {
   dynamodbTable,
   eventBus,
@@ -21,7 +21,7 @@ import {
   sqsQueue,
   ssmParameter,
   synthesizeCloudFormation,
-} from "@voke/aws/cloudformation";
+} from "@vokejs/aws/cloudformation";
 
 import { defineConfig } from "../src/config";
 import { VokeModelError } from "../src/errors";

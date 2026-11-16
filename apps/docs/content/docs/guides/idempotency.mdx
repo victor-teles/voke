@@ -5,15 +5,15 @@ description: Make a retried Function, route or SQS message run once with the ide
 
 After this page you can make a handler that charges a card or sends an email run once, however often AWS or a client retries it, and test it without AWS.
 
-AWS delivers events at least once. SQS sends a message again when the Function times out or the batch partly fails, an HTTP client retries a `POST` after a network error, and Lambda retries an asynchronous invocation twice. `@voke/idempotency` records each operation in a DynamoDB table, so a retry returns the first result instead of running the handler again.
+AWS delivers events at least once. SQS sends a message again when the Function times out or the batch partly fails, an HTTP client retries a `POST` after a network error, and Lambda retries an asynchronous invocation twice. `@vokejs/idempotency` records each operation in a DynamoDB table, so a retry returns the first result instead of running the handler again.
 
 ## Add the Plugin
 
 Add `idempotency()` to `plugins` in `voke.config.ts`:
 
 ```ts title="voke.config.ts" twoslash
-import { aws } from "@voke/aws";
-import { idempotency } from "@voke/idempotency";
+import { aws } from "@vokejs/aws";
+import { idempotency } from "@vokejs/idempotency";
 import { defineConfig } from "voke";
 
 export default defineConfig({
@@ -42,9 +42,9 @@ Nothing becomes idempotent because the Plugin is configured. You choose the hand
 Wrap the handler with `idempotent(handler, { key })`. `key` returns the **Idempotency Key**: the value that identifies one logical operation, here the order id:
 
 ```ts title="src/index.ts" twoslash
-import { schema } from "@voke/schema";
+import { schema } from "@vokejs/schema";
 import { createFunctions, fn } from "voke";
-import { idempotent } from "@voke/idempotency";
+import { idempotent } from "@vokejs/idempotency";
 
 const chargeCard = async (orderId: string, amount: number) => ({
   chargeId: `ch_${orderId}_${amount}`,
@@ -78,9 +78,9 @@ With `idempotency({ store })` there is no table, so no link is needed.
 Read the key from a request header. A client sends the same `idempotency-key` with every retry of one request:
 
 ```ts title="src/index.ts" twoslash
-import { error } from "@voke/http";
-import { IdempotencyError, idempotent } from "@voke/idempotency";
-import { schema } from "@voke/schema";
+import { error } from "@vokejs/http";
+import { IdempotencyError, idempotent } from "@vokejs/idempotency";
+import { schema } from "@vokejs/schema";
 import { createFunctions, http, route } from "voke";
 
 interface CreateOrderRequest {
@@ -133,9 +133,9 @@ export const functions = createFunctions({
 `idempotentBatch(processMessage, { key })` returns a whole SQS handler. Each message runs on its own, one after another:
 
 ```ts twoslash
-import { sqs } from "@voke/aws";
-import { idempotentBatch } from "@voke/idempotency";
-import { schema } from "@voke/schema";
+import { sqs } from "@vokejs/aws";
+import { idempotentBatch } from "@vokejs/idempotency";
+import { schema } from "@vokejs/schema";
 
 const settlePayment = async (paymentId: string): Promise<void> => {
   // Record the payment in the ledger.
@@ -204,7 +204,7 @@ Each step is one DynamoDB request. The first call writes an `INPROGRESS` record 
 A completed record replays its result for `expiresAfterSeconds`, one hour by default. Set it per Plugin or per handler:
 
 ```ts twoslash
-import { idempotency, idempotent } from "@voke/idempotency";
+import { idempotency, idempotent } from "@vokejs/idempotency";
 
 const plugin = idempotency({ expiresAfterSeconds: 24 * 60 * 60 });
 
@@ -224,8 +224,8 @@ DynamoDB deletes expired items in the background, usually within a few days. An 
 
 ```ts twoslash
 import { expect, test } from "bun:test";
-import { idempotency, idempotent, memoryStore } from "@voke/idempotency";
-import { schema } from "@voke/schema";
+import { idempotency, idempotent, memoryStore } from "@vokejs/idempotency";
+import { schema } from "@vokejs/schema";
 import { createFunctions, fn, voke } from "voke";
 
 test("a retried charge runs once", async () => {
@@ -267,8 +267,8 @@ To test the handler alone, without a Gateway, pass the store to `idempotent` its
 Do not wrap a [Durable Function](/docs/guides/durable-functions) with `idempotent`. Lambda replays a Durable Function's handler after each wait and retry, and its steps are already checkpointed, so it needs no record. To start one execution per operation, name the execution:
 
 ```ts twoslash
-import { durable } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { durable } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 import { createFunctions, voke } from "voke";
 
 const functions = createFunctions({
@@ -289,7 +289,7 @@ await functions.invoke(
 );
 ```
 
-A second start with the same `executionName` returns the existing execution. `@voke/idempotency` writes no record for it.
+A second start with the same `executionName` returns the existing execution. `@vokejs/idempotency` writes no record for it.
 
 ## Limits
 

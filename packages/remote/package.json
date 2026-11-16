@@ -1,5 +1,5 @@
 {
-  "name": "@voke/remote",
+  "name": "@vokejs/remote",
   "version": "0.1.0",
   "description": "Typed Remote Function Registries for calling Voke Functions across projects.",
   "keywords": [
@@ -24,7 +24,7 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "@voke/source": "./src/index.ts",
+      "@vokejs/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./src/index.ts"
     }

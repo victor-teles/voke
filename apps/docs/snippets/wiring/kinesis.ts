@@ -1,5 +1,5 @@
-import { kinesis } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { kinesis } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 
 export const clicks = kinesis({
   handler: (batch) => {

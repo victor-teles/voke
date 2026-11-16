@@ -8,12 +8,12 @@ After this page you can declare the AWS resources your project needs, link each 
 ## Declare resources
 
 Declare resources in `resources` in `voke.config.ts`, with the builders from
-`@voke/aws/cloudformation`. The key of each entry (`usersTable` below) is the **resource key**: you
+`@vokejs/aws/cloudformation`. The key of each entry (`usersTable` below) is the **resource key**: you
 use it to link the resource to a Function, and Voke derives the CloudFormation logical id from it.
 
 ```ts title="voke.config.ts" twoslash
-import { aws } from "@voke/aws";
-import { dynamodbTable, s3Bucket, sqsQueue } from "@voke/aws/cloudformation";
+import { aws } from "@vokejs/aws";
+import { dynamodbTable, s3Bucket, sqsQueue } from "@vokejs/aws/cloudformation";
 import { defineConfig } from "voke";
 
 export default defineConfig({
@@ -58,10 +58,11 @@ AWS generates the physical names. Your code never hard-codes a table name or a q
 links the resource and reads its binding.
 
 <Callout type="info" title="Two functions are named secret">
-  `secret` from `@voke/aws/cloudformation` declares a Secrets Manager resource.
-  `secret` from `@voke/aws` is a different function that reads a secret at run
-  time. To read the value of a declared `secret()` or `ssmParameter()`, use a
-  [Runtime Variable](/docs/guides/runtime-variables) with `.fromResource(key)`.
+  `secret` from `@vokejs/aws/cloudformation` declares a Secrets Manager
+  resource. `secret` from `@vokejs/aws` is a different function that reads a
+  secret at run time. To read the value of a declared `secret()` or
+  `ssmParameter()`, use a [Runtime Variable](/docs/guides/runtime-variables)
+  with `.fromResource(key)`.
 </Callout>
 
 ## Data retention
@@ -82,8 +83,8 @@ To delete data-bearing resources with their stack, set `retainData` on the AWS P
 `--stage`:
 
 ```ts title="voke.config.ts" twoslash
-import { aws } from "@voke/aws";
-import { dynamodbTable, s3Bucket } from "@voke/aws/cloudformation";
+import { aws } from "@vokejs/aws";
+import { dynamodbTable, s3Bucket } from "@vokejs/aws/cloudformation";
 import { defineConfig } from "voke";
 
 export default defineConfig({
@@ -122,7 +123,7 @@ Link**. The Function's handler then reads a linked resource's binding value with
 `context.resource(key)`: a table name, a queue URL, a topic ARN, a secret id.
 
 ```ts twoslash
-import { schema } from "@voke/schema";
+import { schema } from "@vokejs/schema";
 import { fn } from "voke";
 
 // ---cut---
@@ -174,7 +175,7 @@ Where the values come from:
 
 ## Create AWS SDK clients with `createAwsClientConfig()`
 
-Pass `createAwsClientConfig()` from `@voke/aws` to every AWS SDK client you create, for example
+Pass `createAwsClientConfig()` from `@vokejs/aws` to every AWS SDK client you create, for example
 `new DynamoDBClient(createAwsClientConfig())`. It returns `{ region, endpoint? }`:
 
 - `region` is the first value set among the `region` option, `AWS_REGION` and `AWS_DEFAULT_REGION`.
@@ -198,8 +199,8 @@ and the client config:
 
 ```ts twoslash
 // @filename: voke.config.ts
-import { aws } from "@voke/aws";
-import { dynamodbTable } from "@voke/aws/cloudformation";
+import { aws } from "@vokejs/aws";
+import { dynamodbTable } from "@vokejs/aws/cloudformation";
 import { defineConfig } from "voke";
 
 export default defineConfig({
@@ -212,8 +213,8 @@ export default defineConfig({
 
 // @filename: src/index.ts
 import { DynamoDBClient, GetItemCommand } from "@aws-sdk/client-dynamodb";
-import { createAwsClientConfig } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { createAwsClientConfig } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 import { createFunctions, http, voke } from "voke";
 
 import config from "../voke.config";

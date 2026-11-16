@@ -1,4 +1,4 @@
-import { createBuildPlan, handlerModule } from "@voke/build";
+import { createBuildPlan, handlerModule } from "@vokejs/build";
 import { createHandlerExportName, functionRegistryEntries } from "voke";
 import type { BuildPlan, ProviderBuildInput } from "voke";
 
@@ -37,7 +37,7 @@ const generatedEntrySource = (
       : [
           `import config from ${JSON.stringify(importPathFromGeneratedEntry(configPath))};`,
         ]),
-    'import { createLambdaHandlers } from "@voke/aws";',
+    'import { createLambdaHandlers } from "@vokejs/aws";',
     "",
     configPath === undefined
       ? "const handlers = createLambdaHandlers(project);"

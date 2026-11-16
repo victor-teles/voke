@@ -61,7 +61,7 @@ export const toLogicalId = (value: string): string => {
     .join("");
 };
 
-/** The AWS metadata every resource builder in `@voke/aws/cloudformation` records. */
+/** The AWS metadata every resource builder in `@vokejs/aws/cloudformation` records. */
 export const resourceProvider = (
   resource: VokeModelResource
 ): AwsCloudFormationResourceProvider => {

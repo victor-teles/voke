@@ -7,11 +7,11 @@ After reading this page you can protect HTTP routes with API Gateway HTTP API au
 
 ## Protect routes
 
-An authorizer decides whether API Gateway lets a request reach a route. You declare named authorizers with `createAuthorizers` from `@voke/aws`, pass them to `http(...)`, and pick a default and per-route overrides:
+An authorizer decides whether API Gateway lets a request reach a route. You declare named authorizers with `createAuthorizers` from `@vokejs/aws`, pass them to `http(...)`, and pick a default and per-route overrides:
 
 ```ts title="src/index.ts" twoslash
 // @filename: voke.config.ts
-import { aws } from "@voke/aws";
+import { aws } from "@vokejs/aws";
 import { defineConfig } from "voke";
 
 export default defineConfig({ name: "users-api", provider: aws() });
@@ -22,7 +22,7 @@ import {
   jwtAuthorizer,
   lambdaAuthorizer,
   requestAuthorizer,
-} from "@voke/aws";
+} from "@vokejs/aws";
 import { createFunctions, http, route, voke } from "voke";
 import config from "../voke.config";
 
@@ -113,8 +113,8 @@ Voke configures the authorizer with payload format version 2.0 and simple respon
 A Request Authorizer Function receives the request and returns `{ authorized, context }`. `authorized` must be a boolean. `context` is an object that the route handler reads from `request.auth.context`. Add a `context` schema to validate it:
 
 ```ts twoslash
-import { requestAuthorizer } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { requestAuthorizer } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 
 const authorizeSession = requestAuthorizer({
   context: schema.object({ userId: schema.string() }),
@@ -137,7 +137,7 @@ The handler's second argument is the invoke context, with Runtime Variables (see
 A Lambda authorizer can call a Lambda that is not part of your project. Pass its ARN or its deployed name:
 
 ```ts twoslash
-import { createAuthorizers, lambdaAuthorizer } from "@voke/aws";
+import { createAuthorizers, lambdaAuthorizer } from "@vokejs/aws";
 
 const authorizers = createAuthorizers({
   shared: lambdaAuthorizer({
@@ -178,11 +178,11 @@ Prefer the ARN: it states the account and the region. A deployed name resolves i
   passing local test does not prove that a real token works on a deployed stage.
 </Callout>
 
-Mint a token for tests with `createTestJwt` from `@voke/testing`. It takes the authorizer, so the issuer and audience always match, and returns an unsigned token that only the local Gateway accepts:
+Mint a token for tests with `createTestJwt` from `@vokejs/testing`. It takes the authorizer, so the issuer and audience always match, and returns an unsigned token that only the local Gateway accepts:
 
 ```ts title="test/profile.test.ts" twoslash
-import { createAuthorizers, jwtAuthorizer } from "@voke/aws";
-import { createTestJwt } from "@voke/testing";
+import { createAuthorizers, jwtAuthorizer } from "@vokejs/aws";
+import { createTestJwt } from "@vokejs/testing";
 import { createFunctions, http, route, voke } from "voke";
 
 const authorizers = createAuthorizers({
@@ -221,14 +221,14 @@ const missing = await gateway.request("/profile");
 To call a JWT route under `voke dev` by hand, send a real token from your issuer, or print a test token and pass it in the `authorization` header:
 
 ```sh
-bun -e 'import { createTestJwt } from "@voke/testing"; console.log(createTestJwt({ issuer: "https://auth.example.com", audience: ["users-api"] }))'
+bun -e 'import { createTestJwt } from "@vokejs/testing"; console.log(createTestJwt({ issuer: "https://auth.example.com", audience: ["users-api"] }))'
 ```
 
 The Lambda authorizer example below runs the Request Authorizer Function in process:
 
 ```ts title="src/index.ts" twoslash
 // @filename: voke.config.ts
-import { aws } from "@voke/aws";
+import { aws } from "@vokejs/aws";
 import { defineConfig } from "voke";
 
 export default defineConfig({ name: "users-api", provider: aws() });
@@ -238,7 +238,7 @@ import {
   createAuthorizers,
   lambdaAuthorizer,
   requestAuthorizer,
-} from "@voke/aws";
+} from "@vokejs/aws";
 import { createFunctions, http, route, voke } from "voke";
 import config from "../voke.config";
 
@@ -282,7 +282,7 @@ On AWS, API Gateway runs the authorizer before it invokes your route Function. V
 `functions.route(...)` calls a route handler directly and skips authorizers. Pass `auth` to give the handler the Route Auth Context it expects. This works for routes behind any authorizer, including JWT:
 
 ```ts twoslash
-import { createAuthorizers, jwtAuthorizer } from "@voke/aws";
+import { createAuthorizers, jwtAuthorizer } from "@vokejs/aws";
 import { createFunctions, http, route } from "voke";
 
 const functions = createFunctions({

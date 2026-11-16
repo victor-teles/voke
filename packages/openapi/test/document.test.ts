@@ -1,7 +1,11 @@
 import { expect, test } from "bun:test";
 
-import { createAuthorizers, jwtAuthorizer, lambdaAuthorizer } from "@voke/aws";
-import { schema } from "@voke/schema";
+import {
+  createAuthorizers,
+  jwtAuthorizer,
+  lambdaAuthorizer,
+} from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 import { createFunctions, functionRegistryEntries, http, route } from "voke";
 import type { AnyFunctionDefinition, VokeConfigError } from "voke";
 import { z } from "zod";
@@ -94,7 +98,7 @@ test("rejects a path parameter API Gateway cannot route", () => {
   ).toThrow('Route "GET /files/*/raw" of Function "http"');
 });
 
-test("reads params, query and headers from @voke/schema", () => {
+test("reads params, query and headers from @vokejs/schema", () => {
   const document = documentFor(
     createFunctions({
       http: http({

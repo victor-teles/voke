@@ -8,11 +8,11 @@ schedule off, and test the Function without AWS.
 
 ## Declare a scheduled Function
 
-Create the Function with `schedule()` from `@voke/aws` and a `rate(...)` or `cron(...)` expression.
+Create the Function with `schedule()` from `@vokejs/aws` and a `rate(...)` or `cron(...)` expression.
 A schedule needs no resource in `voke.config.ts`:
 
 ```ts title="src/index.ts" twoslash
-import { schedule } from "@voke/aws";
+import { schedule } from "@vokejs/aws";
 import { createFunctions } from "voke";
 
 export const functions = createFunctions({
@@ -69,7 +69,7 @@ Test a scheduled Function with `functions.sendEvent(name, {})`. It runs the same
 Lambda:
 
 ```ts twoslash
-import { schedule } from "@voke/aws";
+import { schedule } from "@vokejs/aws";
 import { createFunctions } from "voke";
 
 const functions = createFunctions({

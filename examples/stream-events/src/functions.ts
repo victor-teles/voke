@@ -1,5 +1,5 @@
-import { dynamodbStream, kinesis } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { dynamodbStream, kinesis } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 import { createFunctions } from "voke";
 
 const clickSchema = schema.object({

@@ -40,7 +40,7 @@ const run = async (
 };
 
 // Runs in a child started with the Local AWS Provider environment, as `voke dev` does, so
-// NODE_EXTRA_CA_CERTS is present at process start. S3 is the data-plane check because @voke/aws
+// NODE_EXTRA_CA_CERTS is present at process start. S3 is the data-plane check because @vokejs/aws
 // already depends on its client; the table and queue are checked through the stack outputs.
 const clientScript = (awsIndex: string) => `
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";

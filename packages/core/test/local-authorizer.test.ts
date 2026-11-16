@@ -5,8 +5,8 @@ import {
   jwtAuthorizer,
   lambdaAuthorizer,
   requestAuthorizer,
-} from "@voke/aws";
-import { createTestClient, createTestJwt } from "@voke/testing";
+} from "@vokejs/aws";
+import { createTestClient, createTestJwt } from "@vokejs/testing";
 
 import { voke } from "../src/app";
 import { createFunctions, http } from "../src/invoke";

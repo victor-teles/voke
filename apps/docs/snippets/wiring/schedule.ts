@@ -1,4 +1,4 @@
-import { schedule } from "@voke/aws";
+import { schedule } from "@vokejs/aws";
 
 export const nightlyCleanup = schedule({
   expression: "cron(0 3 * * ? *)",

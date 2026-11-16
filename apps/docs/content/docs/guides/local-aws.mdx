@@ -82,7 +82,7 @@ Stop also deletes `.voke/local/outputs.json`. `voke local reset` restarts the Lo
 
 ## Choose a Local AWS Provider
 
-Set the Local AWS Provider with `aws({ local })` in `voke.config.ts`. Both builders come from `@voke/aws/local`.
+Set the Local AWS Provider with `aws({ local })` in `voke.config.ts`. Both builders come from `@vokejs/aws/local`.
 
 <Tabs items={["AWS Emulator", "Floci"]}>
 <Tab value="AWS Emulator">
@@ -90,8 +90,8 @@ Set the Local AWS Provider with `aws({ local })` in `voke.config.ts`. Both build
 The default. You do not need to set it, but you can pass options:
 
 ```ts title="voke.config.ts" twoslash
-import { aws } from "@voke/aws";
-import { awsEmulator } from "@voke/aws/local";
+import { aws } from "@vokejs/aws";
+import { awsEmulator } from "@vokejs/aws/local";
 import { defineConfig } from "voke";
 
 export default defineConfig({
@@ -116,8 +116,8 @@ export default defineConfig({
 Floci keeps state between restarts and uses a smaller image. It runs with Docker Compose.
 
 ```ts title="voke.config.ts" twoslash
-import { aws } from "@voke/aws";
-import { floci } from "@voke/aws/local";
+import { aws } from "@vokejs/aws";
+import { floci } from "@vokejs/aws/local";
 import { defineConfig } from "voke";
 
 export default defineConfig({
@@ -147,7 +147,7 @@ Every `voke local` command also accepts `--config`, `--entrypoint`, `--name`, `-
 ## Create every AWS SDK client with `createAwsClientConfig()`
 
 ```ts twoslash
-import { createAwsClientConfig } from "@voke/aws";
+import { createAwsClientConfig } from "@vokejs/aws";
 import { SQSClient } from "@aws-sdk/client-sqs";
 
 const sqs = new SQSClient(createAwsClientConfig());

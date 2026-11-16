@@ -1,5 +1,5 @@
 {
-  "name": "@voke/stream-events",
+  "name": "@vokejs/stream-events",
   "version": "0.0.0",
   "private": true,
   "license": "MIT",
@@ -13,8 +13,8 @@
     "clean": "rm -rf dist coverage"
   },
   "dependencies": {
-    "@voke/aws": "workspace:*",
-    "@voke/schema": "workspace:*",
+    "@vokejs/aws": "workspace:*",
+    "@vokejs/schema": "workspace:*",
     "hono": "^4.0.0",
     "voke": "workspace:*"
   },

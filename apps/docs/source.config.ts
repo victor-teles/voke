@@ -23,11 +23,11 @@ export default defineConfig({
         // fails the build, so a sample cannot drift from the API it documents.
         transformerTwoslash({
           // Bun's types (which include Node's) let samples use process.env, Bun.env and bun:test.
-          // `@voke/source` resolves the workspace packages to their source, as the root tsconfig
+          // `@vokejs/source` resolves the workspace packages to their source, as the root tsconfig
           // does, so samples compile without building declaration files first.
           twoslashOptions: {
             compilerOptions: {
-              customConditions: ["@voke/source"],
+              customConditions: ["@vokejs/source"],
               types: ["bun"],
             },
           },

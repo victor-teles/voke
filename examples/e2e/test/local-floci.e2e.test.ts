@@ -4,9 +4,9 @@ import {
   dynamodbTable,
   sqsQueue,
   synthesizeCloudFormation,
-} from "@voke/aws/cloudformation";
-import { floci } from "@voke/aws/local";
-import { createStackTestContext } from "@voke/aws/testing";
+} from "@vokejs/aws/cloudformation";
+import { floci } from "@vokejs/aws/local";
+import { createStackTestContext } from "@vokejs/aws/testing";
 
 test("prepares a Local Floci E2E context and seed plan", () => {
   const template = synthesizeCloudFormation({

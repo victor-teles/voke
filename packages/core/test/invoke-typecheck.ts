@@ -1,5 +1,5 @@
-import { requestAuthorizer, sqs } from "@voke/aws";
-import type { SqsBatchResult } from "@voke/aws";
+import { requestAuthorizer, sqs } from "@vokejs/aws";
+import type { SqsBatchResult } from "@vokejs/aws";
 
 import { fn, createFunctions, http } from "../src/invoke";
 import type {
@@ -245,7 +245,7 @@ fn({
   handler: () => ({ ok: true }),
   output: schema<{ ok: boolean }>(),
   synthesis: {
-    // @ts-expect-error The Lambda runtime moved to synthesis.provider (awsLambda from @voke/aws).
+    // @ts-expect-error The Lambda runtime moved to synthesis.provider (awsLambda from @vokejs/aws).
     runtime: "nodejs24.x",
   },
 });

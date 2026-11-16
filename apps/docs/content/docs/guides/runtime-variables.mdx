@@ -12,18 +12,18 @@ Contract, so it does not appear in the contract metadata or in generated remote 
 ## Declare and read a Runtime Variable
 
 Declare Runtime Variables in the `variables` field of a Function, with `secret()` and `parameter()`
-from `@voke/aws`. Read them in the handler through `context.variables`:
+from `@vokejs/aws`. Read them in the handler through `context.variables`:
 
 ```ts twoslash
 // @filename: voke.config.ts
-import { aws } from "@voke/aws";
+import { aws } from "@vokejs/aws";
 import { defineConfig } from "voke";
 
 export default defineConfig({ name: "checkout", provider: aws() });
 
 // @filename: src/index.ts
-import { parameter, secret } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { parameter, secret } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 import { createFunctions, fn, voke } from "voke";
 
 import config from "../voke.config";
@@ -75,8 +75,8 @@ AWS. To read one that your project declares in `resources`, use `.fromResource(r
 
 ```ts twoslash
 // @filename: voke.config.ts
-import { aws } from "@voke/aws";
-import { secret, ssmParameter } from "@voke/aws/cloudformation";
+import { aws } from "@vokejs/aws";
+import { secret, ssmParameter } from "@vokejs/aws/cloudformation";
 import { defineConfig } from "voke";
 
 export default defineConfig({
@@ -89,8 +89,8 @@ export default defineConfig({
 });
 
 // @filename: src/index.ts
-import { parameter, secret } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { parameter, secret } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 import { fn } from "voke";
 
 // ---cut---
@@ -110,8 +110,8 @@ variable (`VOKE_RESOURCE_SIGNING_SECRET_ID`, `VOKE_RESOURCE_PUBLIC_CONFIG_NAME`)
 [Resources and bindings](/docs/guides/resources).
 
 <Callout type="info" title="Two functions are named secret">
-  `secret` from `@voke/aws` builds a Runtime Variable. `secret` from
-  `@voke/aws/cloudformation` declares a Secrets Manager resource. They are
+  `secret` from `@vokejs/aws` builds a Runtime Variable. `secret` from
+  `@vokejs/aws/cloudformation` declares a Secrets Manager resource. They are
   different functions with the same name.
 </Callout>
 
@@ -128,7 +128,7 @@ Pass options as the last argument: `secret(secretId, options)`,
 | `load`     | `"lazy"` | `"beforeHandler"` loads the value before the handler runs, so a missing value fails the call before your code starts.                           |
 
 ```ts twoslash
-import { parameter, secret } from "@voke/aws";
+import { parameter, secret } from "@vokejs/aws";
 
 // ---cut---
 const variables = {
@@ -162,14 +162,14 @@ Pass overrides to `voke()` in the entrypoint or in a test:
 
 ```ts twoslash
 // @filename: voke.config.ts
-import { aws } from "@voke/aws";
+import { aws } from "@vokejs/aws";
 import { defineConfig } from "voke";
 
 export default defineConfig({ name: "checkout", provider: aws() });
 
 // @filename: src/index.ts
-import { secret } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { secret } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 import { createFunctions, fn, voke } from "voke";
 
 import config from "../voke.config";

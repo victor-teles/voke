@@ -1,7 +1,7 @@
 import { expect, spyOn, test } from "bun:test";
 
-import { sqs } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { sqs } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 import {
   createFunctions,
   voke,

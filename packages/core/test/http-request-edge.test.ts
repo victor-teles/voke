@@ -1,6 +1,6 @@
 import { afterAll, afterEach, expect, spyOn, test } from "bun:test";
 
-import { schema } from "@voke/schema";
+import { schema } from "@vokejs/schema";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 
@@ -201,7 +201,7 @@ test("a query key named __proto__ is an ordinary own property", async () => {
   });
 });
 
-test("a @voke/schema query object rejects an undeclared parameter", async () => {
+test("a @vokejs/schema query object rejects an undeclared parameter", async () => {
   const response = await request("/q?page=2&debug=1");
 
   expect(response.status).toBe(400);
@@ -394,7 +394,7 @@ test("functions.route takes plain objects and keeps throwing InvokeError with fu
   );
 });
 
-test("a @voke/schema headers object with a name that is not lower-case fails composition", () => {
+test("a @vokejs/schema headers object with a name that is not lower-case fails composition", () => {
   const invalid = createFunctions({
     edge: http({
       routes: [

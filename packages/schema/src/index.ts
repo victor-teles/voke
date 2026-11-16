@@ -145,7 +145,7 @@ const jsonSchemaConverter = (
     (options: StandardJsonSchemaOptions): JsonSchemaObject => {
       if (!supportedJsonSchemaTargets.has(options.target)) {
         throw new Error(
-          `Unsupported JSON Schema target "${options.target}"; @voke/schema supports "draft-2020-12" and "draft-07"`
+          `Unsupported JSON Schema target "${options.target}"; @vokejs/schema supports "draft-2020-12" and "draft-07"`
         );
       }
 

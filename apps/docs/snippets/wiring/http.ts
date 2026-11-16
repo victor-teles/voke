@@ -1,4 +1,4 @@
-import { schema } from "@voke/schema";
+import { schema } from "@vokejs/schema";
 import { http, route } from "voke";
 
 export const users = http({

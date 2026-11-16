@@ -110,7 +110,7 @@ interface RemoteInvokeRequest {
   trace?: Record<string, boolean | number | string | undefined>;
 }
 
-// Same rule as core's remote config; private so @voke/remote stays provider-neutral.
+// Same rule as core's remote config; private so @vokejs/remote stays provider-neutral.
 const toEnvKey = (value: string): string =>
   value
     .replaceAll(/([a-z0-9])([A-Z])/gu, "$1_$2")

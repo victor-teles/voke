@@ -5,7 +5,7 @@ import {
   s3Bucket,
   snsTopic,
   synthesizeCloudFormation,
-} from "@voke/aws/cloudformation";
+} from "@vokejs/aws/cloudformation";
 
 import { functions } from "../src/functions";
 

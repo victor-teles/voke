@@ -1,5 +1,5 @@
-import { dynamodbStream } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { dynamodbStream } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 
 export const orderChanged = dynamodbStream({
   handler: (batch) => {

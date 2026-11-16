@@ -71,8 +71,8 @@ const dependencyBlocks = [
   "optionalDependencies",
 ] as const;
 
-test("the condition that resolves workspace source is @voke/source", () => {
-  expect(sourceCondition).toBe("@voke/source");
+test("the condition that resolves workspace source is @vokejs/source", () => {
+  expect(sourceCondition).toBe("@vokejs/source");
 });
 
 test("publishedPackages lists every package that is not private", async () => {
@@ -91,14 +91,14 @@ test("publishedPackages lists every package that is not private", async () => {
   ).toEqual(published.toSorted((a, b) => a.name.localeCompare(b.name)));
   expect(publishedPackages.map(({ name }) => name)).toEqual([
     "voke",
-    "@voke/build",
-    "@voke/http",
-    "@voke/schema",
-    "@voke/testing",
-    "@voke/remote",
-    "@voke/openapi",
-    "@voke/aws",
-    "@voke/idempotency",
+    "@vokejs/build",
+    "@vokejs/http",
+    "@vokejs/schema",
+    "@vokejs/testing",
+    "@vokejs/remote",
+    "@vokejs/openapi",
+    "@vokejs/aws",
+    "@vokejs/idempotency",
   ]);
 });
 
@@ -145,7 +145,7 @@ test("hono and voke are peers of the packages that import them", async () => {
 
   expect(core.peerDependencies?.hono).toBe("^4.0.0");
   expect(aws.peerDependencies?.hono).toBe("^4.0.0");
-  expect(idempotency.peerDependencies?.["@voke/aws"]).toBe("workspace:*");
+  expect(idempotency.peerDependencies?.["@vokejs/aws"]).toBe("workspace:*");
 });
 
 test("no workspace manifest depends on the range latest", async () => {
@@ -164,7 +164,7 @@ test("no workspace manifest depends on the range latest", async () => {
 const packedManifest = (
   overrides: Partial<PackageManifest> = {}
 ): PackageManifest => ({
-  dependencies: { "@voke/build": "1.2.3", zod: "^4.0.0" },
+  dependencies: { "@vokejs/build": "1.2.3", zod: "^4.0.0" },
   devDependencies: { voke: "1.2.3" },
   exports: {
     ".": {
@@ -173,7 +173,7 @@ const packedManifest = (
       types: "./dist/index.d.ts",
     },
   },
-  name: "@voke/example",
+  name: "@vokejs/example",
   peerDependencies: { voke: "1.2.3" },
   types: "./dist/index.d.ts",
   version: "1.2.3",
@@ -276,16 +276,16 @@ test("changelogHasVersion matches a version heading only", () => {
 
 test("withTarballOverrides points every name at its tarball and keeps dependencies", () => {
   const manifest: PackageManifest = {
-    dependencies: { "@voke/aws": "^1.2.3", hono: "^4.0.0", voke: "^1.2.3" },
+    dependencies: { "@vokejs/aws": "^1.2.3", hono: "^4.0.0", voke: "^1.2.3" },
     name: "smoke-api",
   };
   const result = withTarballOverrides(manifest, {
-    "@voke/aws": "/tmp/voke-aws-1.2.3.tgz",
+    "@vokejs/aws": "/tmp/voke-aws-1.2.3.tgz",
     voke: "/tmp/voke-1.2.3.tgz",
   });
 
   expect(result.overrides).toEqual({
-    "@voke/aws": "file:/tmp/voke-aws-1.2.3.tgz",
+    "@vokejs/aws": "file:/tmp/voke-aws-1.2.3.tgz",
     voke: "file:/tmp/voke-1.2.3.tgz",
   });
   expect(result.dependencies).toEqual(manifest.dependencies);

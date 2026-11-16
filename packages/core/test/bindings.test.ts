@@ -9,8 +9,8 @@ import {
   sqsQueue,
   ssmParameter,
   synthesizeCloudFormation,
-} from "@voke/aws/cloudformation";
-import { createLocalResourceBindings } from "@voke/aws/local";
+} from "@vokejs/aws/cloudformation";
+import { createLocalResourceBindings } from "@vokejs/aws/local";
 
 import { createResourceBindingName } from "../src/bindings";
 import { createFunctions, http } from "../src/invoke";

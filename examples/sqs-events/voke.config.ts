@@ -1,6 +1,6 @@
-import { aws } from "@voke/aws";
-import { sqsQueue } from "@voke/aws/cloudformation";
-import { idempotency } from "@voke/idempotency";
+import { aws } from "@vokejs/aws";
+import { sqsQueue } from "@vokejs/aws/cloudformation";
+import { idempotency } from "@vokejs/idempotency";
 import { defineConfig } from "voke";
 
 export default defineConfig({

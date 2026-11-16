@@ -1,7 +1,7 @@
 import { expect, spyOn, test } from "bun:test";
 
-import { response } from "@voke/http";
-import { schema } from "@voke/schema";
+import { response } from "@vokejs/http";
+import { schema } from "@vokejs/schema";
 import {
   createFunctions,
   defineConfig,

@@ -83,8 +83,8 @@ Pass `deadLetterQueue: false` to the owner. For SQS that is the queue:
 
 ```ts twoslash
 // voke.config.ts
-import { aws } from "@voke/aws";
-import { sqsQueue } from "@voke/aws/cloudformation";
+import { aws } from "@vokejs/aws";
+import { sqsQueue } from "@vokejs/aws/cloudformation";
 import { defineConfig } from "voke";
 
 export default defineConfig({
@@ -103,8 +103,8 @@ Voke leaves it untouched and adds no queue.
 For every other source, pass it to the Function:
 
 ```ts twoslash
-import { sns } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { sns } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 import { createFunctions } from "voke";
 
 export const functions = createFunctions({

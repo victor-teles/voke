@@ -12,9 +12,9 @@ Voke is split into a provider-neutral core, `voke`, and smaller packages for the
 
 ## Install and versions
 
-- Create a new project with `bunx voke create my-api`. It lists `voke`, `@voke/aws` and `@voke/testing`.
-- Add another package with `bun add @voke/<name>`, for example `bun add @voke/schema`.
-- Every `@voke/*` package needs the same version of `voke`, so update them together: `bun update voke @voke/aws @voke/testing`, plus any other `@voke/*` package the project lists.
+- Create a new project with `bunx voke create my-api`. It lists `voke`, `@vokejs/aws` and `@vokejs/testing`.
+- Add another package with `bun add @vokejs/<name>`, for example `bun add @vokejs/schema`.
+- Every `@vokejs/*` package needs the same version of `voke`, so update them together: `bun update voke @vokejs/aws @vokejs/testing`, plus any other `@vokejs/*` package the project lists.
 - The project's `tsconfig.json` must use `"moduleResolution": "bundler"`. Voke ships declaration files, so stricter compiler flags apply to your code only.
 - The CLI and the packages run on Bun. The Lambda bundle that `voke build` writes runs on Node.
 
@@ -22,28 +22,28 @@ Voke is split into a provider-neutral core, `voke`, and smaller packages for the
   <Card icon={<Package />} href="#voke" title="voke">
     Functions, the Gateway, the config, the error classes and the CLI.
   </Card>
-  <Card icon={<CloudUpload />} href="#vokeaws" title="@voke/aws">
+  <Card icon={<CloudUpload />} href="#vokeaws" title="@vokejs/aws">
     The AWS Provider and the AWS-specific authoring helpers.
   </Card>
-  <Card icon={<Repeat />} href="#vokeidempotency" title="@voke/idempotency">
+  <Card icon={<Repeat />} href="#vokeidempotency" title="@vokejs/idempotency">
     A Plugin that makes a retried handler run once.
   </Card>
-  <Card icon={<ShieldCheck />} href="#vokeschema" title="@voke/schema">
+  <Card icon={<ShieldCheck />} href="#vokeschema" title="@vokejs/schema">
     Builders for Function Contracts.
   </Card>
-  <Card icon={<Globe />} href="#vokehttp" title="@voke/http">
+  <Card icon={<Globe />} href="#vokehttp" title="@vokejs/http">
     Response helpers for route handlers.
   </Card>
-  <Card icon={<FlaskConical />} href="#voketesting" title="@voke/testing">
+  <Card icon={<FlaskConical />} href="#voketesting" title="@vokejs/testing">
     Provider-neutral test clients.
   </Card>
-  <Card icon={<Network />} href="#vokeremote" title="@voke/remote">
+  <Card icon={<Network />} href="#vokeremote" title="@vokejs/remote">
     Typed Remote Function Registries.
   </Card>
-  <Card icon={<ScrollText />} href="#vokeopenapi" title="@voke/openapi">
+  <Card icon={<ScrollText />} href="#vokeopenapi" title="@vokejs/openapi">
     The OpenAPI Document and the API Reference Page.
   </Card>
-  <Card icon={<Boxes />} href="#vokebuild" title="@voke/build">
+  <Card icon={<Boxes />} href="#vokebuild" title="@vokejs/build">
     Lambda bundle planning for Provider packages.
   </Card>
 </Cards>
@@ -54,8 +54,8 @@ A typical project imports from these packages:
 
 ```ts twoslash
 // voke.config.ts
-import { aws } from "@voke/aws";
-import { sqsQueue } from "@voke/aws/cloudformation";
+import { aws } from "@vokejs/aws";
+import { sqsQueue } from "@vokejs/aws/cloudformation";
 import { defineConfig } from "voke";
 
 export default defineConfig({
@@ -67,8 +67,8 @@ export default defineConfig({
 
 ```ts twoslash
 // src/index.ts
-import { created } from "@voke/http";
-import { schema } from "@voke/schema";
+import { created } from "@vokejs/http";
+import { schema } from "@vokejs/schema";
 import { createFunctions, http, route, voke } from "voke";
 
 const functions = createFunctions({
@@ -98,16 +98,16 @@ The core package: Functions, the Gateway, the config, and the error classes. It 
 | `VokeError`, `VokeConfigError`, `VokeModelError`, `VokeDeployError`, `VokeResourceBindingError`, `VokeRuntimeVariableError`, `InvokeError` | Error classes. See [Errors](/docs/reference/errors).                                                                              |
 | `createVariableSource`, `createVariableProvider`                                                                                           | Build provider-neutral Runtime Variable sources and providers.                                                                    |
 | `StandardSchemaV1`, `VokeConfig`, `VokeConfigInput`, `VokeProvider` (types)                                                                | Types for schemas, config and Providers.                                                                                          |
-| `FunctionContractArtifact`, `FunctionContractMetadata`, `ContractJsonSchema` (types)                                                       | The **Function Contract Artifact** that `GET /_voke/contract` serves and `@voke/remote` reads.                                    |
+| `FunctionContractArtifact`, `FunctionContractMetadata`, `ContractJsonSchema` (types)                                                       | The **Function Contract Artifact** that `GET /_voke/contract` serves and `@vokejs/remote` reads.                                  |
 | `VokePlugin`, `FunctionWrap`, `FunctionExecution`, `PluginContributions`, `PluginCommand` and the other `Plugin*` types                    | Write a [Plugin](/docs/guides/plugins).                                                                                           |
 
 `voke` also exports building blocks for Provider packages, such as `functionRegistryEntries`, `projectFunctionEntries`, `createHandlerExportName`, `runRequestAuthorizer`, `readStandardResult` and `formatValidationIssue`. Application code does not need them.
 
-`readJsonSchema` reads a schema's JSON Schema through Standard JSON Schema. `@voke/openapi` uses it.
+`readJsonSchema` reads a schema's JSON Schema through Standard JSON Schema. `@vokejs/openapi` uses it.
 
 Learn it in [Functions](/docs/guides/functions), [HTTP routes](/docs/guides/http-routes) and [Concepts](/docs/concepts).
 
-## @voke/aws
+## @vokejs/aws
 
 The AWS Provider and the AWS-specific authoring helpers.
 
@@ -128,7 +128,7 @@ The AWS Provider and the AWS-specific authoring helpers.
 
 Learn it in [Deploy](/docs/guides/deploy), [SQS events](/docs/guides/sqs-events), [SNS events](/docs/guides/sns-events), [EventBridge events](/docs/guides/eventbridge-events), [S3 events](/docs/guides/s3-events), [Scheduled Functions](/docs/guides/scheduled-functions), [Durable Functions](/docs/guides/durable-functions), [Runtime Variables](/docs/guides/runtime-variables) and [Authorizers](/docs/guides/authorizers). See [Config](/docs/reference/config#aws-provider-options) for the `aws()` options.
 
-### @voke/aws/cloudformation
+### @vokejs/aws/cloudformation
 
 CloudFormation resource builders for `resources` in `voke.config.ts`, and the template synthesizer.
 
@@ -140,7 +140,7 @@ CloudFormation resource builders for `resources` in `voke.config.ts`, and the te
 
 Learn it in [Resources](/docs/guides/resources).
 
-### @voke/aws/local
+### @vokejs/aws/local
 
 The **Local AWS Providers** for `aws({ local })`, and the helpers behind `voke local`.
 
@@ -152,7 +152,7 @@ The **Local AWS Providers** for `aws({ local })`, and the helpers behind `voke l
 
 Learn it in [Local AWS](/docs/guides/local-aws).
 
-### @voke/aws/testing
+### @vokejs/aws/testing
 
 Test helpers for projects that use the AWS Provider.
 
@@ -163,9 +163,9 @@ Test helpers for projects that use the AWS Provider.
 
 Learn it in [Testing](/docs/guides/testing).
 
-## @voke/idempotency
+## @vokejs/idempotency
 
-A [Plugin](/docs/guides/plugins) that makes a retried handler run once. It provisions a DynamoDB table and depends on `@voke/aws`.
+A [Plugin](/docs/guides/plugins) that makes a retried handler run once. It provisions a DynamoDB table and depends on `@vokejs/aws`.
 
 | Export                                                                | Use                                                                                                                                                                |
 | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -178,7 +178,7 @@ A [Plugin](/docs/guides/plugins) that makes a retried handler run once. It provi
 
 Learn it in [Idempotency](/docs/guides/idempotency).
 
-## @voke/schema
+## @vokejs/schema
 
 Builders for **Function Contracts** that follow the Standard Schema interface.
 
@@ -188,7 +188,7 @@ Builders for **Function Contracts** that follow the Standard Schema interface.
 
 Zod and other Standard Schema validators work in the same places. Learn it in [Schemas](/docs/guides/schemas).
 
-## @voke/http
+## @vokejs/http
 
 Response helpers for route handlers. Each returns a `Response` with a JSON body.
 
@@ -200,7 +200,7 @@ Response helpers for route handlers. Each returns a `Response` with a JSON body.
 
 Learn it in [HTTP routes](/docs/guides/http-routes).
 
-## @voke/testing
+## @vokejs/testing
 
 Provider-neutral test clients.
 
@@ -212,7 +212,7 @@ Provider-neutral test clients.
 
 Learn it in [Testing](/docs/guides/testing).
 
-## @voke/remote
+## @vokejs/remote
 
 Typed **Remote Function Registries**, to call the Functions of another Voke Project.
 
@@ -225,7 +225,7 @@ Typed **Remote Function Registries**, to call the Functions of another Voke Proj
 
 Learn it in [Remote Functions](/docs/guides/remote-functions).
 
-## @voke/openapi
+## @vokejs/openapi
 
 The **OpenAPI Document** of a Gateway's HTTP API, generated from route contracts, and the **API Reference Page** that renders it with Scalar.
 
@@ -236,9 +236,9 @@ The **OpenAPI Document** of a Gateway's HTTP API, generated from route contracts
 
 Learn it in [OpenAPI and API reference](/docs/guides/openapi).
 
-## @voke/build
+## @vokejs/build
 
-Lambda bundle planning for Provider packages. `@voke/aws` uses it; application code does not import it.
+Lambda bundle planning for Provider packages. `@vokejs/aws` uses it; application code does not import it.
 
 | Export            | Use                                                                                                                           |
 | ----------------- | ----------------------------------------------------------------------------------------------------------------------------- |

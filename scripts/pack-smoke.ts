@@ -30,8 +30,9 @@ const deployTimeMarkers = [
   "@aws-sdk/client-cloudformation",
 ];
 
-const sourcePathPattern = /node_modules\/(?:voke|@voke\/[a-z]+)\/src\//u;
-const declarationPathPattern = /node_modules\/(?:voke|@voke\/[a-z]+)\/dist\//u;
+const sourcePathPattern = /node_modules\/(?:voke|@vokejs\/[a-z]+)\/src\//u;
+const declarationPathPattern =
+  /node_modules\/(?:voke|@vokejs\/[a-z]+)\/dist\//u;
 
 const strictFlags = [
   "exactOptionalPropertyTypes",
@@ -45,31 +46,31 @@ const strictFlags = [
 ] as const;
 
 /** One import from every entry point, each used once, so all of them load and type-check. */
-const allPackagesModule = `import { created } from "@voke/http";
-import { idempotent } from "@voke/idempotency";
-import { openapi } from "@voke/openapi";
-import { createRemoteFunctions } from "@voke/remote";
-import { schema } from "@voke/schema";
-import { createTestClient } from "@voke/testing";
-import { aws } from "@voke/aws";
-import { sqsQueue } from "@voke/aws/cloudformation";
-import { createLocalWorkflow } from "@voke/aws/local";
-import { runDurable } from "@voke/aws/testing";
-import { createBuildPlan } from "@voke/build";
+const allPackagesModule = `import { created } from "@vokejs/http";
+import { idempotent } from "@vokejs/idempotency";
+import { openapi } from "@vokejs/openapi";
+import { createRemoteFunctions } from "@vokejs/remote";
+import { schema } from "@vokejs/schema";
+import { createTestClient } from "@vokejs/testing";
+import { aws } from "@vokejs/aws";
+import { sqsQueue } from "@vokejs/aws/cloudformation";
+import { createLocalWorkflow } from "@vokejs/aws/local";
+import { runDurable } from "@vokejs/aws/testing";
+import { createBuildPlan } from "@vokejs/build";
 import { defineConfig } from "voke";
 
 const entryPoints = {
-  "@voke/aws": aws,
-  "@voke/aws/cloudformation": sqsQueue,
-  "@voke/aws/local": createLocalWorkflow,
-  "@voke/aws/testing": runDurable,
-  "@voke/build": createBuildPlan,
-  "@voke/http": created,
-  "@voke/idempotency": idempotent,
-  "@voke/openapi": openapi,
-  "@voke/remote": createRemoteFunctions,
-  "@voke/schema": schema,
-  "@voke/testing": createTestClient,
+  "@vokejs/aws": aws,
+  "@vokejs/aws/cloudformation": sqsQueue,
+  "@vokejs/aws/local": createLocalWorkflow,
+  "@vokejs/aws/testing": runDurable,
+  "@vokejs/build": createBuildPlan,
+  "@vokejs/http": created,
+  "@vokejs/idempotency": idempotent,
+  "@vokejs/openapi": openapi,
+  "@vokejs/remote": createRemoteFunctions,
+  "@vokejs/schema": schema,
+  "@vokejs/testing": createTestClient,
   voke: defineConfig,
 };
 

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { synthesizeCloudFormation } from "@voke/aws/cloudformation";
+import { synthesizeCloudFormation } from "@vokejs/aws/cloudformation";
 
 import { functions } from "../src/functions";
 import config from "../voke.config";

@@ -134,9 +134,9 @@ test("generated API starter responds through the public test client", async () =
 
   await createApiProject({ directory, name: "smoke-api" });
   await Bun.$`mkdir -p ${directory}/node_modules`;
-  await Bun.$`mkdir -p ${directory}/node_modules/@voke`;
+  await Bun.$`mkdir -p ${directory}/node_modules/@vokejs`;
   await Bun.$`ln -s ${import.meta.dir}/.. ${directory}/node_modules/voke`;
-  await Bun.$`ln -s ${import.meta.dir}/../../aws ${directory}/node_modules/@voke/aws`;
+  await Bun.$`ln -s ${import.meta.dir}/../../aws ${directory}/node_modules/@vokejs/aws`;
   await Bun.$`ln -s ${import.meta.dir}/../node_modules/hono ${directory}/node_modules/hono`;
 
   const { default: service } = (await import(
@@ -144,7 +144,7 @@ test("generated API starter responds through the public test client", async () =
   )) as {
     default: { fetch: typeof fetch };
   };
-  const { createTestClient } = await import("@voke/testing");
+  const { createTestClient } = await import("@vokejs/testing");
   const client = createTestClient(service);
   const response = await client.get("/health");
 
@@ -344,7 +344,7 @@ export const functions = createFunctions({
   await expect(runCli(["synth"], { cwd: directory })).rejects.toThrow(
     `No provider configured. Add a provider to voke.config.ts, for example:
 
-  import { aws } from "@voke/aws";
+  import { aws } from "@vokejs/aws";
   export default defineConfig({ name: "orders", provider: aws() });`
   );
 });
@@ -427,7 +427,7 @@ test("create writes the starter, installs through the runner, and prints next st
   const vokeVersions = Object.entries(
     manifest.dependencies as Record<string, string>
   )
-    .filter(([name]) => name === "voke" || name.startsWith("@voke/"))
+    .filter(([name]) => name === "voke" || name.startsWith("@vokejs/"))
     .map(([, version]) => version);
 
   expect(manifest.name).toBe("orders-api");

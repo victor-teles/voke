@@ -1,7 +1,7 @@
 import { expect, spyOn, test } from "bun:test";
 import { rm } from "node:fs/promises";
 
-import { createAwsClientConfig, createLambdaHandlers } from "@voke/aws";
+import { createAwsClientConfig, createLambdaHandlers } from "@vokejs/aws";
 import {
   dynamodbTable,
   s3Bucket,
@@ -10,7 +10,7 @@ import {
   sqsQueue,
   synthesizeCloudFormation,
   ssmParameter,
-} from "@voke/aws/cloudformation";
+} from "@vokejs/aws/cloudformation";
 import type {
   APIGatewayProxyResult,
   LambdaContext,
@@ -302,8 +302,8 @@ test("creates a starter API project", async () => {
 
   expect(packageJson.name).toBe("created-api");
   expect(packageJson.dependencies).toEqual({
-    "@voke/aws": `^${corePackageJson.version}`,
-    "@voke/testing": `^${corePackageJson.version}`,
+    "@vokejs/aws": `^${corePackageJson.version}`,
+    "@vokejs/testing": `^${corePackageJson.version}`,
     hono: "^4.0.0",
     voke: `^${corePackageJson.version}`,
   });
@@ -319,7 +319,7 @@ test("creates a starter API project", async () => {
   );
   expect(config).toContain('name: "created-api"');
   expect(config).toContain('entrypoint: "./src/index.ts"');
-  expect(config).toContain('import { aws } from "@voke/aws";');
+  expect(config).toContain('import { aws } from "@vokejs/aws";');
   expect(config).toContain("provider: aws()");
   expect(healthRoute).toContain(
     'route.get("/health", {\n  handler: () => ({ ok: true }),\n});'
@@ -347,8 +347,8 @@ test("generated starter test suite passes with local package links", async () =>
     name: "created-api-smoke",
   });
   const links: Record<string, string> = {
-    "@voke/aws": `${import.meta.dir}/../../aws`,
-    "@voke/testing": `${import.meta.dir}/../../testing`,
+    "@vokejs/aws": `${import.meta.dir}/../../aws`,
+    "@vokejs/testing": `${import.meta.dir}/../../testing`,
     hono: `${import.meta.dir}/../node_modules/hono`,
     voke: `${import.meta.dir}/..`,
   };
@@ -361,7 +361,7 @@ test("generated starter test suite passes with local package links", async () =>
     Object.keys(links).toSorted()
   );
 
-  await Bun.$`mkdir -p ${directory}/node_modules/@voke`;
+  await Bun.$`mkdir -p ${directory}/node_modules/@vokejs`;
 
   for (const [name, target] of Object.entries(links)) {
     await Bun.$`ln -s ${target} ${`${directory}/node_modules/${name}`}`;
@@ -439,7 +439,7 @@ test("normalizes project and CloudFormation settings through defineConfig", () =
   });
 });
 
-test("exposes AWS resource helpers from @voke/aws", () => {
+test("exposes AWS resource helpers from @vokejs/aws", () => {
   const template = synthesizeCloudFormation(
     defineConfig({
       name: "aws-subpath-api",
@@ -594,7 +594,7 @@ export default defineConfig({ name: "cli-api", provider: aws() });
   );
 
   // The generated entry is written under the working directory, as in a real project, and
-  // imports @voke/aws. That import resolves from a workspace package, not from the repository
+  // imports @vokejs/aws. That import resolves from a workspace package, not from the repository
   // root, so the build runs from packages/core whatever directory the test run started in.
   const previousDirectory = process.cwd();
   process.chdir(`${import.meta.dir}/..`);

@@ -26,7 +26,7 @@ export interface CreateProjectOptions extends CreateApiProjectOptions {
 }
 
 // Every Voke package moves in lockstep, so the starter pins all of them to the CLI's own version.
-const vokeDependencies = ["@voke/aws", "@voke/testing", "voke"] as const;
+const vokeDependencies = ["@vokejs/aws", "@vokejs/testing", "voke"] as const;
 // Both match the root package.json catalog (scripts/release.test.ts checks it). The TypeScript
 // preview is pinned exactly because a caret on a nightly floats to newer nightlies.
 const bunTypesVersion = "^1.4.4";
@@ -50,7 +50,7 @@ export const unscopedName = (name: string): string =>
   name.startsWith("@") ? (name.split("/")[1] ?? name) : name;
 
 const testTemplate = `import { expect, test } from "bun:test";
-import { createTestClient } from "@voke/testing";
+import { createTestClient } from "@vokejs/testing";
 
 import service from "../src/index";
 
@@ -72,7 +72,7 @@ export const healthRoute = route.get("/health", {
 
 const vokeConfigTemplate = (
   name: string
-): string => `import { aws } from "@voke/aws";
+): string => `import { aws } from "@vokejs/aws";
 import { defineConfig } from "voke";
 
 export default defineConfig({

@@ -1,5 +1,5 @@
 // Run-time module: deployed Functions import it through voke.config.ts.
-import { dynamodbTable } from "@voke/aws/cloudformation";
+import { dynamodbTable } from "@vokejs/aws/cloudformation";
 import { VokeConfigError } from "voke";
 import type { VokePlugin } from "voke";
 

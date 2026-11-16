@@ -1,6 +1,6 @@
-import { sqs } from "@voke/aws";
-import { idempotentBatch } from "@voke/idempotency";
-import { schema } from "@voke/schema";
+import { sqs } from "@vokejs/aws";
+import { idempotentBatch } from "@vokejs/idempotency";
+import { schema } from "@vokejs/schema";
 import { createFunctions } from "voke";
 
 const orderMessageSchema = schema.object({

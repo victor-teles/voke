@@ -99,7 +99,7 @@ functions:
 the migrator writes this `voke.config.ts`:
 
 ```ts title="voke.config.ts" twoslash
-import { aws } from "@voke/aws";
+import { aws } from "@vokejs/aws";
 import { defineConfig } from "voke";
 
 export default defineConfig({
@@ -142,7 +142,7 @@ All migrated routes share one `http(...)` Function, so per-function settings hav
 A function with its own supported `runtime` gets an `awsLambda()` record in `synthesis.provider`. This is the generated EventBridge worker skeleton:
 
 ```txt title="src/functions/nightly.ts"
-import { awsLambda } from "@voke/aws";
+import { awsLambda } from "@vokejs/aws";
 import { fn } from "voke";
 import type { StandardSchemaV1 } from "voke";
 
@@ -175,11 +175,11 @@ export const nightly = fn({
 });
 ```
 
-The skeleton accepts any value. Replace `outputSchema` with a real schema from `@voke/schema` and move your handler logic into `handler`. See [Schemas](/docs/guides/schemas).
+The skeleton accepts any value. Replace `outputSchema` with a real schema from `@vokejs/schema` and move your handler logic into `handler`. See [Schemas](/docs/guides/schemas).
 
 ### SQS events
 
-An `sqs` event becomes an SQS Event Source Function, `sqs({ message, queue, handler })` from `@voke/aws`, when its queue resolves to an `AWS::SQS::Queue` resource that the migrator generated with `sqsQueue()` (for example `arn: { Fn::GetAtt: [OrdersQueue, Arn] }`). Batch settings such as `batchSize` carry over. Other `sqs` events get a plain Function skeleton and a manual task in the report. See [SQS events](/docs/guides/sqs-events).
+An `sqs` event becomes an SQS Event Source Function, `sqs({ message, queue, handler })` from `@vokejs/aws`, when its queue resolves to an `AWS::SQS::Queue` resource that the migrator generated with `sqsQueue()` (for example `arn: { Fn::GetAtt: [OrdersQueue, Arn] }`). Batch settings such as `batchSize` carry over. Other `sqs` events get a plain Function skeleton and a manual task in the report. See [SQS events](/docs/guides/sqs-events).
 
 ### Resources
 
@@ -195,7 +195,7 @@ Native CloudFormation resources become top-level `resources` in `voke.config.ts`
 | `AWS::Events::EventBus`       | `eventBus()`             |
 | `AWS::SecretsManager::Secret` | `secret()`               |
 
-The helpers come from `@voke/aws/cloudformation`. A queue, topic, bucket, event bus, or secret with any `Properties`, and every other resource type, is left out and reported as manual work with its type. A DynamoDB table is generated only when nothing is lost: its `Properties` hold only `KeySchema`, `BillingMode` and `AttributeDefinitions`, and every attribute has type `S`. A `TableName`, an index, a stream or a number key sends the table to manual work. An SSM parameter whose `Value` is not a literal is manual work too. See [Resources](/docs/guides/resources).
+The helpers come from `@vokejs/aws/cloudformation`. A queue, topic, bucket, event bus, or secret with any `Properties`, and every other resource type, is left out and reported as manual work with its type. A DynamoDB table is generated only when nothing is lost: its `Properties` hold only `KeySchema`, `BillingMode` and `AttributeDefinitions`, and every attribute has type `S`. A `TableName`, an index, a stream or a number key sends the table to manual work. An SSM parameter whose `Value` is not a literal is manual work too. See [Resources](/docs/guides/resources).
 
 ### Authorizers
 
@@ -287,7 +287,7 @@ Known plugins get a status and a note. For example, `serverless-offline` is repo
 | `plugins`                                | Reported                                                                         | Per-plugin notes                            |
 
 For an `sns` or `schedule` event, the report's manual task tells you to rewrite the function with
-[`sns()`](/docs/guides/sns-events) or [`schedule()`](/docs/guides/scheduled-functions) from `@voke/aws`.
+[`sns()`](/docs/guides/sns-events) or [`schedule()`](/docs/guides/scheduled-functions) from `@vokejs/aws`.
 
 ## Migrate incrementally
 

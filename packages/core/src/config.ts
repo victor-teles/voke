@@ -249,7 +249,7 @@ const removedSettings = (
   if ("local" in raw) {
     issues.push({
       message:
-        'local AWS settings moved to the provider: aws({ local: floci() }) from "@voke/aws" and "@voke/aws/local"',
+        'local AWS settings moved to the provider: aws({ local: floci() }) from "@vokejs/aws" and "@vokejs/aws/local"',
       path: "local",
     });
   }

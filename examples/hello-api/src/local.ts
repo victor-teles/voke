@@ -1,4 +1,4 @@
-import { awsEmulator, readLocalStackOutputs } from "@voke/aws/local";
+import { awsEmulator, readLocalStackOutputs } from "@vokejs/aws/local";
 
 import config from "../voke.config";
 

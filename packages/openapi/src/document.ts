@@ -113,7 +113,7 @@ const wordPattern = /[A-Za-z0-9]+/gu;
 
 const errorSchemaRef = { $ref: "#/components/schemas/Error" } as const;
 
-// Mirrors `ErrorBody` from @voke/http: every `{ error }` response the Gateway sends.
+// Mirrors `ErrorBody` from @vokejs/http: every `{ error }` response the Gateway sends.
 const errorSchema: JsonSchemaObject = {
   properties: {
     error: {

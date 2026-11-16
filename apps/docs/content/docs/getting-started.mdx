@@ -6,7 +6,7 @@ description: Create a Voke API, run it locally, test it, deploy it to AWS and re
 After this page you have a Voke API that runs on your machine, passes its tests, and deploys to AWS Lambda with one command. You need [Bun](https://bun.sh) installed.
 
 <Callout type="info" title="Voke is not published yet">
-  The published names (`voke`, `@voke/*`) are not final. The steps below work
+  The published names (`voke`, `@vokejs/*`) are not final. The steps below work
   once Voke is published. Until then, [try it from the
   repository](#try-it-from-the-repository).
 </Callout>
@@ -57,7 +57,7 @@ bun run dev
 bun test
 ```
 
-The starter test sends `GET /health` to the Gateway through `createTestClient()` from `@voke/testing`. No server or AWS account is needed.
+The starter test sends `GET /health` to the Gateway through `createTestClient()` from `@vokejs/testing`. No server or AWS account is needed.
 
 </Step>
 <Step>
@@ -114,7 +114,7 @@ bun run remove
 | `voke.config.ts`       | The project name, the entrypoint and the Provider (`provider: aws()`). The Provider is set only here, and `deploy`, `synth` and `local` need it. |
 | `src/index.ts`         | The entrypoint. It declares the Functions and exports the Gateway.                                                                               |
 | `src/routes/health.ts` | The `GET /health` route, made with the Route Builder.                                                                                            |
-| `test/api.test.ts`     | A `bun test` test that calls `GET /health` through `@voke/testing`.                                                                              |
+| `test/api.test.ts`     | A `bun test` test that calls `GET /health` through `@vokejs/testing`.                                                                            |
 | `package.json`         | The dependencies and the scripts `build`, `clean`, `deploy`, `dev`, `local`, `remove`, `synth`, `test` and `typecheck`.                          |
 | `tsconfig.json`        | Strict TypeScript settings for Bun. `bun run typecheck` uses it. Stricter flags work too: Voke ships declaration files.                          |
 | `README.md`            | The four commands you use most.                                                                                                                  |

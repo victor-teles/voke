@@ -1,5 +1,5 @@
-import { aws } from "@voke/aws";
-import { eventBus, s3Bucket, snsTopic } from "@voke/aws/cloudformation";
+import { aws } from "@vokejs/aws";
+import { eventBus, s3Bucket, snsTopic } from "@vokejs/aws/cloudformation";
 import { defineConfig } from "voke";
 
 export default defineConfig({

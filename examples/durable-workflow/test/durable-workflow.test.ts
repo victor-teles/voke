@@ -1,13 +1,13 @@
 import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test";
 
-import { aws } from "@voke/aws";
-import type { CloudFormationTemplate } from "@voke/aws/cloudformation";
+import { aws } from "@vokejs/aws";
+import type { CloudFormationTemplate } from "@vokejs/aws/cloudformation";
 import {
   runDurable,
   setupDurableTests,
   teardownDurableTests,
-} from "@voke/aws/testing";
-import { createTestClient } from "@voke/testing";
+} from "@vokejs/aws/testing";
+import { createTestClient } from "@vokejs/testing";
 import { createVokeModel } from "voke";
 
 import { functions, warehouseLog } from "../src/functions";

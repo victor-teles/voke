@@ -131,7 +131,7 @@ export {
   type VokeProvider,
   type VokeProviderCapability,
 } from "./provider";
-// The Function Contract Artifact format: core serves it, @voke/remote reads it.
+// The Function Contract Artifact format: core serves it, @vokejs/remote reads it.
 export type {
   FunctionContractArtifact,
   FunctionContractMetadata,

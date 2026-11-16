@@ -1,5 +1,5 @@
 {
-  "name": "@voke/cross-function",
+  "name": "@vokejs/cross-function",
   "version": "0.0.0",
   "private": true,
   "license": "MIT",
@@ -14,9 +14,9 @@
     "clean": "rm -rf dist coverage"
   },
   "dependencies": {
-    "@voke/aws": "workspace:*",
-    "@voke/schema": "workspace:*",
-    "@voke/testing": "workspace:*",
+    "@vokejs/aws": "workspace:*",
+    "@vokejs/schema": "workspace:*",
+    "@vokejs/testing": "workspace:*",
     "hono": "^4.0.0",
     "voke": "workspace:*"
   },

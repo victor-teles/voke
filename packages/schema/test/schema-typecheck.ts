@@ -29,7 +29,7 @@ const orderInput: StandardSchemaInput<typeof order> = {
   status: "pending",
   tags: ["gift"],
 };
-// @ts-expect-error The input of a @voke/schema object is typed, not unknown.
+// @ts-expect-error The input of a @vokejs/schema object is typed, not unknown.
 const numberAsInput: StandardSchemaInput<typeof order> = 42;
 // @ts-expect-error A field of the input is typed.
 const wrongField: StandardSchemaInput<typeof orderId> = { id: 1 };
@@ -65,7 +65,7 @@ const functions = createFunctions({
 });
 
 void functions.invoke("createOrder", orderInput);
-// @ts-expect-error The payload is checked against the @voke/schema input schema.
+// @ts-expect-error The payload is checked against the @vokejs/schema input schema.
 void functions.invoke("createOrder", 42);
 
 const routed: Promise<{ readonly id: string }> = functions.route(
@@ -73,7 +73,7 @@ const routed: Promise<{ readonly id: string }> = functions.route(
   "/orders",
   { body: { id: "ord_1" } }
 );
-// @ts-expect-error The route body is checked against the @voke/schema body schema.
+// @ts-expect-error The route body is checked against the @vokejs/schema body schema.
 void functions.route("POST", "/orders", { body: { id: 1 } });
 
 fn({

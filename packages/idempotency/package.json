@@ -1,5 +1,5 @@
 {
-  "name": "@voke/idempotency",
+  "name": "@vokejs/idempotency",
   "version": "0.1.0",
   "description": "A Voke Plugin that makes a retried handler run once, backed by a DynamoDB table it provisions.",
   "keywords": [
@@ -25,7 +25,7 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "@voke/source": "./src/index.ts",
+      "@vokejs/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./src/index.ts"
     }
@@ -47,13 +47,13 @@
   "devDependencies": {
     "@types/bun": "catalog:",
     "@typescript/native-preview": "catalog:",
-    "@voke/aws": "workspace:*",
-    "@voke/http": "workspace:*",
-    "@voke/schema": "workspace:*",
+    "@vokejs/aws": "workspace:*",
+    "@vokejs/http": "workspace:*",
+    "@vokejs/schema": "workspace:*",
     "voke": "workspace:*"
   },
   "peerDependencies": {
-    "@voke/aws": "workspace:*",
+    "@vokejs/aws": "workspace:*",
     "voke": "workspace:*"
   },
   "engines": {

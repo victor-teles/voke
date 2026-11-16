@@ -79,11 +79,11 @@ const readPackageFile = async (path: string): Promise<string> =>
 const importPackage = async (
   specifier: string
 ): Promise<Record<string, unknown>> => {
-  if (specifier === "@voke/remote") {
+  if (specifier === "@vokejs/remote") {
     return await import("../../remote/src/index.ts");
   }
 
-  if (specifier === "@voke/testing") {
+  if (specifier === "@vokejs/testing") {
     return await import("../../testing/src/index.ts");
   }
 
@@ -108,7 +108,7 @@ test("keeps the stable root runtime surface intentional", () => {
     "createVokeModel",
     "defineConfig",
     "fn",
-    // Read Standard Schema results in Provider packages such as @voke/aws (SQS bodies).
+    // Read Standard Schema results in Provider packages such as @vokejs/aws (SQS bodies).
     "formatValidationIssue",
     "functionRegistryEntries",
     "http",
@@ -123,12 +123,12 @@ test("keeps the stable root runtime surface intentional", () => {
     "runRequestAuthorizer",
     "voke",
   ]);
-  // toEnvKey is an AWS binding-name helper: it lives in @voke/aws only.
+  // toEnvKey is an AWS binding-name helper: it lives in @vokejs/aws only.
   expect("toEnvKey" in voke).toBe(false);
 });
 
-test("keeps AWS authoring in @voke/aws", async () => {
-  const aws = await importPackage("@voke/aws");
+test("keeps AWS authoring in @vokejs/aws", async () => {
+  const aws = await importPackage("@vokejs/aws");
 
   expect(Object.keys(aws).toSorted()).toEqual([
     "aws",
@@ -160,8 +160,8 @@ test("keeps AWS authoring in @voke/aws", async () => {
   expect("durable" in voke).toBe(false);
 });
 
-test("keeps CloudFormation synthesis and resource builders in @voke/aws/cloudformation", async () => {
-  const cloudformation = await importPackage("@voke/aws/cloudformation");
+test("keeps CloudFormation synthesis and resource builders in @vokejs/aws/cloudformation", async () => {
+  const cloudformation = await importPackage("@vokejs/aws/cloudformation");
 
   expect(Object.keys(cloudformation).toSorted()).toEqual([
     "dynamodbTable",
@@ -176,8 +176,8 @@ test("keeps CloudFormation synthesis and resource builders in @voke/aws/cloudfor
   ]);
 });
 
-test("keeps build helpers in @voke/build", async () => {
-  const build = await importPackage("@voke/build");
+test("keeps build helpers in @vokejs/build", async () => {
+  const build = await importPackage("@vokejs/build");
 
   expect(Object.keys(build).toSorted()).toEqual([
     "createBuildPlan",
@@ -190,8 +190,8 @@ test("publishes only stable package subpaths", () => {
   expect(Object.keys(packageJson.exports).toSorted()).toEqual(["."]);
 });
 
-test("keeps provider-neutral testing helpers in @voke/testing", async () => {
-  const testing = await importPackage("@voke/testing");
+test("keeps provider-neutral testing helpers in @vokejs/testing", async () => {
+  const testing = await importPackage("@vokejs/testing");
 
   expect(Object.keys(testing).toSorted()).toEqual([
     "createInvokeTestClient",
@@ -201,8 +201,8 @@ test("keeps provider-neutral testing helpers in @voke/testing", async () => {
   expect("createTestClient" in voke).toBe(false);
 });
 
-test("keeps AWS testing helpers in @voke/aws/testing", async () => {
-  const awsTesting = await importPackage("@voke/aws/testing");
+test("keeps AWS testing helpers in @vokejs/aws/testing", async () => {
+  const awsTesting = await importPackage("@vokejs/aws/testing");
 
   expect(Object.keys(awsTesting).toSorted()).toEqual([
     "createStackTestContext",
@@ -214,16 +214,16 @@ test("keeps AWS testing helpers in @voke/aws/testing", async () => {
   expect("runDurable" in voke).toBe(false);
 });
 
-test("keeps Remote Function helpers in @voke/remote", async () => {
-  const remote = await importPackage("@voke/remote");
+test("keeps Remote Function helpers in @vokejs/remote", async () => {
+  const remote = await importPackage("@vokejs/remote");
 
   expect(Object.keys(remote).toSorted()).toEqual(["createRemoteFunctions"]);
   expect("createRemoteFunctions" in voke).toBe(false);
   expect("defineRemoteFunctions" in voke).toBe(false);
 });
 
-test("keeps HTTP helpers in @voke/http", async () => {
-  const httpHelpers = await importPackage("@voke/http");
+test("keeps HTTP helpers in @vokejs/http", async () => {
+  const httpHelpers = await importPackage("@vokejs/http");
 
   expect(Object.keys(httpHelpers).toSorted()).toEqual([
     "created",
@@ -236,22 +236,22 @@ test("keeps HTTP helpers in @voke/http", async () => {
   expect("response" in voke).toBe(false);
 });
 
-test("@voke/http is the same source as core's response helpers", async () => {
-  // Core cannot import @voke/* packages, so the helpers exist in both; they must not drift.
+test("@vokejs/http is the same source as core's response helpers", async () => {
+  // Core cannot import @vokejs/* packages, so the helpers exist in both; they must not drift.
   expect(await readPackageFile("../../http/src/index.ts")).toBe(
     await readPackageFile("../src/response.ts")
   );
 });
 
-test("keeps schema helpers in @voke/schema", async () => {
-  const schemaHelpers = await importPackage("@voke/schema");
+test("keeps schema helpers in @vokejs/schema", async () => {
+  const schemaHelpers = await importPackage("@vokejs/schema");
 
   expect(Object.keys(schemaHelpers).toSorted()).toEqual(["schema"]);
   expect("schema" in voke).toBe(false);
 });
 
-test("keeps OpenAPI helpers in @voke/openapi", async () => {
-  const openapiHelpers = await importPackage("@voke/openapi");
+test("keeps OpenAPI helpers in @vokejs/openapi", async () => {
+  const openapiHelpers = await importPackage("@vokejs/openapi");
 
   expect(Object.keys(openapiHelpers).toSorted()).toEqual([
     "createOpenApiDocument",
@@ -261,8 +261,8 @@ test("keeps OpenAPI helpers in @voke/openapi", async () => {
   expect("createOpenApiDocument" in voke).toBe(false);
 });
 
-test("keeps idempotency helpers in @voke/idempotency", async () => {
-  const idempotencyHelpers = await importPackage("@voke/idempotency");
+test("keeps idempotency helpers in @vokejs/idempotency", async () => {
+  const idempotencyHelpers = await importPackage("@vokejs/idempotency");
 
   expect(Object.keys(idempotencyHelpers).toSorted()).toEqual([
     "IdempotencyError",
@@ -275,8 +275,8 @@ test("keeps idempotency helpers in @voke/idempotency", async () => {
   expect("idempotent" in voke).toBe(false);
 });
 
-test("keeps local AWS provider helpers in @voke/aws/local", async () => {
-  const local = await importPackage("@voke/aws/local");
+test("keeps local AWS provider helpers in @vokejs/aws/local", async () => {
+  const local = await importPackage("@vokejs/aws/local");
 
   expect(Object.keys(local).toSorted()).toEqual([
     "LocalProviderError",

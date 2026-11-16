@@ -1,5 +1,5 @@
-import { eventBridge } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { eventBridge } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 
 export const orderPaid = eventBridge({
   bus: "ordersBus",

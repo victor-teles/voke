@@ -1,10 +1,10 @@
 import { expect, test } from "bun:test";
 import { realpathSync } from "node:fs";
 
-import { sqs } from "@voke/aws";
-import type { SqsMessageBatchIncludeInvalid } from "@voke/aws";
-import { response } from "@voke/http";
-import { schema } from "@voke/schema";
+import { sqs } from "@vokejs/aws";
+import type { SqsMessageBatchIncludeInvalid } from "@vokejs/aws";
+import { response } from "@vokejs/http";
+import { schema } from "@vokejs/schema";
 
 import { createFunctions, fn, http, route, voke } from "../src/index";
 import type { Middleware } from "../src/index";

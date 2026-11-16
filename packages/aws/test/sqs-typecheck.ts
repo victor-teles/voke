@@ -17,7 +17,7 @@ const schema = <TValue>(): StandardSchemaV1<TValue, TValue> => ({
 });
 
 // A generic helper that builds an SQS handler from a per-message function, like
-// idempotentBatch() in @voke/idempotency.
+// idempotentBatch() in @vokejs/idempotency.
 const perMessage =
   <TBody>(
     processMessage: (message: SqsValidMessage<TBody>) => void

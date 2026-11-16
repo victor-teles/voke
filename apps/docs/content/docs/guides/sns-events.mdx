@@ -9,13 +9,13 @@ the messages it receives, and test the Function without AWS.
 ## Declare the topic and the Function
 
 Declare the topic in `resources` in `voke.config.ts` with `snsTopic()` from
-`@voke/aws/cloudformation`. Then create the Function with `sns()` from `@voke/aws`, and pass the
+`@vokejs/aws/cloudformation`. Then create the Function with `sns()` from `@vokejs/aws`, and pass the
 topic's resource key as `topic`:
 
 ```ts twoslash
 // @filename: voke.config.ts
-import { aws } from "@voke/aws";
-import { snsTopic } from "@voke/aws/cloudformation";
+import { aws } from "@vokejs/aws";
+import { snsTopic } from "@vokejs/aws/cloudformation";
 import { defineConfig } from "voke";
 
 export default defineConfig({
@@ -27,8 +27,8 @@ export default defineConfig({
 });
 
 // @filename: src/index.ts
-import { sns } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { sns } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 import { createFunctions } from "voke";
 
 const orderCreated = schema.object({
@@ -89,8 +89,8 @@ it to the subscription untouched. By default SNS matches the policy against the 
 set `filterPolicyScope: "MessageBody"` to match it against the JSON body:
 
 ```ts twoslash
-import { sns } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { sns } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 
 // ---cut---
 export const onPaidOrder = sns({
@@ -113,8 +113,8 @@ Test an SNS Function with `functions.sendEvent(name, { message })`. It runs the 
 validation and handler code as the deployed Lambda:
 
 ```ts twoslash
-import { sns } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { sns } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 import { createFunctions } from "voke";
 
 const functions = createFunctions({

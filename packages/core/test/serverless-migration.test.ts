@@ -678,7 +678,7 @@ test("creates a measurable migration report and Voke skeleton files", () => {
   expect(migration.report.unsupported).toEqual([
     "plugin serverless-webpack maps to Voke Bun build but requires bundler option review",
     "sqs event on fulfillOrder requires manual implementation. Queue source cannot be resolved to a migrated Voke SQS queue resource.",
-    "schedule event on scheduledReport requires manual implementation. Rewrite it with `schedule()` from `@voke/aws`; review the expression and time zone.",
+    "schedule event on scheduledReport requires manual implementation. Rewrite it with `schedule()` from `@vokejs/aws`; review the expression and time zone.",
   ]);
   expect(migration.report.manualSteps).toContain(
     "Move one Serverless function at a time by routing migrated HTTP paths to Voke while the original service keeps the remaining functions."
@@ -739,13 +739,13 @@ test("reports expanded event coverage and unknown fields deterministically", () 
   expect(migration.report.unsupported).toEqual([
     "plugin serverless-esbuild maps to Voke Bun build but requires bundler option review",
     "REST API event: apiHandler POST /profiles is generated behind migrationBlocked. REST API authorizers and API keys are not converted.",
-    "sns event on apiHandler requires manual implementation. Rewrite it with `sns()` from `@voke/aws` and declare the topic with `snsTopic()`; review the filter policy.",
+    "sns event on apiHandler requires manual implementation. Rewrite it with `sns()` from `@vokejs/aws` and declare the topic with `snsTopic()`; review the filter policy.",
     "sqs event on apiHandler requires manual implementation. Queue source OrdersQueue is not generated as a Voke SQS queue resource.",
-    "s3 event on apiHandler requires manual implementation. Rewrite it with `s3()` from `@voke/aws`; the bucket must be a Voke resource declared with `s3Bucket()`.",
-    "schedule event on apiHandler requires manual implementation. Rewrite it with `schedule()` from `@voke/aws`; review the expression and time zone.",
-    "stream event on apiHandler requires manual implementation. Rewrite it with kinesis() or dynamodbStream() from @voke/aws, then review the starting position, batching and retry settings.",
+    "s3 event on apiHandler requires manual implementation. Rewrite it with `s3()` from `@vokejs/aws`; the bucket must be a Voke resource declared with `s3Bucket()`.",
+    "schedule event on apiHandler requires manual implementation. Rewrite it with `schedule()` from `@vokejs/aws`; review the expression and time zone.",
+    "stream event on apiHandler requires manual implementation. Rewrite it with kinesis() or dynamodbStream() from @vokejs/aws, then review the starting position, batching and retry settings.",
     "Unsupported Serverless event kafka on function apiHandler: kafka is not an automatic Voke migration target. Recreate the trigger, permissions, batching, and failure behavior manually before cutting over.",
-    "stream event on kinesisWorker requires manual implementation. Rewrite it with kinesis() or dynamodbStream() from @voke/aws, then review the starting position, batching and retry settings.",
+    "stream event on kinesisWorker requires manual implementation. Rewrite it with kinesis() or dynamodbStream() from @vokejs/aws, then review the starting position, batching and retry settings.",
   ]);
   expect(migration.report.unknownFields).toEqual([
     {
@@ -780,7 +780,7 @@ test("reports expanded event coverage and unknown fields deterministically", () 
     migration.files["./voke-advanced/SERVERLESS_COMPATIBILITY.md"]
   ).toContain("Inventory only");
   expect(migration.files["./voke-advanced/voke.config.ts"]).toContain(
-    'import { dynamodbTable } from "@voke/aws/cloudformation";'
+    'import { dynamodbTable } from "@vokejs/aws/cloudformation";'
   );
   expect(migration.files["./voke-advanced/voke.config.ts"]).toContain(
     '"UsersTable": dynamodbTable()'
@@ -793,7 +793,7 @@ test("reports expanded event coverage and unknown fields deterministically", () 
   ).toContain('provider: awsLambda({ runtime: "nodejs24.x" })');
   expect(
     migration.files["./voke-advanced/src/functions/api-handler.ts"]
-  ).toContain('import { awsLambda } from "@voke/aws";');
+  ).toContain('import { awsLambda } from "@vokejs/aws";');
   expect(migration.files["./voke-advanced/voke.config.ts"]).toContain(
     'provider: aws({ lambda: { runtime: "nodejs22.x" } }),'
   );
@@ -817,7 +817,7 @@ test("generates config-first resources and preserves unsafe resources as manual 
   const report = migration.files["./voke-resources/MIGRATION_REPORT.md"];
 
   expect(config).toContain(
-    'import { dynamodbTable, eventBus, s3Bucket, secret, sqsQueue, ssmParameter } from "@voke/aws/cloudformation";'
+    'import { dynamodbTable, eventBus, s3Bucket, secret, sqsQueue, ssmParameter } from "@vokejs/aws/cloudformation";'
   );
   expect(config).toContain(
     '"OrdersTable": dynamodbTable({ partitionKey: "tenantId", sortKey: "orderId", billingMode: "PAY_PER_REQUEST" })'
@@ -860,7 +860,7 @@ test("generates first-class SQS Event Sources for resolvable queues and reports 
   const compatibility =
     migration.files["./voke-sqs-events/SERVERLESS_COMPATIBILITY.md"];
 
-  expect(processOrder).toContain('import { sqs } from "@voke/aws";');
+  expect(processOrder).toContain('import { sqs } from "@vokejs/aws";');
   expect(processOrder).toContain(
     'queue: { queue: "OrdersQueue", batchSize: 10, enabled: false, maxBatchingWindowSeconds: 20 },'
   );
@@ -1117,7 +1117,7 @@ test("reports Serverless Framework plugin compatibility deterministically", () =
     },
     {
       manualSteps: [
-        "Rewrite Lambda-centric workflows as durable() Functions from @voke/aws: steps, waits and callbacks become TypeScript in the Function's handler.",
+        "Rewrite Lambda-centric workflows as durable() Functions from @vokejs/aws: steps, waits and callbacks become TypeScript in the Function's handler.",
         "Declare state machines you keep as raw CloudFormation resources in voke.config.ts, with their IAM roles and permissions.",
       ],
       name: "serverless-step-functions",

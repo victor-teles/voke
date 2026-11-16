@@ -13,7 +13,7 @@ After reading this page you can add the `openapi()` Plugin to a project and brow
 ### Install the package
 
 ```bash
-bun add @voke/openapi
+bun add @vokejs/openapi
 ```
 
 </Step>
@@ -24,8 +24,8 @@ bun add @voke/openapi
 Add `openapi()` to `plugins` in `voke.config.ts`:
 
 ```ts title="voke.config.ts" twoslash
-import { aws } from "@voke/aws";
-import { openapi } from "@voke/openapi";
+import { aws } from "@vokejs/aws";
+import { openapi } from "@vokejs/openapi";
 import { defineConfig } from "voke";
 
 export default defineConfig({
@@ -59,7 +59,7 @@ Run `voke dev` and open:
 Voke builds the document from what your routes already declare: the method, the path, the schemas, the authorizer. Add `meta` to a route for the text a reader needs:
 
 ```ts twoslash
-import { schema } from "@voke/schema";
+import { schema } from "@vokejs/schema";
 import { createFunctions, http, route } from "voke";
 
 const order = schema.object({ id: schema.string(), total: schema.number() });
@@ -115,8 +115,8 @@ The `Error` schema is the `{ "error": { "message", "code", "details", "issues" }
 An API description tells an attacker every route and field, so the deployed API does not serve it unless you ask. `expose: true` adds the **Plugin Function** `openapi-docs`, which serves both routes locally and is deployed with your Functions:
 
 ```ts title="voke.config.ts" twoslash
-import { aws } from "@voke/aws";
-import { openapi } from "@voke/openapi";
+import { aws } from "@vokejs/aws";
+import { openapi } from "@vokejs/openapi";
 import { defineConfig } from "voke";
 
 export default defineConfig({
@@ -165,7 +165,7 @@ voke openapi generate --out openapi.json --server https://api.example.com
 The file is two-space JSON with a trailing newline, and the same routes always give the same file, so you can commit it and review its diff. To build the document in code, call `createOpenApiDocument`:
 
 ```ts twoslash
-import { createOpenApiDocument } from "@voke/openapi";
+import { createOpenApiDocument } from "@vokejs/openapi";
 import { createFunctions, functionRegistryEntries, http, route } from "voke";
 
 const functions = createFunctions({

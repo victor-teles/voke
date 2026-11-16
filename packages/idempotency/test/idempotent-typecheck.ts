@@ -1,7 +1,7 @@
 // Type-level checks: tsgo compiles this file; bun test does not run it.
-import { sqs } from "@voke/aws";
-import type { SqsBatchResult } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { sqs } from "@vokejs/aws";
+import type { SqsBatchResult } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 import { createFunctions, fn, http, route } from "voke";
 
 import { idempotent, idempotentBatch } from "../src/index";

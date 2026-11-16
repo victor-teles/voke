@@ -169,7 +169,7 @@ test("an invalid AWS Plugin record fails at its contribution path", () => {
   ).toEqual([
     {
       message:
-        'expected "iam.policy" (use awsPolicy() from "@voke/aws"); received "cloudformation.template"',
+        'expected "iam.policy" (use awsPolicy() from "@vokejs/aws"); received "cloudformation.template"',
       path: "plugins.raw.contributions.provider.aws.type",
     },
   ]);

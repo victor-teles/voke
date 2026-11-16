@@ -8,14 +8,14 @@ event's `detail`, and test the Function without AWS.
 
 ## Declare the bus and the Function
 
-Create the Function with `eventBridge()` from `@voke/aws`. `pattern` selects the events, and `detail`
+Create the Function with `eventBridge()` from `@vokejs/aws`. `pattern` selects the events, and `detail`
 is the schema for each event's `detail`. To use your own event bus, declare it in `resources` with
-`eventBus()` from `@voke/aws/cloudformation` and pass its resource key as `bus`:
+`eventBus()` from `@vokejs/aws/cloudformation` and pass its resource key as `bus`:
 
 ```ts twoslash
 // @filename: voke.config.ts
-import { aws } from "@voke/aws";
-import { eventBus } from "@voke/aws/cloudformation";
+import { aws } from "@vokejs/aws";
+import { eventBus } from "@vokejs/aws/cloudformation";
 import { defineConfig } from "voke";
 
 export default defineConfig({
@@ -27,8 +27,8 @@ export default defineConfig({
 });
 
 // @filename: src/index.ts
-import { eventBridge } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { eventBridge } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 import { createFunctions } from "voke";
 
 const orderPaid = schema.object({
@@ -98,8 +98,8 @@ Test an EventBridge Function with `functions.sendEvent(name, { detail })`. It ru
 validation and handler code as the deployed Lambda:
 
 ```ts twoslash
-import { eventBridge } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { eventBridge } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 import { createFunctions } from "voke";
 
 const functions = createFunctions({

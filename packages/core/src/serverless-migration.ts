@@ -2331,16 +2331,16 @@ const createGeneratedFiles = (
 const eventManualReason = (event: ServerlessFunctionEvent): string => {
   switch (event.type) {
     case "s3": {
-      return "Rewrite it with `s3()` from `@voke/aws`; the bucket must be a Voke resource declared with `s3Bucket()`.";
+      return "Rewrite it with `s3()` from `@vokejs/aws`; the bucket must be a Voke resource declared with `s3Bucket()`.";
     }
     case "schedule": {
-      return "Rewrite it with `schedule()` from `@voke/aws`; review the expression and time zone.";
+      return "Rewrite it with `schedule()` from `@vokejs/aws`; review the expression and time zone.";
     }
     case "sns": {
-      return "Rewrite it with `sns()` from `@voke/aws` and declare the topic with `snsTopic()`; review the filter policy.";
+      return "Rewrite it with `sns()` from `@vokejs/aws` and declare the topic with `snsTopic()`; review the filter policy.";
     }
     case "stream": {
-      return "Rewrite it with kinesis() or dynamodbStream() from @voke/aws, then review the starting position, batching and retry settings.";
+      return "Rewrite it with kinesis() or dynamodbStream() from @vokejs/aws, then review the starting position, batching and retry settings.";
     }
     case "unsupported": {
       return `${event.name} is not an automatic Voke migration target. Recreate the trigger, permissions, batching, and failure behavior manually before cutting over.`;
@@ -3178,7 +3178,7 @@ const createSqsFunctionTemplate = (
     return sqsQueueExpression(event, queue);
   });
 
-  return `import { ${synthesisBlock === "" ? "sqs" : "awsLambda, sqs"} } from "@voke/aws";
+  return `import { ${synthesisBlock === "" ? "sqs" : "awsLambda, sqs"} } from "@vokejs/aws";
 import type { StandardSchemaV1 } from "voke";
 
 const messageSchema: StandardSchemaV1<unknown, unknown> = {
@@ -3217,7 +3217,7 @@ const createFunctionTemplate = (
     .filter((event) => event.type === "sqs" || event.type === "eventBridge")
     .map((event) => event.type);
 
-  return `${synthesisBlock === "" ? "" : 'import { awsLambda } from "@voke/aws";\n'}import { fn } from "voke";
+  return `${synthesisBlock === "" ? "" : 'import { awsLambda } from "@vokejs/aws";\n'}import { fn } from "voke";
 import type { StandardSchemaV1 } from "voke";
 
 const outputSchema: StandardSchemaV1<unknown, unknown> = {
@@ -3336,7 +3336,7 @@ const createConfigTemplate = (service: ServerlessService): string => {
       ? ""
       : `\nimport { ${[...new Set(resources.map((resource) => resource.helper))]
           .toSorted()
-          .join(", ")} } from "@voke/aws/cloudformation";`;
+          .join(", ")} } from "@vokejs/aws/cloudformation";`;
   const resourceEntries = resources.map(
     (resource) => `    ${tsString(resource.name)}: ${resource.expression},`
   );
@@ -3347,7 +3347,7 @@ const createConfigTemplate = (service: ServerlessService): string => {
 
   // Functions live in the entrypoint (src/index.ts); the config holds project metadata,
   // the Provider, and infrastructure resources.
-  return `import { aws } from "@voke/aws";
+  return `import { aws } from "@vokejs/aws";
 import { defineConfig } from "voke";${resourceImports}
 
 export default defineConfig({
@@ -3388,7 +3388,7 @@ export const ${blockedAuthorizerName} = requestAuthorizer({
 
   return `import {
 ${helpers.map((helper) => `  ${helper},`).join("\n")}
-} from "@voke/aws";
+} from "@vokejs/aws";
 
 export const authorizers = createAuthorizers({
 ${registry.join("\n")}
@@ -3738,7 +3738,7 @@ const pluginCompatibilityCatalog: Record<
     "serverless-step-functions",
     {
       manualSteps: [
-        "Rewrite Lambda-centric workflows as durable() Functions from @voke/aws: steps, waits and callbacks become TypeScript in the Function's handler.",
+        "Rewrite Lambda-centric workflows as durable() Functions from @vokejs/aws: steps, waits and callbacks become TypeScript in the Function's handler.",
         "Declare state machines you keep as raw CloudFormation resources in voke.config.ts, with their IAM roles and permissions.",
       ],
       notes: [

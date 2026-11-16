@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import {
   dynamodbTable,
   synthesizeCloudFormation,
-} from "@voke/aws/cloudformation";
+} from "@vokejs/aws/cloudformation";
 import { createVokeModel } from "voke";
 
 import { functions } from "../src/functions";

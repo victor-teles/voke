@@ -6,7 +6,7 @@ import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { basename, join, relative, resolve } from "node:path";
 
 /** The `exports`/`imports` condition that makes workspace tools resolve a package to its source. */
-export const sourceCondition = "@voke/source";
+export const sourceCondition = "@vokejs/source";
 
 export interface PackageManifest {
   [key: string]: unknown;
@@ -24,14 +24,14 @@ export interface PackageManifest {
 export const publishedPackages: readonly { directory: string; name: string }[] =
   [
     { directory: "packages/core", name: "voke" },
-    { directory: "packages/build", name: "@voke/build" },
-    { directory: "packages/http", name: "@voke/http" },
-    { directory: "packages/schema", name: "@voke/schema" },
-    { directory: "packages/testing", name: "@voke/testing" },
-    { directory: "packages/remote", name: "@voke/remote" },
-    { directory: "packages/openapi", name: "@voke/openapi" },
-    { directory: "packages/aws", name: "@voke/aws" },
-    { directory: "packages/idempotency", name: "@voke/idempotency" },
+    { directory: "packages/build", name: "@vokejs/build" },
+    { directory: "packages/http", name: "@vokejs/http" },
+    { directory: "packages/schema", name: "@vokejs/schema" },
+    { directory: "packages/testing", name: "@vokejs/testing" },
+    { directory: "packages/remote", name: "@vokejs/remote" },
+    { directory: "packages/openapi", name: "@vokejs/openapi" },
+    { directory: "packages/aws", name: "@vokejs/aws" },
+    { directory: "packages/idempotency", name: "@vokejs/idempotency" },
   ];
 
 export const repositoryRoot = resolve(import.meta.dir, "..");
@@ -48,7 +48,7 @@ const dependencyBlocks = [
 const sharedPeers = ["hono", "voke"] as const;
 
 const isInternal = (name: string): boolean =>
-  name === "voke" || name.startsWith("@voke/");
+  name === "voke" || name.startsWith("@vokejs/");
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);

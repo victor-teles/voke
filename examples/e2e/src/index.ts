@@ -1,5 +1,5 @@
-import { created } from "@voke/http";
-import { schema } from "@voke/schema";
+import { created } from "@vokejs/http";
+import { schema } from "@vokejs/schema";
 import { createFunctions, http, route, voke } from "voke";
 
 import config from "../voke.config";

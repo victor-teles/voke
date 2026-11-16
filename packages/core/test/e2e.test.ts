@@ -4,9 +4,9 @@ import {
   dynamodbTable,
   sqsQueue,
   synthesizeCloudFormation,
-} from "@voke/aws/cloudformation";
-import { createStackTestContext } from "@voke/aws/testing";
-import { createInvokeTestClient, createTestClient } from "@voke/testing";
+} from "@vokejs/aws/cloudformation";
+import { createStackTestContext } from "@vokejs/aws/testing";
+import { createInvokeTestClient, createTestClient } from "@vokejs/testing";
 import { Hono } from "hono";
 
 import { voke } from "../src/app";

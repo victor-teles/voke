@@ -124,7 +124,7 @@ Deliverables:
 - Add a typed error response convention that maps known Voke errors, validation errors, and user-thrown HTTP errors to stable responses.
 - Add a request/response interceptor API scoped to HTTP Functions, with explicit ordering and typed context.
 - Add route-level and Function-level defaults for response serialization.
-- Add OpenAPI export from route contracts after request/response shape metadata is complete, as the first Plugin (`.factory/plans/020-openapi-and-scalar-plugin.md`). Delivered: `@voke/openapi` with a Scalar API reference page and `voke openapi generate` (ADR 0016); response status codes and error shapes remain.
+- Add OpenAPI export from route contracts after request/response shape metadata is complete, as the first Plugin (`.factory/plans/020-openapi-and-scalar-plugin.md`). Delivered: `@vokejs/openapi` with a Scalar API reference page and `voke openapi generate` (ADR 0016); response status codes and error shapes remain.
 
 Acceptance tests:
 
@@ -335,7 +335,7 @@ Why Voke needs it:
 
 Voke should avoid premature workflow DSL design, but it should leave a path for typed orchestration around Functions.
 
-Outcome (decided 2026-11-14, ADR 0014): AWS Lambda durable functions are the supported orchestration model. A `durable(...)` Function from `@voke/aws` is ordinary TypeScript with checkpointed `step`, `wait` and callbacks, tested locally through the AWS durable execution testing runner and deployed as a durable Lambda behind a `live` alias. Step Functions gets no builder or DSL; state machines stay reachable as raw CloudFormation resources. The `workflow(...)` exploration is dropped.
+Outcome (decided 2026-11-14, ADR 0014): AWS Lambda durable functions are the supported orchestration model. A `durable(...)` Function from `@vokejs/aws` is ordinary TypeScript with checkpointed `step`, `wait` and callbacks, tested locally through the AWS durable execution testing runner and deployed as a durable Lambda behind a `live` alias. Step Functions gets no builder or DSL; state machines stay reachable as raw CloudFormation resources. The `workflow(...)` exploration is dropped.
 
 Delivered:
 
@@ -347,7 +347,7 @@ Follow-ups:
 
 - Prove the deployed path on real AWS (deploy, wait, redeploy while an execution is paused).
 - `voke executions` (list, inspect, stop), callback helpers, pruning retained versions, KMS keys for execution state.
-- Idempotency helpers should treat `executionName` as the idempotent start for Durable Functions. Done in `@voke/idempotency` (plan 021, ADR 0017): it writes no record for a Durable Function start, and its guide points at `executionName`.
+- Idempotency helpers should treat `executionName` as the idempotent start for Durable Functions. Done in `@vokejs/idempotency` (plan 021, ADR 0017): it writes no record for a Durable Function start, and its guide points at `executionName`.
 
 ## Explicit Non-Goals
 

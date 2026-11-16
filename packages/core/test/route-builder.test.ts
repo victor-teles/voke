@@ -6,7 +6,7 @@ import {
   requestAuthorizer,
   secret,
   sqs,
-} from "@voke/aws";
+} from "@vokejs/aws";
 import type { MiddlewareHandler } from "hono";
 
 import packageJson from "../package.json";

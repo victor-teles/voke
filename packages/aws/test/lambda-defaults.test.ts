@@ -281,7 +281,7 @@ test("validates awsLambda() records and aws({ lambda }) options", () => {
       name: "record-api",
     })
   ).toThrow(
-    'Invalid Voke model at functions.worker.synthesis.provider.aws.type: expected "lambda.function" (use awsLambda() from "@voke/aws"); received "cloudformation.resource"'
+    'Invalid Voke model at functions.worker.synthesis.provider.aws.type: expected "lambda.function" (use awsLambda() from "@vokejs/aws"); received "cloudformation.resource"'
   );
   expect(() => aws({ lambda: { logRetentionDays: 10 as never } })).toThrow(
     "Invalid Voke config at aws.lambda.logRetentionDays: expected a CloudWatch Logs retention period such as 7 or 14; received 10"

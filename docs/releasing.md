@@ -1,6 +1,6 @@
 # Releasing
 
-This is the one release procedure. All nine packages (`voke` and the eight `@voke/*` packages)
+This is the one release procedure. All nine packages (`voke` and the eight `@vokejs/*` packages)
 share one version and are released together. The procedure ends at a set of verified tarballs;
 publishing them is the owner's action, and no registry token is stored anywhere in the
 repository or in CI.
@@ -10,7 +10,7 @@ repository or in CI.
 The procedure names these gates and does not perform them. Do not start step 6 while one is
 open.
 
-1. **The names are available.** The npm package name `voke` and the scope `@voke` are free and
+1. **The names are available.** The npm package name `voke` and the scope `@vokejs` are free and
    owned by the publishing account. Nobody has checked this. If either is taken, stop and plan a
    rename; do not publish under other names.
 2. **A real AWS deploy has run.** The real-AWS smoke deploy of plan 004 (step 8) and the durable
@@ -72,7 +72,7 @@ Run the printed commands in the printed order, one per tarball:
 
 ```bash
 bun publish .release/<version>/voke-<version>.tgz --access public
-# … then each @voke/* tarball, in the printed order
+# … then each @vokejs/* tarball, in the printed order
 ```
 
 Publish a pre-release with `--tag next`, so `bunx voke` keeps resolving the stable release.

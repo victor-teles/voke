@@ -143,7 +143,7 @@ const createSsm = async () => {
 };
 
 export const createAwsRuntimeVariableProvider = (): RuntimeVariableProvider => {
-  // The SDKs load on first use, so importing @voke/aws or activating a Gateway stays cheap,
+  // The SDKs load on first use, so importing @vokejs/aws or activating a Gateway stays cheap,
   // and bundles keep @aws-sdk/* external (the Lambda Node.js runtime provides it).
   let secretsManager:
     | Promise<{

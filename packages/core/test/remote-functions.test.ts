@@ -1,8 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
 
-import { secret } from "@voke/aws";
-import { createRemoteFunctions } from "@voke/remote";
-import { schema as vokeSchema } from "@voke/schema";
+import { secret } from "@vokejs/aws";
+import { createRemoteFunctions } from "@vokejs/remote";
+import { schema as vokeSchema } from "@vokejs/schema";
 import { z } from "zod";
 
 import { voke } from "../src/app";
@@ -109,7 +109,7 @@ test("a Zod contract becomes a JSON Schema entry in the Function Contract Artifa
   });
 });
 
-test("a @voke/schema contract becomes a JSON Schema entry in the Function Contract Artifact", () => {
+test("a @vokejs/schema contract becomes a JSON Schema entry in the Function Contract Artifact", () => {
   const artifact = createFunctionContractArtifact(
     "users",
     createFunctions({
@@ -278,7 +278,7 @@ test("generates checked-in Remote Function Registry modules from configured remo
     "http://contracts.local/audit",
   ]);
   expect(writes["src/voke/remotes/users.ts"]).toContain(
-    'import { createRemoteFunctions } from "@voke/remote";'
+    'import { createRemoteFunctions } from "@vokejs/remote";'
   );
   expect(writes["src/voke/remotes/users.ts"]).toContain(
     "export const users = createRemoteFunctions"
@@ -464,7 +464,7 @@ test("the Dev Function Invoke Endpoint rejects a request body that is not a JSON
   }
 });
 
-test("remote config and @voke/remote agree on the origin variable of a remote", async () => {
+test("remote config and @vokejs/remote agree on the origin variable of a remote", async () => {
   const origin = "http://wallet-audit.local";
   const artifact = {
     fingerprint: "sha256:audit",

@@ -1,5 +1,5 @@
 {
-  "name": "@voke/testing",
+  "name": "@vokejs/testing",
   "version": "0.1.0",
   "description": "Test clients for Voke Gateways and Function Registries.",
   "keywords": [
@@ -23,7 +23,7 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "@voke/source": "./src/index.ts",
+      "@vokejs/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./src/index.ts"
     }

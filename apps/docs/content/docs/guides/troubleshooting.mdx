@@ -55,7 +55,7 @@ Each entry starts with the message Voke prints, then gives the cause and the fix
 ```txt
 Invalid CLI usage: No provider configured. Add a provider to voke.config.ts, for example:
 
-  import { aws } from "@voke/aws";
+  import { aws } from "@vokejs/aws";
   export default defineConfig({ name: "hello-api", provider: aws() });
 ```
 
@@ -64,7 +64,7 @@ Invalid CLI usage: No provider configured. Add a provider to voke.config.ts, for
 **Fix:** Add `provider: aws()` to `voke.config.ts`:
 
 ```ts title="voke.config.ts" twoslash
-import { aws } from "@voke/aws";
+import { aws } from "@vokejs/aws";
 import { defineConfig } from "voke";
 
 export default defineConfig({
@@ -89,7 +89,7 @@ Usage: voke deploy [--stage dev] [--region us-east-1] [--config voke.config.ts] 
 **Cause:** Voke fails on settings it no longer reads, instead of ignoring them. Every message starts with `Invalid Voke config at <path>:`, and several issues are joined with `;`.
 
 ```txt
-Invalid Voke config at local: local AWS settings moved to the provider: aws({ local: floci() }) from "@voke/aws" and "@voke/aws/local"
+Invalid Voke config at local: local AWS settings moved to the provider: aws({ local: floci() }) from "@vokejs/aws" and "@vokejs/aws/local"
 ```
 
 **Fix:** Move the Local AWS Provider into the AWS Provider: `provider: aws({ local: floci() })`. See [Local AWS](/docs/guides/local-aws).

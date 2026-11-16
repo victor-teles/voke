@@ -25,8 +25,8 @@ The same project in code:
 
 ```ts twoslash
 // @filename: voke.config.ts
-import { aws } from "@voke/aws";
-import { sqsQueue } from "@voke/aws/cloudformation";
+import { aws } from "@vokejs/aws";
+import { sqsQueue } from "@vokejs/aws/cloudformation";
 import { defineConfig } from "voke";
 
 export default defineConfig({
@@ -38,8 +38,8 @@ export default defineConfig({
 });
 
 // @filename: src/index.ts
-import { sqs } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { sqs } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 import { createFunctions, fn, http, route, voke } from "voke";
 
 import config from "../voke.config";
@@ -89,7 +89,7 @@ A named unit of serverless work. Each Function becomes one AWS Lambda function w
 
 - **Invokable**, made with `fn()`: other project code calls it by its registry key.
 - **Route-backed**, made with `http()`: it serves HTTP routes through the Gateway.
-- **Event Source**, for example `sqs()` from `@voke/aws`: an AWS service invokes it.
+- **Event Source**, for example `sqs()` from `@vokejs/aws`: an AWS service invokes it.
 
 See [Functions](/docs/guides/functions).
 
@@ -99,7 +99,7 @@ The typed catalog of the project's Functions, made with `createFunctions({ ... }
 
 ### Function Contract
 
-The input and output schemas of a Function (`input` and `output` on `fn()`). Voke validates the payload before the handler runs and the result after it returns. Any [Standard Schema](https://standardschema.dev) validator works; `@voke/schema` is Voke's own. See [Schemas](/docs/guides/schemas).
+The input and output schemas of a Function (`input` and `output` on `fn()`). Voke validates the payload before the handler runs and the result after it returns. Any [Standard Schema](https://standardschema.dev) validator works; `@vokejs/schema` is Voke's own. See [Schemas](/docs/guides/schemas).
 
 ### Gateway
 
@@ -111,11 +111,11 @@ The HTTP side of the project, made with `voke(functions, { config })`. It serves
 
 ### Provider
 
-The platform adapter that builds, synthesizes, deploys and runs local infrastructure for the project. The first-party Provider is `aws()` from `@voke/aws`. A project has at most one Provider, and you set it only in `voke.config.ts` with `provider: aws()`. `voke build`, `voke synth`, `voke deploy`, `voke remove` and `voke local` fail with an error when no Provider is set. Function code stays the same whatever the Provider.
+The platform adapter that builds, synthesizes, deploys and runs local infrastructure for the project. The first-party Provider is `aws()` from `@vokejs/aws`. A project has at most one Provider, and you set it only in `voke.config.ts` with `provider: aws()`. `voke build`, `voke synth`, `voke deploy`, `voke remove` and `voke local` fail with an error when no Provider is set. Function code stays the same whatever the Provider.
 
 ### Local AWS Provider
 
-A program that emulates AWS services on your machine, so the queues, tables and other resources the project declares exist during development. Voke supports the AWS Emulator (the default) and Floci; choose Floci with `aws({ local: floci() })` and `floci` from `@voke/aws/local`. `voke local start` starts it. See [Local AWS](/docs/guides/local-aws).
+A program that emulates AWS services on your machine, so the queues, tables and other resources the project declares exist during development. Voke supports the AWS Emulator (the default) and Floci; choose Floci with `aws({ local: floci() })` and `floci` from `@vokejs/aws/local`. `voke local start` starts it. See [Local AWS](/docs/guides/local-aws).
 
 <Callout type="info" title="Not the Provider">
   The Provider decides where the project deploys. The Local AWS Provider only
@@ -124,11 +124,11 @@ A program that emulates AWS services on your machine, so the queues, tables and 
 
 ### Runtime Variable
 
-A value a Function loads at runtime from AWS Secrets Manager or SSM Parameter Store, declared with `secret()` or `parameter()` from `@voke/aws` in the Function's `variables`. The handler reads it through `context.variables.<key>.text()` or `.json()`. Runtime Variables are not part of the Function Contract. See [Runtime Variables](/docs/guides/runtime-variables).
+A value a Function loads at runtime from AWS Secrets Manager or SSM Parameter Store, declared with `secret()` or `parameter()` from `@vokejs/aws` in the Function's `variables`. The handler reads it through `context.variables.<key>.text()` or `.json()`. Runtime Variables are not part of the Function Contract. See [Runtime Variables](/docs/guides/runtime-variables).
 
 ### Event Source
 
-A trigger where an AWS service invokes a Function. Voke supports SQS: `sqs({ queue, message, handler })` from `@voke/aws` attaches a queue that you declare in `resources`. The handler receives a batch of messages, and in tests you send one with `functions.sendEvent(...)`. See [SQS events](/docs/guides/sqs-events).
+A trigger where an AWS service invokes a Function. Voke supports SQS: `sqs({ queue, message, handler })` from `@vokejs/aws` attaches a queue that you declare in `resources`. The handler receives a batch of messages, and in tests you send one with `functions.sendEvent(...)`. See [SQS events](/docs/guides/sqs-events).
 
 ## What each command produces
 

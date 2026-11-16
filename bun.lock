@@ -15,7 +15,7 @@
       },
     },
     "apps/docs": {
-      "name": "@voke/docs",
+      "name": "@vokejs/docs",
       "dependencies": {
         "@fontsource-variable/bricolage-grotesque": "^5.3.0",
         "@fontsource-variable/instrument-sans": "^5.3.0",
@@ -38,13 +38,13 @@
         "@types/react": "^19.3.0",
         "@types/react-dom": "^19.3.0",
         "@typescript/native-preview": "catalog:",
-        "@voke/aws": "workspace:*",
-        "@voke/http": "workspace:*",
-        "@voke/idempotency": "workspace:*",
-        "@voke/openapi": "workspace:*",
-        "@voke/remote": "workspace:*",
-        "@voke/schema": "workspace:*",
-        "@voke/testing": "workspace:*",
+        "@vokejs/aws": "workspace:*",
+        "@vokejs/http": "workspace:*",
+        "@vokejs/idempotency": "workspace:*",
+        "@vokejs/openapi": "workspace:*",
+        "@vokejs/remote": "workspace:*",
+        "@vokejs/schema": "workspace:*",
+        "@vokejs/testing": "workspace:*",
         "hono": "^4.0.0",
         "next-validate-link": "^1.6.7",
         "postcss": "^8.5.15",
@@ -56,12 +56,12 @@
       },
     },
     "examples/cross-function": {
-      "name": "@voke/cross-function",
+      "name": "@vokejs/cross-function",
       "version": "0.0.0",
       "dependencies": {
-        "@voke/aws": "workspace:*",
-        "@voke/schema": "workspace:*",
-        "@voke/testing": "workspace:*",
+        "@vokejs/aws": "workspace:*",
+        "@vokejs/schema": "workspace:*",
+        "@vokejs/testing": "workspace:*",
         "hono": "^4.0.0",
         "voke": "workspace:*",
       },
@@ -71,12 +71,12 @@
       },
     },
     "examples/durable-workflow": {
-      "name": "@voke/durable-workflow",
+      "name": "@vokejs/durable-workflow",
       "version": "0.0.0",
       "dependencies": {
-        "@voke/aws": "workspace:*",
-        "@voke/schema": "workspace:*",
-        "@voke/testing": "workspace:*",
+        "@vokejs/aws": "workspace:*",
+        "@vokejs/schema": "workspace:*",
+        "@vokejs/testing": "workspace:*",
         "hono": "^4.0.0",
         "voke": "workspace:*",
       },
@@ -86,13 +86,13 @@
       },
     },
     "examples/e2e": {
-      "name": "@voke/e2e",
+      "name": "@vokejs/e2e",
       "version": "0.0.0",
       "dependencies": {
-        "@voke/aws": "workspace:*",
-        "@voke/http": "workspace:*",
-        "@voke/schema": "workspace:*",
-        "@voke/testing": "workspace:*",
+        "@vokejs/aws": "workspace:*",
+        "@vokejs/http": "workspace:*",
+        "@vokejs/schema": "workspace:*",
+        "@vokejs/testing": "workspace:*",
         "hono": "^4.0.0",
         "voke": "workspace:*",
       },
@@ -102,11 +102,11 @@
       },
     },
     "examples/event-sources": {
-      "name": "@voke/event-sources",
+      "name": "@vokejs/event-sources",
       "version": "0.0.0",
       "dependencies": {
-        "@voke/aws": "workspace:*",
-        "@voke/schema": "workspace:*",
+        "@vokejs/aws": "workspace:*",
+        "@vokejs/schema": "workspace:*",
         "hono": "^4.0.0",
         "voke": "workspace:*",
       },
@@ -116,13 +116,13 @@
       },
     },
     "examples/hello-api": {
-      "name": "@voke/hello-api",
+      "name": "@vokejs/hello-api",
       "version": "0.0.0",
       "dependencies": {
-        "@voke/aws": "workspace:*",
-        "@voke/http": "workspace:*",
-        "@voke/openapi": "workspace:*",
-        "@voke/schema": "workspace:*",
+        "@vokejs/aws": "workspace:*",
+        "@vokejs/http": "workspace:*",
+        "@vokejs/openapi": "workspace:*",
+        "@vokejs/schema": "workspace:*",
         "hono": "^4.0.0",
         "voke": "workspace:*",
       },
@@ -132,12 +132,12 @@
       },
     },
     "examples/sqs-events": {
-      "name": "@voke/sqs-events",
+      "name": "@vokejs/sqs-events",
       "version": "0.0.0",
       "dependencies": {
-        "@voke/aws": "workspace:*",
-        "@voke/idempotency": "workspace:*",
-        "@voke/schema": "workspace:*",
+        "@vokejs/aws": "workspace:*",
+        "@vokejs/idempotency": "workspace:*",
+        "@vokejs/schema": "workspace:*",
         "hono": "^4.0.0",
         "voke": "workspace:*",
       },
@@ -147,11 +147,11 @@
       },
     },
     "examples/stream-events": {
-      "name": "@voke/stream-events",
+      "name": "@vokejs/stream-events",
       "version": "0.0.0",
       "dependencies": {
-        "@voke/aws": "workspace:*",
-        "@voke/schema": "workspace:*",
+        "@vokejs/aws": "workspace:*",
+        "@vokejs/schema": "workspace:*",
         "hono": "^4.0.0",
         "voke": "workspace:*",
       },
@@ -161,7 +161,7 @@
       },
     },
     "packages/aws": {
-      "name": "@voke/aws",
+      "name": "@vokejs/aws",
       "version": "0.1.0",
       "dependencies": {
         "@aws-sdk/client-cloudformation": "^3.1053.0",
@@ -171,8 +171,8 @@
         "@aws-sdk/client-ssm": "^3.1053.0",
         "@aws/durable-execution-sdk-js": "^3.0.0",
         "@aws/durable-execution-sdk-js-testing": "^1.3.2",
-        "@voke/build": "workspace:*",
-        "@voke/http": "workspace:*",
+        "@vokejs/build": "workspace:*",
+        "@vokejs/http": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "catalog:",
@@ -186,7 +186,7 @@
       },
     },
     "packages/build": {
-      "name": "@voke/build",
+      "name": "@vokejs/build",
       "version": "0.1.0",
       "devDependencies": {
         "@types/bun": "catalog:",
@@ -214,7 +214,7 @@
       },
     },
     "packages/http": {
-      "name": "@voke/http",
+      "name": "@vokejs/http",
       "version": "0.1.0",
       "devDependencies": {
         "@types/bun": "catalog:",
@@ -222,7 +222,7 @@
       },
     },
     "packages/idempotency": {
-      "name": "@voke/idempotency",
+      "name": "@vokejs/idempotency",
       "version": "0.1.0",
       "dependencies": {
         "@aws-sdk/client-dynamodb": "^3.1053.0",
@@ -230,24 +230,24 @@
       "devDependencies": {
         "@types/bun": "catalog:",
         "@typescript/native-preview": "catalog:",
-        "@voke/aws": "workspace:*",
-        "@voke/http": "workspace:*",
-        "@voke/schema": "workspace:*",
+        "@vokejs/aws": "workspace:*",
+        "@vokejs/http": "workspace:*",
+        "@vokejs/schema": "workspace:*",
         "voke": "workspace:*",
       },
       "peerDependencies": {
-        "@voke/aws": "workspace:*",
+        "@vokejs/aws": "workspace:*",
         "voke": "workspace:*",
       },
     },
     "packages/openapi": {
-      "name": "@voke/openapi",
+      "name": "@vokejs/openapi",
       "version": "0.1.0",
       "devDependencies": {
         "@types/bun": "catalog:",
         "@typescript/native-preview": "catalog:",
-        "@voke/aws": "workspace:*",
-        "@voke/schema": "workspace:*",
+        "@vokejs/aws": "workspace:*",
+        "@vokejs/schema": "workspace:*",
         "voke": "workspace:*",
         "zod": "^4.4.3",
       },
@@ -256,7 +256,7 @@
       },
     },
     "packages/remote": {
-      "name": "@voke/remote",
+      "name": "@vokejs/remote",
       "version": "0.1.0",
       "devDependencies": {
         "@types/bun": "catalog:",
@@ -268,7 +268,7 @@
       },
     },
     "packages/schema": {
-      "name": "@voke/schema",
+      "name": "@vokejs/schema",
       "version": "0.1.0",
       "devDependencies": {
         "@types/bun": "catalog:",
@@ -280,7 +280,7 @@
       },
     },
     "packages/testing": {
-      "name": "@voke/testing",
+      "name": "@vokejs/testing",
       "version": "0.1.0",
       "devDependencies": {
         "@types/bun": "catalog:",
@@ -816,37 +816,37 @@
 
     "@ungap/structured-clone": ["@ungap/structured-clone@1.3.1", "", {}, "sha512-mUFwbeTqrVgDQxFveS+df2yfap6iuP20NAKAsBt5jDEoOTDew+zwLAOilHCeQJOVSvmgCX4ogqIrA0mnyr08yQ=="],
 
-    "@voke/aws": ["@voke/aws@workspace:packages/aws"],
+    "@vokejs/aws": ["@vokejs/aws@workspace:packages/aws"],
 
-    "@voke/build": ["@voke/build@workspace:packages/build"],
+    "@vokejs/build": ["@vokejs/build@workspace:packages/build"],
 
-    "@voke/cross-function": ["@voke/cross-function@workspace:examples/cross-function"],
+    "@vokejs/cross-function": ["@vokejs/cross-function@workspace:examples/cross-function"],
 
-    "@voke/docs": ["@voke/docs@workspace:apps/docs"],
+    "@vokejs/docs": ["@vokejs/docs@workspace:apps/docs"],
 
-    "@voke/durable-workflow": ["@voke/durable-workflow@workspace:examples/durable-workflow"],
+    "@vokejs/durable-workflow": ["@vokejs/durable-workflow@workspace:examples/durable-workflow"],
 
-    "@voke/e2e": ["@voke/e2e@workspace:examples/e2e"],
+    "@vokejs/e2e": ["@vokejs/e2e@workspace:examples/e2e"],
 
-    "@voke/event-sources": ["@voke/event-sources@workspace:examples/event-sources"],
+    "@vokejs/event-sources": ["@vokejs/event-sources@workspace:examples/event-sources"],
 
-    "@voke/hello-api": ["@voke/hello-api@workspace:examples/hello-api"],
+    "@vokejs/hello-api": ["@vokejs/hello-api@workspace:examples/hello-api"],
 
-    "@voke/http": ["@voke/http@workspace:packages/http"],
+    "@vokejs/http": ["@vokejs/http@workspace:packages/http"],
 
-    "@voke/idempotency": ["@voke/idempotency@workspace:packages/idempotency"],
+    "@vokejs/idempotency": ["@vokejs/idempotency@workspace:packages/idempotency"],
 
-    "@voke/openapi": ["@voke/openapi@workspace:packages/openapi"],
+    "@vokejs/openapi": ["@vokejs/openapi@workspace:packages/openapi"],
 
-    "@voke/remote": ["@voke/remote@workspace:packages/remote"],
+    "@vokejs/remote": ["@vokejs/remote@workspace:packages/remote"],
 
-    "@voke/schema": ["@voke/schema@workspace:packages/schema"],
+    "@vokejs/schema": ["@vokejs/schema@workspace:packages/schema"],
 
-    "@voke/sqs-events": ["@voke/sqs-events@workspace:examples/sqs-events"],
+    "@vokejs/sqs-events": ["@vokejs/sqs-events@workspace:examples/sqs-events"],
 
-    "@voke/stream-events": ["@voke/stream-events@workspace:examples/stream-events"],
+    "@vokejs/stream-events": ["@vokejs/stream-events@workspace:examples/stream-events"],
 
-    "@voke/testing": ["@voke/testing@workspace:packages/testing"],
+    "@vokejs/testing": ["@vokejs/testing@workspace:packages/testing"],
 
     "@yuku-core/binding-android-arm64": ["@yuku-core/binding-android-arm64@0.19.0", "", { "os": "android", "cpu": "arm64" }, "sha512-wdL2XmTiZixAOaHk9Z0JJZ8u9Qm8d333Zjpc6gaxXFX+UR5BlsfxZ7a2+2Rm71pamppsPYGUGFq2oVLbh6DISw=="],
 

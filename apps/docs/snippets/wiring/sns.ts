@@ -1,5 +1,5 @@
-import { sns } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { sns } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 
 export const orderCreated = sns({
   handler: (message) => {

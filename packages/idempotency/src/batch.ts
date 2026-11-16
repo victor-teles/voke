@@ -2,7 +2,7 @@ import type {
   SqsBatchResult,
   SqsMessageBatch,
   SqsValidMessage,
-} from "@voke/aws";
+} from "@vokejs/aws";
 
 import { IdempotencyError } from "./errors";
 import type { IdempotencyErrorCode } from "./errors";

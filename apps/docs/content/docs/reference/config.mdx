@@ -9,7 +9,7 @@ The smallest config that can synthesize, build and deploy names the project and 
 
 ```ts twoslash
 // voke.config.ts
-import { aws } from "@voke/aws";
+import { aws } from "@vokejs/aws";
 import { defineConfig } from "voke";
 
 export default defineConfig({
@@ -30,9 +30,9 @@ The top-level settings.
 | `stage`       | `string`                 | `VOKE_STAGE`, then `"local"`     | Stage, such as `local`, `dev` or `prod`. See the note on `local` below the table.                                                             |
 | `region`      | `string`                 | `AWS_REGION`, then `"us-east-1"` | AWS region for synthesized and deployed resources.                                                                                            |
 | `entrypoint`  | `string`                 | `"./src/index.ts"`               | Project entrypoint. `voke synth`, `voke build` and `voke deploy` import it to discover the Functions.                                         |
-| `provider`    | `VokeProvider`           | None                             | The Provider, such as `aws()` from `@voke/aws`. Required by `voke synth`, `build`, `deploy`, `remove` and `local`.                            |
+| `provider`    | `VokeProvider`           | None                             | The Provider, such as `aws()` from `@vokejs/aws`. Required by `voke synth`, `build`, `deploy`, `remove` and `local`.                          |
 | `environment` | `Record<string, string>` | `{}`                             | Environment variables set on every Function, deployed and under `voke dev`.                                                                   |
-| `resources`   | `Record<string, ...>`    | `{}`                             | Infrastructure resources, built with `sqsQueue()`, `dynamodbTable()` and the other builders from `@voke/aws/cloudformation`.                  |
+| `resources`   | `Record<string, ...>`    | `{}`                             | Infrastructure resources, built with `sqsQueue()`, `dynamodbTable()` and the other builders from `@vokejs/aws/cloudformation`.                |
 | `remotes`     | `Record<string, ...>`    | None                             | Remote Function Registry targets, read by `voke remote generate` and `voke dev`. See [Remotes](#remotes).                                     |
 | `plugins`     | `VokePlugin[]`           | `[]`                             | Plugins, in wrap order: the first is the outermost. Their resources and environment join the ones above. See [Plugins](/docs/guides/plugins). |
 
@@ -110,7 +110,7 @@ Each key of `remotes` names one remote Voke Project. Voke selects the target for
 | `remotes.<name>.out`                      | `string`                                          | `"src/voke/remotes/<name>.ts"` | Module that `voke remote generate` writes.                                                                                 |
 
 ```ts title="voke.config.ts" twoslash
-import { aws } from "@voke/aws";
+import { aws } from "@vokejs/aws";
 import { defineConfig } from "voke";
 
 export default defineConfig({
@@ -132,22 +132,22 @@ See [Remote Functions](/docs/guides/remote-functions) for the full workflow.
 
 ## AWS Provider options
 
-`aws()` from `@voke/aws` takes three options, `lambda`, `local` and `retainData`:
+`aws()` from `@vokejs/aws` takes three options, `lambda`, `local` and `retainData`:
 
 | Option                    | Type                                                                             | Default         | Description                                                                                                                                                                                                                          |
 | ------------------------- | -------------------------------------------------------------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `lambda.runtime`          | `"nodejs22.x" \| "nodejs24.x"`                                                   | `"nodejs22.x"`  | Lambda Node.js runtime for every Function.                                                                                                                                                                                           |
 | `lambda.architecture`     | `"arm64" \| "x86_64"`                                                            | `"arm64"`       | Lambda architecture for every Function.                                                                                                                                                                                              |
 | `lambda.logRetentionDays` | `number`                                                                         | `14`            | How long each Function's log group keeps logs. One of the CloudWatch Logs values listed below.                                                                                                                                       |
-| `local`                   | `LocalProvider`                                                                  | `awsEmulator()` | The Local AWS Provider for `voke local` and `voke dev`: `awsEmulator()` or `floci()` from `@voke/aws/local`.                                                                                                                         |
+| `local`                   | `LocalProvider`                                                                  | `awsEmulator()` | The Local AWS Provider for `voke local` and `voke dev`: `awsEmulator()` or `floci()` from `@vokejs/aws/local`.                                                                                                                       |
 | `retainData`              | `boolean \| (resource: { key: string; stage: string; type: string }) => boolean` | `true`          | Whether `voke deploy` and `voke remove` keep tables, buckets and secrets with their data. A predicate decides per resource and stage. Local AWS Providers never retain. See [Data retention](/docs/guides/resources#data-retention). |
 
 `logRetentionDays` accepts only these values: 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653. Another value is a `VokeConfigError` that suggests the nearest allowed values.
 
 ```ts twoslash
 // voke.config.ts
-import { aws } from "@voke/aws";
-import { floci } from "@voke/aws/local";
+import { aws } from "@vokejs/aws";
+import { floci } from "@vokejs/aws/local";
 import { defineConfig } from "voke";
 
 export default defineConfig({
@@ -174,14 +174,14 @@ See [Local AWS](/docs/guides/local-aws) for the AWS Emulator and Floci.
 | `synthesis.timeout`     | `number`                 | `runtime.timeout` | Maximum run time for this Function, in seconds.                                                           |
 | `synthesis.memory`      | `number`                 | `runtime.memory`  | Memory for this Function, in MB.                                                                          |
 | `synthesis.environment` | `Record<string, string>` | None              | Environment variables for this Function. They override `environment`.                                     |
-| `synthesis.provider`    | `Record<string, ...>`    | None              | Provider-specific settings. For AWS, use `awsLambda({ runtime, architecture })` from `@voke/aws`.         |
+| `synthesis.provider`    | `Record<string, ...>`    | None              | Provider-specific settings. For AWS, use `awsLambda({ runtime, architecture })` from `@vokejs/aws`.       |
 | `synthesis.entrypoint`  | `string`                 | `entrypoint`      | Bundle this Function from its own file.                                                                   |
 | `synthesis.handler`     | `string`                 | Generated         | Lambda handler string. Voke generates one handler per Function; set this only with a custom `entrypoint`. |
 
 ```ts twoslash
 // src/index.ts
-import { awsLambda } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { awsLambda } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 import { fn } from "voke";
 
 export const report = fn({
@@ -223,8 +223,8 @@ An explicit queue visibility timeout lower than a consumer's timeout is an error
 
 ```ts twoslash
 // voke.config.ts
-import { aws } from "@voke/aws";
-import { sqsQueue } from "@voke/aws/cloudformation";
+import { aws } from "@vokejs/aws";
+import { sqsQueue } from "@vokejs/aws/cloudformation";
 import { defineConfig } from "voke";
 
 export default defineConfig({
@@ -250,14 +250,14 @@ These settings were removed. Voke does not ignore them: `defineConfig()` throws 
 | `api.function`               | "api.function" was removed; HTTP routes come from the route-backed Functions in the project entrypoint                                                                                                        |
 | `api.routes`                 | "api.routes" was removed; HTTP routes come from the route-backed Functions in the project entrypoint                                                                                                          |
 | `api.protocol`               | "api.protocol" was removed; HTTP routes come from the route-backed Functions in the project entrypoint                                                                                                        |
-| `local`                      | local AWS settings moved to the provider: `aws({ local: floci() })` from "@voke/aws" and "@voke/aws/local"                                                                                                    |
+| `local`                      | local AWS settings moved to the provider: `aws({ local: floci() })` from "@vokejs/aws" and "@vokejs/aws/local"                                                                                                |
 | `runtime.lambda`             | "runtime.lambda" moved to the AWS provider; use `aws({ lambda: { runtime } })`                                                                                                                                |
 | `build.target`               | "build.target" was removed; Voke always builds an ESM bundle for the Lambda Node.js runtime                                                                                                                   |
 
 Voke reports every removed setting in one error, for example:
 
 ```txt
-Invalid Voke config at functions: Functions are declared in the project entrypoint, not in voke.config.ts. Export them from the entrypoint: export default voke(functions, { config }) or export const functions = createFunctions({ ... }); local: local AWS settings moved to the provider: aws({ local: floci() }) from "@voke/aws" and "@voke/aws/local"
+Invalid Voke config at functions: Functions are declared in the project entrypoint, not in voke.config.ts. Export them from the entrypoint: export default voke(functions, { config }) or export const functions = createFunctions({ ... }); local: local AWS settings moved to the provider: aws({ local: floci() }) from "@vokejs/aws" and "@vokejs/aws/local"
 ```
 
 ## Next steps

@@ -1,5 +1,5 @@
 {
-  "name": "@voke/http",
+  "name": "@vokejs/http",
   "version": "0.1.0",
   "description": "HTTP helpers for Voke Gateways.",
   "keywords": [
@@ -24,7 +24,7 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "@voke/source": "./src/index.ts",
+      "@vokejs/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./src/index.ts"
     }

@@ -8,8 +8,8 @@ import type {
   PutItemCommand,
   UpdateItemCommand,
 } from "@aws-sdk/client-dynamodb";
-import { createAwsClientConfig } from "@voke/aws";
-import type { AwsClientConfig } from "@voke/aws";
+import { createAwsClientConfig } from "@vokejs/aws";
+import type { AwsClientConfig } from "@vokejs/aws";
 
 import type {
   IdempotencyAcquireResult,

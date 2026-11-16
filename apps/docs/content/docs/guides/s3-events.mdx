@@ -8,13 +8,13 @@ filter the objects by key, and test the Function without AWS.
 
 ## Declare the bucket and the Function
 
-Declare the bucket in `resources` with `s3Bucket()` from `@voke/aws/cloudformation`. Then create the
-Function with `s3()` from `@voke/aws`, and pass the bucket's resource key as `bucket`:
+Declare the bucket in `resources` with `s3Bucket()` from `@vokejs/aws/cloudformation`. Then create the
+Function with `s3()` from `@vokejs/aws`, and pass the bucket's resource key as `bucket`:
 
 ```ts twoslash
 // @filename: voke.config.ts
-import { aws } from "@voke/aws";
-import { s3Bucket } from "@voke/aws/cloudformation";
+import { aws } from "@vokejs/aws";
+import { s3Bucket } from "@vokejs/aws/cloudformation";
 import { defineConfig } from "voke";
 
 export default defineConfig({
@@ -26,7 +26,7 @@ export default defineConfig({
 });
 
 // @filename: src/index.ts
-import { s3 } from "@voke/aws";
+import { s3 } from "@vokejs/aws";
 import { createFunctions } from "voke";
 
 export const functions = createFunctions({
@@ -114,7 +114,7 @@ Test an S3 Function with `functions.sendEvent(name, { key })`. It runs the same 
 deployed Lambda:
 
 ```ts twoslash
-import { s3 } from "@voke/aws";
+import { s3 } from "@vokejs/aws";
 import { createFunctions } from "voke";
 
 const functions = createFunctions({

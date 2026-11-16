@@ -1,5 +1,5 @@
-import { aws, sqs } from "@voke/aws";
-import { dynamodbTable } from "@voke/aws/cloudformation";
+import { aws, sqs } from "@vokejs/aws";
+import { dynamodbTable } from "@vokejs/aws/cloudformation";
 
 import { createFunctions, fn, http, voke } from "../../../src/index";
 import type { StandardSchemaV1 } from "../../../src/index";

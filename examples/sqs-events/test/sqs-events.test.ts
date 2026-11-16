@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
 
-import { createLambdaHandlers } from "@voke/aws";
-import type { SqsAwsEvent, SqsBatchResult, SqsRecord } from "@voke/aws";
-import { idempotency, memoryStore } from "@voke/idempotency";
+import { createLambdaHandlers } from "@vokejs/aws";
+import type { SqsAwsEvent, SqsBatchResult, SqsRecord } from "@vokejs/aws";
+import { idempotency, memoryStore } from "@vokejs/idempotency";
 
 import { functions, processedOrders, settledPayments } from "../src/functions";
 

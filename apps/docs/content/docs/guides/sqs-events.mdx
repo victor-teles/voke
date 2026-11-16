@@ -9,13 +9,13 @@ the messages that failed, and test the Function without AWS.
 ## Declare the queue and the Function
 
 Declare the queue in `resources` in `voke.config.ts` with `sqsQueue()` from
-`@voke/aws/cloudformation`. Then create the Function with `sqs()` from `@voke/aws`, and pass the
+`@vokejs/aws/cloudformation`. Then create the Function with `sqs()` from `@vokejs/aws`, and pass the
 queue's resource key as `queue`:
 
 ```ts twoslash
 // @filename: voke.config.ts
-import { aws } from "@voke/aws";
-import { sqsQueue } from "@voke/aws/cloudformation";
+import { aws } from "@vokejs/aws";
+import { sqsQueue } from "@vokejs/aws/cloudformation";
 import { defineConfig } from "voke";
 
 export default defineConfig({
@@ -27,8 +27,8 @@ export default defineConfig({
 });
 
 // @filename: src/index.ts
-import { sqs } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { sqs } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 import { createFunctions } from "voke";
 
 const orderMessage = schema.object({
@@ -88,8 +88,8 @@ succeeded and makes the failed messages visible again for a retry.
   then return the builder.
 
 ```ts twoslash
-import { sqs } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { sqs } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 
 const chargeOrder = async (orderId: string): Promise<void> => {
   if (orderId === "") {
@@ -131,8 +131,8 @@ Set `invalidMessageBody: "include"` to receive invalid messages too, for example
 `batch.messages` then holds both kinds. Check `message.valid` to tell them apart:
 
 ```ts twoslash
-import { sqs } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { sqs } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 
 // ---cut---
 export const processOrder = sqs({
@@ -169,13 +169,13 @@ receives, SQS moves it to the queue's [dead-letter queue](/docs/guides/dead-lett
 
 SQS delivers a message at least once: a timeout or a partial batch failure sends it again, and a
 producer can send the same business event twice with a new message id. To run each message once,
-wrap a per-message function with `idempotentBatch` from `@voke/idempotency` and add the
+wrap a per-message function with `idempotentBatch` from `@vokejs/idempotency` and add the
 `idempotency()` Plugin to `voke.config.ts`:
 
 ```ts twoslash
-import { sqs } from "@voke/aws";
-import { idempotentBatch } from "@voke/idempotency";
-import { schema } from "@voke/schema";
+import { sqs } from "@vokejs/aws";
+import { idempotentBatch } from "@vokejs/idempotency";
+import { schema } from "@vokejs/schema";
 
 const settlePayment = async (paymentId: string): Promise<void> => {
   // Charge or record the payment.
@@ -222,8 +222,8 @@ To consume more than one queue with one Function, pass `queues` instead of `queu
 resource key, or an object with `queue` and its own options:
 
 ```ts twoslash
-import { sqs } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { sqs } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 
 // ---cut---
 export const processOrder = sqs({
@@ -249,8 +249,8 @@ the largest value wins.
 To set it yourself, pass `visibilityTimeoutSeconds`:
 
 ```ts title="voke.config.ts" twoslash
-import { aws } from "@voke/aws";
-import { sqsQueue } from "@voke/aws/cloudformation";
+import { aws } from "@vokejs/aws";
+import { sqsQueue } from "@vokejs/aws/cloudformation";
 import { defineConfig } from "voke";
 
 export default defineConfig({
@@ -275,8 +275,8 @@ Test an SQS Function with `functions.sendEvent(name, { messages })`. It runs the
 validation and handler code as the deployed Lambda, and returns the batch result:
 
 ```ts twoslash
-import { sqs } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { sqs } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 import { createFunctions } from "voke";
 
 const functions = createFunctions({

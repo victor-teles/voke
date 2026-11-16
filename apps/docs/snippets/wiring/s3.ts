@@ -1,4 +1,4 @@
-import { s3 } from "@voke/aws";
+import { s3 } from "@vokejs/aws";
 
 export const imageUploaded = s3({
   bucket: "uploadsBucket",

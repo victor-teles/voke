@@ -8,8 +8,8 @@ Voke is a TypeScript framework for HTTP APIs and workers that run on AWS Lambda.
 It is for TypeScript developers who want one typed codebase for local development, tests and deployment, without writing handler glue or infrastructure templates.
 
 <Callout type="info" title="Voke is not published yet">
-  The published package names (`voke`, `@voke/*`) are not final. Until then, you
-  can [try it from the
+  The published package names (`voke`, `@vokejs/*`) are not final. Until then,
+  you can [try it from the
   repository](/docs/getting-started#try-it-from-the-repository).
 </Callout>
 
@@ -36,7 +36,7 @@ A Voke project has two files. `voke.config.ts` holds the project settings and th
 
 ```ts twoslash
 // @filename: voke.config.ts
-import { aws } from "@voke/aws";
+import { aws } from "@vokejs/aws";
 import { defineConfig } from "voke";
 
 export default defineConfig({
@@ -45,7 +45,7 @@ export default defineConfig({
 });
 
 // @filename: src/index.ts
-import { schema } from "@voke/schema";
+import { schema } from "@vokejs/schema";
 import { createFunctions, http, route, voke } from "voke";
 
 import config from "../voke.config";

@@ -8,14 +8,14 @@ import {
   parameter,
   secret,
   sqs,
-} from "@voke/aws";
-import type { SqsMessageBatch } from "@voke/aws";
+} from "@vokejs/aws";
+import type { SqsMessageBatch } from "@vokejs/aws";
 import {
   dynamodbTable,
   secret as cloudFormationSecret,
   sqsQueue,
   ssmParameter,
-} from "@voke/aws/cloudformation";
+} from "@vokejs/aws/cloudformation";
 
 import { defineConfig } from "../src/config";
 import { VokeConfigError } from "../src/errors";

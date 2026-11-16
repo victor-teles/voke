@@ -18,7 +18,7 @@ export class CliUsageError extends VokeError {
 export const missingProviderMessage = (name: string): string =>
   `No provider configured. Add a provider to voke.config.ts, for example:
 
-  import { aws } from "@voke/aws";
+  import { aws } from "@vokejs/aws";
   export default defineConfig({ name: ${JSON.stringify(name)}, provider: aws() });`;
 
 export type { CliFlagSpec, CliPositionalSpec } from "./plugin";

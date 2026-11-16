@@ -115,7 +115,7 @@ test("build CLI fails clearly when no Provider is configured", async () => {
         run: () => {},
       })
     ).rejects.toThrow(
-      'No provider configured. Add a provider to voke.config.ts, for example:\n\n  import { aws } from "@voke/aws";\n  export default defineConfig({ name: "build-api", provider: aws() });'
+      'No provider configured. Add a provider to voke.config.ts, for example:\n\n  import { aws } from "@vokejs/aws";\n  export default defineConfig({ name: "build-api", provider: aws() });'
     );
   } finally {
     await rm(directory, { force: true, recursive: true });

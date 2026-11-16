@@ -1239,7 +1239,7 @@ const parseResult = async <TOutputSchema extends AnyStandardSchema>(
   )) as StandardSchemaOutput<TOutputSchema>;
 };
 
-// The keys a `@voke/schema` object exposes, for checks other validators cannot support.
+// The keys a `@vokejs/schema` object exposes, for checks other validators cannot support.
 const schemaObjectKeys = (schema: unknown): readonly string[] | undefined => {
   if (typeof schema !== "object" || schema === null || !("~voke" in schema)) {
     return undefined;

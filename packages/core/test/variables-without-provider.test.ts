@@ -22,7 +22,7 @@ const text: StandardSchemaV1<string, string> = {
 };
 
 // A descriptor for a provider id that nothing registers, as an AWS Runtime Variable is when no
-// Provider is configured (core tests, @voke/testing clients).
+// Provider is configured (core tests, @vokejs/testing clients).
 const createRegistry = () =>
   createFunctions({
     readKey: fn({

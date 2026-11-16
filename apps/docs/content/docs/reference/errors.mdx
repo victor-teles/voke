@@ -6,7 +6,7 @@ description: Identify a Voke error by its class and code, read its message, and 
 This page lists the errors Voke throws, when each one is thrown, and the error body the Gateway sends to HTTP clients. Use it to catch an error by class or `code`, and to read its message.
 
 ```ts twoslash
-import { schema } from "@voke/schema";
+import { schema } from "@vokejs/schema";
 import { createFunctions, fn, InvokeError, voke } from "voke";
 
 const functions = createFunctions({
@@ -144,7 +144,7 @@ The message names the Function and the failure, for example `Invalid payload for
 
 ## Idempotency errors
 
-`IdempotencyError` is exported by `@voke/idempotency`. `idempotent(...)` throws it when a call cannot run or be replayed. It extends `Error` (not `VokeError`) and has a `code`. The message names the Function and the record status, never the key, the payload or the stored result. In a route, an uncaught `IdempotencyError` becomes the Gateway's generic 500 response; catch it to answer with another status. See [Idempotency](/docs/guides/idempotency).
+`IdempotencyError` is exported by `@vokejs/idempotency`. `idempotent(...)` throws it when a call cannot run or be replayed. It extends `Error` (not `VokeError`) and has a `code`. The message names the Function and the record status, never the key, the payload or the stored result. In a route, an uncaught `IdempotencyError` becomes the Gateway's generic 500 response; catch it to answer with another status. See [Idempotency](/docs/guides/idempotency).
 
 | `code`                                | Thrown when                                                                                                                                                                                                                      |
 | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -209,7 +209,7 @@ Each issue path starts with the part that failed:
   see the cause locally. The stage does not turn this on.
 </Callout>
 
-For a failure the client should see, handle it in the handler and return the response you want with `error()` from `@voke/http`. Do not rely on a thrown message. See [HTTP routes](/docs/guides/http-routes).
+For a failure the client should see, handle it in the handler and return the response you want with `error()` from `@vokejs/http`. Do not rely on a thrown message. See [HTTP routes](/docs/guides/http-routes).
 
 ## Next steps
 

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 
-import type { AwsClientConfig } from "@voke/aws";
+import type { AwsClientConfig } from "@vokejs/aws";
 import { VokeResourceBindingError } from "voke";
 
 import { acquireCondition, dynamoDbStore } from "../src/dynamodb-store";

@@ -61,7 +61,7 @@ export const handlerModule = (file: string, outdir: string): string =>
 /**
  * The package condition every Lambda Bundle is built with. A package resolves its run-time half
  * through it in its `package.json` `exports` or `imports`, so deploy-time code stays out of the
- * bundle, as `@voke/aws` does for `aws()`. A public contract: docs/adr/0022-runtime-only-lambda-bundle.md.
+ * bundle, as `@vokejs/aws` does for `aws()`. A public contract: docs/adr/0022-runtime-only-lambda-bundle.md.
  */
 const runtimeCondition = "voke-runtime";
 

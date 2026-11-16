@@ -15,7 +15,7 @@ export interface AwsProviderOptions {
   lambda?: AwsLambdaOptions;
   /**
    * The Local AWS Provider for `voke local` and `voke dev`. Defaults to the AWS Emulator,
-   * `awsEmulator()`; pass `floci()` from "@voke/aws/local" for Floci.
+   * `awsEmulator()`; pass `floci()` from "@vokejs/aws/local" for Floci.
    */
   local?: LocalProvider;
   /**
