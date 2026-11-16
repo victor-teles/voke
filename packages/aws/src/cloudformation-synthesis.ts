@@ -68,6 +68,8 @@ export interface StackResourceDefinition {
         cloudFormationType: string;
         /** Holds state that a redeploy cannot recreate; synthesis retains it by default. */
         dataBearing?: true;
+        /** `sqsQueue({ deadLetterQueue: false })`: a consumed queue gets no dead-letter queue. */
+        deadLetterQueue?: false;
         outputName: string;
         policyResource:
           | "ref"
@@ -88,11 +90,12 @@ const awsCloudFormationResource = (definition: {
   bindingValue: AwsResourceBindingValue;
   cloudFormationType: string;
   dataBearing?: true;
+  deadLetterQueue?: false;
   outputName: string;
   policyResource: AwsResourcePolicyResource;
   properties: Record<string, CloudFormationValue>;
 }): StackResourceDefinition => {
-  const { dataBearing, ...resource } = definition;
+  const { dataBearing, deadLetterQueue, ...resource } = definition;
 
   return {
     ...resource,
@@ -102,6 +105,7 @@ const awsCloudFormationResource = (definition: {
           bindingValue: definition.bindingValue,
           cloudFormationType: definition.cloudFormationType,
           ...(dataBearing === true ? { dataBearing } : {}),
+          ...(deadLetterQueue === false ? { deadLetterQueue } : {}),
           outputName: definition.outputName,
           policyResource: definition.policyResource,
         },
@@ -143,6 +147,8 @@ export const dynamodbTable = (
   return awsCloudFormationResource({
     // Voke does not model per-operation table access yet, so these practical
     // defaults stay table-scoped instead of wildcarding all DynamoDB resources.
+    // A transaction needs no action of its own: each item is authorized by its
+    // item action, ConditionCheckItem included.
     actions: [
       "dynamodb:GetItem",
       "dynamodb:PutItem",
@@ -150,6 +156,9 @@ export const dynamodbTable = (
       "dynamodb:DeleteItem",
       "dynamodb:Query",
       "dynamodb:Scan",
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
     ],
     bindingAttribute: "name",
     bindingValue: "ref",
@@ -233,6 +242,12 @@ export const kinesisStream = (
 
 export interface SqsQueueOptions {
   /**
+   * A queue that a Function consumes gets a dead-letter queue: after 5 failed receives SQS moves
+   * the message there and keeps it for 14 days. `false` turns it off, and a failing message is
+   * then delivered again until the queue's retention ends. Default true.
+   */
+  deadLetterQueue?: boolean;
+  /**
    * How long a received message stays hidden from other consumers, in seconds. When unset, Voke
    * derives it from the Functions that consume the queue (six times the timeout plus the batching
    * window), as AWS recommends.
@@ -253,6 +268,7 @@ export const sqsQueue = (
     bindingAttribute: "url",
     bindingValue: "ref",
     cloudFormationType: "AWS::SQS::Queue",
+    ...(options.deadLetterQueue === false ? { deadLetterQueue: false } : {}),
     outputName: "Url",
     policyResource: "getAttArn",
     properties:
@@ -446,9 +462,31 @@ const parameterArn = (name: string): CloudFormationValue => ({
   ],
 });
 
+/** The statements of each resource a Function links, and of no other resource. */
+const toResourceLinkPolicyStatements = (
+  links: readonly string[],
+  resources: VokeModel["resources"]
+): CloudFormationValue[] =>
+  links.flatMap((key) => {
+    const resource = resources[key];
+
+    if (resource === undefined) {
+      throw new Error(`Missing resource model for Resource Link: ${key}`);
+    }
+
+    return toResourcePolicyStatements(
+      toLogicalId(key),
+      resource,
+      resourceProvider(resource)
+    );
+  });
+
+// A resource-backed Runtime Variable reads a resource the Function may also link; the link's
+// statement already covers the read, so it is skipped here.
 const toRuntimeVariablePolicyStatements = (
   variables: VokeModel["functions"][string]["variables"],
-  resources: VokeModel["resources"]
+  resources: VokeModel["resources"],
+  links: readonly string[]
 ): CloudFormationValue[] => {
   const statements: CloudFormationValue[] = [];
 
@@ -485,6 +523,11 @@ const toRuntimeVariablePolicyStatements = (
     }
 
     const resourceKey = String(source.resource);
+
+    if (links.includes(resourceKey)) {
+      continue;
+    }
+
     const resource = resources[resourceKey];
 
     if (resource === undefined) {
@@ -508,6 +551,7 @@ const toRuntimeVariablePolicyStatements = (
 /** The statements each of a Function's Event Sources adds to that Function's role only. */
 const toEventSourcePolicyStatements = (
   functionKey: string,
+  lambdaLogicalId: string,
   definition: VokeModel["functions"][string],
   model: VokeModel
 ): CloudFormationValue[] =>
@@ -520,6 +564,7 @@ const toEventSourcePolicyStatements = (
         eventSource,
         eventSourceIndex,
         functionKey,
+        lambdaLogicalId,
         model,
       }) ?? []
   );
@@ -919,6 +964,46 @@ const withDerivedVisibilityTimeout = (
     : { ...resource.properties, VisibilityTimeout: derived };
 };
 
+/**
+ * Adds an Event Source's resources to the template. The same resource twice is fine (two Functions
+ * consuming one queue share its dead-letter queue); a different resource under a taken logical id
+ * is an error, never a silent overwrite.
+ */
+const mergeEventSourceResources = (
+  templateResources: Record<string, CloudFormationResource>,
+  resources: Record<string, CloudFormationResource>,
+  model: VokeModel,
+  functionKey: string
+): void => {
+  for (const [logicalId, resource] of Object.entries(resources)) {
+    const existing = templateResources[logicalId];
+
+    if (
+      existing !== undefined &&
+      JSON.stringify(existing) !== JSON.stringify(resource)
+    ) {
+      const owner =
+        Object.keys(model.resources).find(
+          (key) => toLogicalId(key) === logicalId
+        ) ?? logicalId;
+      const isDeadLetterQueue = logicalId.endsWith("DeadLetterQueue");
+      const purpose = isDeadLetterQueue ? " for its dead-letter queue" : "";
+      const hint = isDeadLetterQueue
+        ? "Rename the resource, or turn the dead-letter queue off with deadLetterQueue: false."
+        : "Rename the resource.";
+
+      throw VokeModelError.validation([
+        {
+          message: `Function "${functionKey}" needs the logical id "${logicalId}"${purpose}, but resource "${owner}" already uses it. ${hint}`,
+          path: `functions.${functionKey}.eventSources`,
+        },
+      ]);
+    }
+
+    templateResources[logicalId] = resource;
+  }
+};
+
 /** Lets an Event Source's adapter change the properties of the resource it references. */
 const patchEventSourceResource = (
   adapter: AwsEventSourceAdapter,
@@ -1037,7 +1122,6 @@ export const synthesizeCloudFormationFromModel = (
   const apiFunctionName = primaryFunctionName;
   const templateResources: Record<string, CloudFormationResource> = {};
   const outputs: Record<string, CloudFormationOutput> = {};
-  const policyStatements: CloudFormationValue[] = [];
   const stackEventSources = new Map<
     AwsEventSourceAdapter,
     AwsEventSourceSynthesisContext[]
@@ -1060,14 +1144,12 @@ export const synthesizeCloudFormationFromModel = (
       Properties: withDerivedVisibilityTimeout(model, name, resource),
       Type: provider.cloudFormationType,
     };
-    policyStatements.push(
-      ...toResourcePolicyStatements(logicalId, resource, provider)
-    );
   }
 
   const durableAccess = durableInvokeAccess(model);
-  // Plugin awsPolicy() statements reach every Function role, like resource statements.
-  policyStatements.push(...pluginPolicyStatements(model));
+  // Plugin awsPolicy() statements reach every Function role on purpose: a Plugin's Function Wrap
+  // runs around every Function. Resource statements do not: each role gets only its links'.
+  const pluginStatements = pluginPolicyStatements(model);
 
   for (const [name, definition] of Object.entries(model.functions).toSorted(
     ([leftName], [rightName]) => {
@@ -1087,12 +1169,14 @@ export const synthesizeCloudFormationFromModel = (
     const logGroupLogicalId = `${logicalId}LogGroup`;
     const lambda = resolveFunctionLambdaSettings(definition, lambdaSettings);
     templateResources[roleLogicalId] = functionRoleResource([
-      ...policyStatements,
+      ...toResourceLinkPolicyStatements(definition.links, model.resources),
+      ...pluginStatements,
       ...toRuntimeVariablePolicyStatements(
         definition.variables,
-        model.resources
+        model.resources,
+        definition.links
       ),
-      ...toEventSourcePolicyStatements(name, definition, model),
+      ...toEventSourcePolicyStatements(name, logicalId, definition, model),
       ...durableAccess.statements,
       ...durableExecutionRoleStatements(definition),
     ]);
@@ -1185,9 +1269,11 @@ export const synthesizeCloudFormationFromModel = (
         model,
       };
 
-      Object.assign(
+      mergeEventSourceResources(
         templateResources,
-        adapter.synthesize(eventSourceContext).resources
+        adapter.synthesize(eventSourceContext).resources,
+        model,
+        name
       );
       patchEventSourceResource(adapter, eventSourceContext, templateResources);
       stackEventSources.set(adapter, [

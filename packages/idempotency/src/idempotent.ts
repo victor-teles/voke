@@ -15,6 +15,11 @@ export interface IdempotencyScope {
   readonly timeoutSeconds: number;
   /** The Plugin's default for `expiresAfterSeconds`. */
   readonly expiresAfterSeconds: number;
+  /**
+   * Reads the table name through the running Function's `context.resource`, which throws when
+   * the Function does not link the table. Absent for a store passed in options.
+   */
+  readonly resolveTable?: () => void;
 }
 
 export const idempotencyScope = new AsyncLocalStorage<IdempotencyScope>();
@@ -205,7 +210,11 @@ export const runIdempotent = async (
 const missingPluginMessage =
   "idempotent() needs the idempotency() Plugin in voke.config.ts, or a store in its options";
 
-const resolveScope = (
+/**
+ * The scope of the running handler call, with its table read through the Function's Resource
+ * Link. Call it before the first store operation of a handler call.
+ */
+export const resolveScope = (
   store: IdempotencyStore | undefined
 ): IdempotencyScope => {
   const scope = idempotencyScope.getStore();
@@ -223,6 +232,8 @@ const resolveScope = (
   if (scope === undefined) {
     throw new VokeConfigError(missingPluginMessage);
   }
+
+  scope.resolveTable?.();
 
   return scope;
 };

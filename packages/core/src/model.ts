@@ -99,6 +99,11 @@ export interface VokeModelFunction {
   eventSources: VokeModelEventSource[];
   handler: string;
   invokable: boolean;
+  /**
+   * The Function's Resource Links: the resource keys it declared in `resources`, in declaration
+   * order, without duplicates. Its role gets each linked resource's access.
+   */
+  links: string[];
   /** Memory in MB: the Function's `synthesis.memory`, else `runtime.memory`. */
   memory: number;
   /** Provider Extension Records from `synthesis.provider`, copied untouched. */
@@ -108,6 +113,10 @@ export interface VokeModelFunction {
   timeout: number;
   variables: RuntimeVariableCatalog;
   environment: Record<string, string>;
+  /**
+   * The resource bindings this Function's environment holds: one per Resource Link, then one per
+   * resource a Runtime Variable reads (`fromResource`), without duplicates.
+   */
   bindings: VokeModelBinding[];
 }
 
@@ -456,6 +465,86 @@ const validateModel = (model: VokeModel): void => {
   }
 };
 
+/** The resource keys a Function's resource-backed Runtime Variables (`fromResource`) read. */
+const runtimeVariableResourceKeys = (
+  definition: AnyFunctionDefinition
+): string[] =>
+  Object.values(definition.variables ?? {}).flatMap((variable) =>
+    runtimeVariableResourceKind(variable.source) !== undefined &&
+    typeof variable.source.resource === "string"
+      ? [variable.source.resource]
+      : []
+  );
+
+const missingResourceLinkMessage = (
+  functionName: string,
+  resource: string
+): string =>
+  `Function "${functionName}" links resource "${resource}", but no matching resource is defined.`;
+
+/** The Function's Resource Links without duplicates; an unknown or malformed key is a config error. */
+const toResourceLinks = (
+  functionName: string,
+  definition: AnyFunctionDefinition,
+  resources: Record<string, VokeModelResource>
+): string[] => {
+  const links: string[] = [];
+  const issues: VokeIssue[] = [];
+
+  for (const [index, resource] of (
+    (definition.resources ?? []) as readonly unknown[]
+  ).entries()) {
+    const path = `functions.${functionName}.resources.${index}`;
+
+    if (typeof resource !== "string" || resource.trim() === "") {
+      issues.push({
+        message: `expected a resource key; received ${JSON.stringify(resource)}`,
+        path,
+      });
+      continue;
+    }
+
+    if (resources[resource] === undefined) {
+      issues.push({
+        message: missingResourceLinkMessage(functionName, resource),
+        path,
+      });
+      continue;
+    }
+
+    if (!links.includes(resource)) {
+      links.push(resource);
+    }
+  }
+
+  if (issues.length > 0) {
+    throw VokeConfigError.validation(issues);
+  }
+
+  return links;
+};
+
+const toFunctionBindings = (
+  links: readonly string[],
+  definition: AnyFunctionDefinition,
+  resources: Record<string, VokeModelResource>
+): VokeModelBinding[] =>
+  [...new Set([...links, ...runtimeVariableResourceKeys(definition)])].flatMap(
+    (resource) => {
+      const modelResource = resources[resource];
+
+      return modelResource === undefined
+        ? []
+        : [
+            {
+              attribute: modelResource.binding.attribute,
+              env: modelResource.binding.env,
+              resource,
+            },
+          ];
+    }
+  );
+
 const validateRuntimeVariableResources = (
   functionName: string,
   definition: AnyFunctionDefinition,
@@ -530,11 +619,6 @@ export const createInternalModel = (input: VokeModelInput): VokeModel => {
       toModelResource(name, resource),
     ])
   );
-  const bindings = Object.entries(resources).map(([resource, definition]) => ({
-    attribute: definition.binding.attribute,
-    env: definition.binding.env,
-    resource,
-  }));
   const resourceOutputs = Object.fromEntries(
     Object.entries(resources).map(([name, resource]) => [
       toOutputKey(name, resource.binding.attribute),
@@ -588,13 +672,14 @@ export const createInternalModel = (input: VokeModelInput): VokeModel => {
       throw VokeConfigError.validation(eventSourceIssues);
     }
 
+    const links = toResourceLinks(name, definition, resources);
     validateRuntimeVariableResources(name, definition, resources);
     assertFunctionSynthesis(name, definition.synthesis);
 
     const provider = definition.synthesis?.provider;
 
     return {
-      bindings,
+      bindings: toFunctionBindings(links, definition, resources),
       deployedName: definition.name ?? generatedFunctionName(name),
       entrypoint: definition.synthesis?.entrypoint ?? config.entrypoint,
       environment: {
@@ -604,6 +689,7 @@ export const createInternalModel = (input: VokeModelInput): VokeModel => {
       eventSources,
       handler: toFunctionHandler(name, definition),
       invokable: definition.kind === "invokable",
+      links,
       memory: definition.synthesis?.memory ?? config.runtime.memory,
       ...(provider === undefined ? {} : { provider: { ...provider } }),
       routes: definition.routes?.map(toRouteKey) ?? [],

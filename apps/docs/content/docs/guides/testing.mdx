@@ -165,7 +165,7 @@ test("processes an order message", async () => {
 });
 ```
 
-See [SQS events](/docs/guides/sqs-events) for batches and partial failures.
+See [SQS events](/docs/guides/sqs-events) for batches and partial failures. Local runs never retry or dead-letter an event: assert on the returned `batchItemFailures` or the thrown error. See [Dead-letter queues](/docs/guides/dead-letter-queues).
 
 ## Send HTTP requests to the Gateway
 
@@ -257,6 +257,30 @@ const result = await client.invoke("sendWelcomeEmail", { userId: "usr_1" });
 ```
 
 Prefer `functions.invoke(...)`, `functions.route(...)`, and `gateway.request(...)` in new tests. Use the client when a separate client object makes a worker suite clearer.
+
+The client activates the registry without a config, so a Function that reads a linked resource with `context.resource` cannot resolve its binding there. Test such a Function through `voke(functions, { config })`, with its binding variable set:
+
+```ts twoslash
+import { dynamodbTable } from "@voke/aws/cloudformation";
+import { schema } from "@voke/schema";
+import { createFunctions, fn, voke } from "voke";
+
+const functions = createFunctions({
+  tableName: fn({
+    output: schema.string(),
+    resources: ["usersTable"],
+    handler: (_payload, context) => context.resource("usersTable"),
+  }),
+});
+
+// ---cut---
+process.env.VOKE_RESOURCE_USERS_TABLE_NAME = "users-test";
+voke(functions, {
+  config: { name: "users", resources: { usersTable: dynamodbTable() } },
+});
+
+const tableName = await functions.invoke("tableName"); // "users-test"
+```
 
 ## Test against local AWS resources
 

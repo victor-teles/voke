@@ -16,8 +16,14 @@ import type {
 
 import { toLogicalId } from "./cloudformation-template";
 import type { CloudFormationValue } from "./cloudformation-template";
+import {
+  asyncFailureResourcesFor,
+  deadLetterQueueOptionIssues,
+  functionDeadLetterQueueStatements,
+} from "./dead-letter-queue";
 import { invalidEventPayloadError, toAwsEventTime } from "./event-payload";
 import { eventSourceResourceKindIssue } from "./event-source-resources";
+import type { AwsEventSourceRuntimeAdapter } from "./event-source-runtime";
 import type {
   AwsEventSourceAdapter,
   AwsEventSourceContext,
@@ -31,6 +37,7 @@ export type S3EventKind = "created" | "deleted";
 /** An S3 Event Source as `s3()` stores it: the bucket resource key, the kinds and the key filters. */
 export interface S3EventSourceDefinition extends EventSourceDefinition {
   readonly properties: {
+    readonly deadLetterQueue: boolean;
     readonly on: S3EventKind[];
     readonly prefix?: string;
     readonly suffix?: string;
@@ -120,12 +127,15 @@ export interface S3ObjectEventSchema extends StandardSchemaV1<
 
 export interface S3FunctionDefinitionInput<
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+  TResources extends readonly string[] = readonly string[],
 > {
   /** The key of an `s3Bucket()` resource. */
   readonly bucket: string;
+  /** Keep events this Function fails after Lambda's retries in a dead-letter queue. Default true. */
+  readonly deadLetterQueue?: boolean;
   readonly handler: (
     event: S3ObjectEvent,
-    context: InvokeContext<TVariables>
+    context: InvokeContext<TVariables, TResources[number]>
   ) => void | Promise<void>;
   readonly name?: string;
   /** The object changes to receive. Defaults to `["created"]`. */
@@ -135,6 +145,8 @@ export interface S3FunctionDefinitionInput<
   /** Only keys that end with this text, compared with the key as delivered. */
   readonly suffix?: string;
   readonly synthesis?: FunctionSynthesisConfig;
+  /** Resource Links: the resource keys this Function reads through `context.resource`. */
+  readonly resources?: TResources;
   readonly variables?: TVariables;
 }
 
@@ -375,12 +387,16 @@ const readEventKinds = (
 const s3EventSourceDefinition = (
   bucket: string,
   on: S3EventKind[],
+  deadLetterQueue: boolean,
   prefix: string | undefined,
   suffix: string | undefined
 ): S3EventSourceDefinition => {
-  const properties: { on: S3EventKind[]; prefix?: string; suffix?: string } = {
-    on,
-  };
+  const properties: {
+    deadLetterQueue: boolean;
+    on: S3EventKind[];
+    prefix?: string;
+    suffix?: string;
+  } = { deadLetterQueue, on };
 
   if (prefix !== undefined) {
     properties.prefix = prefix;
@@ -396,8 +412,9 @@ const s3EventSourceDefinition = (
 /** A Function that runs for each object created in or deleted from a bucket. */
 export const s3 = <
   const TVariables extends RuntimeVariableCatalog = Record<never, never>,
+  const TResources extends readonly string[] = readonly [],
 >(
-  definition: S3FunctionDefinitionInput<TVariables>
+  definition: S3FunctionDefinitionInput<TVariables, TResources>
 ): EventFunctionDefinition<string, S3ObjectEventSchema, TVariables, void> => {
   const { bucket, prefix, suffix } = definition;
 
@@ -426,13 +443,20 @@ export const s3 = <
 
   return Object.freeze({
     events: Object.freeze([
-      s3EventSourceDefinition(bucket, on, prefix, suffix),
+      s3EventSourceDefinition(
+        bucket,
+        on,
+        definition.deadLetterQueue ?? true,
+        prefix,
+        suffix
+      ),
     ]),
     handler: definition.handler,
     input: s3ObjectEventSchema(on, bucket),
     key: "",
     kind: "event",
     name: definition.name,
+    resources: definition.resources,
     routes: [],
     synthesis: definition.synthesis,
     variables: definition.variables,
@@ -480,7 +504,10 @@ const bucketKind = {
 const bucketIssues = (context: AwsEventSourceContext): VokeIssue[] => {
   const issue = eventSourceResourceKindIssue(context, bucketKind);
 
-  return issue === undefined ? [] : [issue];
+  return [
+    ...(issue === undefined ? [] : [issue]),
+    ...deadLetterQueueOptionIssues(context),
+  ];
 };
 
 const storedProperties = (
@@ -505,6 +532,22 @@ const withEventBridgeEnabled = (
 });
 
 /** How an S3 Event Source runs on Lambda and synthesizes to an EventBridge rule and a permission. */
+export const s3EventRuntimeAdapter: AwsEventSourceRuntimeAdapter = {
+  source: "s3",
+  // The key is passed through untouched; the schema reads everything else from `raw`.
+  toInvocation: (event) => {
+    const raw = readS3AwsEvent(event);
+
+    return {
+      key: raw.detail.object.key,
+      raw,
+    } satisfies S3EventInvocationInput;
+  },
+  toResponse: () => {
+    // EventBridge invokes asynchronously and ignores the result.
+  },
+};
+
 export const s3EventSourceAdapter: AwsEventSourceAdapter = {
   // The bucket sends its events to EventBridge; other notification settings are kept.
   resourceProperties: (_context, properties) => ({
@@ -513,6 +556,7 @@ export const s3EventSourceAdapter: AwsEventSourceAdapter = {
       properties.NotificationConfiguration
     ),
   }),
+  roleStatements: functionDeadLetterQueueStatements,
   source: "s3",
   synthesize: (context) => {
     const issues = bucketIssues(context);
@@ -534,28 +578,19 @@ export const s3EventSourceAdapter: AwsEventSourceAdapter = {
     }
 
     return {
-      resources: eventBridgeRuleResources({
-        lambdaLogicalId,
-        pattern: {
-          detail,
-          detailType: on.map((kind) => detailTypes[kind]),
-          source: [s3EventSource],
-        },
-        ruleLogicalId: `${lambdaLogicalId}${bucketLogicalId}Rule`,
-      }),
+      resources: {
+        ...asyncFailureResourcesFor(context),
+        ...eventBridgeRuleResources({
+          lambdaLogicalId,
+          pattern: {
+            detail,
+            detailType: on.map((kind) => detailTypes[kind]),
+            source: [s3EventSource],
+          },
+          ruleLogicalId: `${lambdaLogicalId}${bucketLogicalId}Rule`,
+        }),
+      },
     };
-  },
-  // The key is passed through untouched; the schema reads everything else from `raw`.
-  toInvocation: (event) => {
-    const raw = readS3AwsEvent(event);
-
-    return {
-      key: raw.detail.object.key,
-      raw,
-    } satisfies S3EventInvocationInput;
-  },
-  toResponse: () => {
-    // EventBridge invokes asynchronously and ignores the result.
   },
   validate: bucketIssues,
 };

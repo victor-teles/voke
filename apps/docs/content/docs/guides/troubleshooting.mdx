@@ -198,6 +198,14 @@ To go ahead anyway, run voke deploy again with --accept-data-loss.
 
 **Fix:** To keep using the data, undo the rename or the key change and deploy again. If you mean to drop the resource, run `voke deploy --accept-data-loss`, then delete or move each resource it lists as kept. `voke deploy --dry-run` prints the same lines as warnings. See [Changes that remove or replace data](/docs/guides/deploy#changes-that-remove-or-replace-data).
 
+### An event failed and I cannot find it
+
+**Symptom:** An Event Source Function failed, and the side effect never happened.
+
+**Cause:** After the source's retries, the event went to a dead-letter queue: the queue's own for an SQS Function, the Function's for every other source. Local runs (`functions.sendEvent`, `voke dev`) never dead-letter: the call returns the batch result or throws.
+
+**Fix:** Find the queue by its logical id (`OrdersQueueDeadLetterQueue`, `OrderCreatedFunctionDeadLetterQueue`) and read its messages. A Function or source that sets `deadLetterQueue: false` has no queue. See [Dead-letter queues](/docs/guides/dead-letter-queues).
+
 ### A durable function needs a qualified name or ARN
 
 **Symptom:** Lambda rejects an invocation of a durable function by its unqualified name or ARN.

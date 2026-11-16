@@ -1,11 +1,7 @@
 import { expect, spyOn, test } from "bun:test";
 import { rm } from "node:fs/promises";
 
-import {
-  bindResource,
-  createAwsClientConfig,
-  createLambdaHandlers,
-} from "@voke/aws";
+import { createAwsClientConfig, createLambdaHandlers } from "@voke/aws";
 import {
   dynamodbTable,
   s3Bucket,
@@ -507,13 +503,19 @@ export default defineConfig({
 });
 
 // synth and build import the project entrypoint to discover its Functions.
-const writeHttpEntrypoint = async (path: string): Promise<void> => {
+const writeHttpEntrypoint = async (
+  path: string,
+  resources: readonly string[] = []
+): Promise<void> => {
   await Bun.write(
     path,
     `import { createFunctions, http, route } from "${import.meta.dir}/../src/index.ts";
 
 export const functions = createFunctions({
-  http: http({ routes: [route.get("/health", { handler: () => "ok" })] }),
+  http: http({
+    resources: ${JSON.stringify(resources)},
+    routes: [route.get("/health", { handler: () => "ok" })],
+  }),
 });
 `
   );
@@ -550,7 +552,7 @@ export default defineConfig({
 `
   );
 
-  await writeHttpEntrypoint(`${directory}/src/service.ts`);
+  await writeHttpEntrypoint(`${directory}/src/service.ts`, ["jobsQueue"]);
   await runCli(["synth", "--config", configPath], { cwd: directory });
 
   const template = await Bun.file(out).json();
@@ -637,7 +639,19 @@ test("synthesizes a CloudFormation template with API, Lambda, IAM, resources, bi
       },
       stage: "prod",
     }),
-    functions: healthFunctions(),
+    functions: createFunctions({
+      http: http({
+        resources: [
+          "eventsQueue",
+          "orderCreatedTopic",
+          "ordersTable",
+          "publicConfig",
+          "signingSecret",
+          "uploadsBucket",
+        ],
+        routes: [route.get("/health", { handler: () => "ok" })],
+      }),
+    }),
   });
   const resources = template.Resources;
   const outputs = template.Outputs;
@@ -686,6 +700,9 @@ test("synthesizes a CloudFormation template with API, Lambda, IAM, resources, bi
       "dynamodb:DeleteItem",
       "dynamodb:Query",
       "dynamodb:Scan",
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
     ],
     Effect: "Allow",
     Resource: { "Fn::GetAtt": ["OrdersTable", "Arn"] },
@@ -711,31 +728,20 @@ test("matches the CloudFormation snapshot for a minimal API stack", async () => 
   expect(template).toEqual(snapshot);
 });
 
-test("creates typed AWS resource bindings and client config from environment", () => {
-  const table = bindResource("ordersTable", "name");
-  const queue = bindResource("eventsQueue", "url");
+test("creates AWS client config from environment", () => {
   const previous = {
     endpoint: Bun.env.VOKE_AWS_ENDPOINT_URL,
-    queue: Bun.env.VOKE_RESOURCE_EVENTS_QUEUE_URL,
     region: Bun.env.AWS_REGION,
-    table: Bun.env.VOKE_RESOURCE_ORDERS_TABLE_NAME,
   };
 
-  Bun.env.VOKE_RESOURCE_ORDERS_TABLE_NAME = "orders-prod";
-  Bun.env.VOKE_RESOURCE_EVENTS_QUEUE_URL = "https://sqs.local/queue";
   Bun.env.AWS_REGION = "sa-east-1";
   Bun.env.VOKE_AWS_ENDPOINT_URL = "http://localhost:4566";
 
-  expect(table.envName).toBe("VOKE_RESOURCE_ORDERS_TABLE_NAME");
-  expect(table.value()).toBe("orders-prod");
-  expect(queue.value()).toBe("https://sqs.local/queue");
   expect(createAwsClientConfig()).toEqual({
     endpoint: "http://localhost:4566",
     region: "sa-east-1",
   });
 
-  setEnv("VOKE_RESOURCE_ORDERS_TABLE_NAME", previous.table);
-  setEnv("VOKE_RESOURCE_EVENTS_QUEUE_URL", previous.queue);
   setEnv("AWS_REGION", previous.region);
   setEnv("VOKE_AWS_ENDPOINT_URL", previous.endpoint);
 });

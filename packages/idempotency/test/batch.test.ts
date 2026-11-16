@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 
 import { sqs } from "@voke/aws";
 import { schema } from "@voke/schema";
-import { createFunctions, voke } from "voke";
+import { createFunctions, voke, VokeResourceBindingError } from "voke";
 
 import { idempotentBatch } from "../src/batch";
 import { memoryStore } from "../src/memory-store";
@@ -96,4 +96,29 @@ test("a message that is in progress elsewhere is reported as failed", async () =
   expect(concurrent).toEqual({ batchItemFailures: [{ itemIdentifier: "m9" }] });
   resolve();
   await expect(running).resolves.toEqual({ batchItemFailures: [] });
+});
+
+test("idempotentBatch in a Function that does not link the table rejects the whole invocation", async () => {
+  const settled: string[] = [];
+  const functions = createFunctions({
+    settle: sqs({
+      handler: idempotentBatch(
+        (message) => settled.push(message.body.paymentId),
+        { key: (message) => message.body.paymentId }
+      ),
+      message: paymentMessage,
+      queue: "paymentsQueue",
+    }),
+  });
+
+  voke(functions, { config: { name: "test", plugins: [idempotency()] } });
+
+  await expect(
+    functions.sendEvent("settle", { messages: [delivery("m1", "pay_1")] })
+  ).rejects.toThrow(
+    new VokeResourceBindingError(
+      'Function "settle" does not link resource "idempotencyTable". Add it to the Function: resources: ["idempotencyTable"]'
+    )
+  );
+  expect(settled).toEqual([]);
 });

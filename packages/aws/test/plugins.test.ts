@@ -38,6 +38,7 @@ const auditPlugin = (): VokePlugin => ({
   contributions: {
     functions: {
       docs: http({
+        resources: ["auditQueue"],
         routes: [route.get("/docs", { handler: () => ({ docs: true }) })],
       }),
     },
@@ -105,11 +106,19 @@ test("synthesizes a Plugin Function, its API route and the contributed resource"
   );
   expect(Resources.AuditQueue?.Type).toBe("AWS::SQS::Queue");
 
-  for (const name of ["Function", "ReportFunction", "AuditDocsFunction"]) {
-    expect(
-      Object.keys(Resources[name]?.Properties.Environment?.Variables ?? {})
-    ).toContain("VOKE_RESOURCE_AUDIT_QUEUE_URL");
-  }
+  // A contributed resource is linked like any other: only the Function that links it gets it.
+  const bindingNames = (name: string): string[] =>
+    Object.keys(Resources[name]?.Properties.Environment?.Variables ?? {});
+
+  expect(bindingNames("AuditDocsFunction")).toContain(
+    "VOKE_RESOURCE_AUDIT_QUEUE_URL"
+  );
+  expect(bindingNames("Function")).not.toContain(
+    "VOKE_RESOURCE_AUDIT_QUEUE_URL"
+  );
+  expect(bindingNames("ReportFunction")).not.toContain(
+    "VOKE_RESOURCE_AUDIT_QUEUE_URL"
+  );
 });
 
 test("adds the awsPolicy statements to every Function role", () => {

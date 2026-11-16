@@ -89,8 +89,8 @@ An event whose `detail` does not match `detail` fails the invocation with an `In
 
 </Callout>
 
-EventBridge invokes the Function asynchronously, so Lambda retries a failed invocation and then
-drops the event.
+EventBridge invokes the Function asynchronously, so Lambda retries a failed invocation twice and
+then sends the event to the Function's [dead-letter queue](/docs/guides/dead-letter-queues).
 
 ## Test an EventBridge Function
 
@@ -137,7 +137,9 @@ See [Testing](/docs/guides/testing) for test setup.
 - an `AWS::Events::Rule` on the bus (the default bus when `bus` is omitted), with the pattern and the
   Function as its target;
 - an `AWS::Lambda::Permission` that lets `events.amazonaws.com` invoke the Function, only from that
-  rule.
+  rule;
+- an `AWS::SQS::Queue` dead-letter queue and an `AWS::Lambda::EventInvokeConfig` that sends failed
+  events to it, unless you pass `deadLetterQueue: false`. See [Dead-letter queues](/docs/guides/dead-letter-queues).
 
 To run a Function on a schedule, use [Scheduled Functions](/docs/guides/scheduled-functions), not an
 EventBridge rule.
@@ -147,7 +149,8 @@ EventBridge rule.
 <Callout type="info" title="EventBridge support is intentionally small in v1">
 
 - One rule per Function. To match two unrelated patterns, create two Functions.
-- There are no input transformers, retry policies or dead-letter queues on the rule.
+- There are no input transformers, retry policies or dead-letter queues on the rule target. An
+  event the Function fails goes to the Function's dead-letter queue.
 - An `eventBridge()` Function cannot have HTTP routes or an output schema.
 
 </Callout>

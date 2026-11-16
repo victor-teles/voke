@@ -5,6 +5,7 @@ import type { MiddlewareHandler } from "hono";
 import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
 
+import { createResourceBindingName } from "./bindings";
 import { defineConfig } from "./config";
 import type { VokeConfig, VokeConfigInput, VokeCorsConfig } from "./config";
 import type { VokeEnv } from "./context";
@@ -163,6 +164,16 @@ const pluginWraps = (setups: readonly PluginSetup[]): PluginFunctionWrap[] =>
     hooks.wrap === undefined ? [] : [{ plugin, wrap: hooks.wrap }]
   );
 
+// Resource key → binding variable, Plugin-contributed resources included: `context.resource`
+// reads a linked resource through it.
+const resourceBindings = (config: VokeConfig): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(config.resources).map(([key, resource]) => [
+      key,
+      createResourceBindingName(key, resource.bindingAttribute),
+    ])
+  );
+
 const createGatewayApp = (
   config: VokeConfig,
   functions: FunctionRegistry | FunctionRegistryInput,
@@ -204,6 +215,7 @@ const createGatewayApp = (
   assertRouteHeaderSchemas(gatewayFunctions);
   const activation = {
     invoke: config.provider?.invoke,
+    resourceBindings: resourceBindings(config),
     variableOverrides: options.variables?.overrides,
     variableProviders: gatewayVariableProviders(config, options.variables),
     wraps: pluginWraps(plugins),

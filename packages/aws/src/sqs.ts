@@ -13,7 +13,14 @@ import type {
 
 import { createBatchResult } from "./batch-result";
 import { resourceProvider, toLogicalId } from "./cloudformation-template";
+import {
+  deadLetterQueueArn,
+  deadLetterQueueLogicalId,
+  deadLetterQueueResource,
+  sqsMaxReceiveCount,
+} from "./dead-letter-queue";
 import { parseJsonEventPayload } from "./event-payload";
+import type { AwsEventSourceRuntimeAdapter } from "./event-source-runtime";
 import type {
   AwsEventSourceAdapter,
   AwsEventSourceContext,
@@ -155,12 +162,13 @@ export interface SqsFunctionDefinitionInput<
   TMessageSchema extends AnyStandardSchema,
   TInvalidMessageBody extends SqsInvalidMessageBodyMode = "fail",
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+  TResources extends readonly string[] = readonly string[],
 > extends SqsEventSourceOptions {
   readonly handler: (
     batch: StandardSchemaOutput<
       SqsMessageBatchSchema<TMessageSchema, TInvalidMessageBody>
     >,
-    context: InvokeContext<TVariables>
+    context: InvokeContext<TVariables, TResources[number]>
   ) => SqsBatchResult | Promise<SqsBatchResult>;
   readonly invalidMessageBody?: TInvalidMessageBody;
   readonly message: TMessageSchema;
@@ -168,6 +176,8 @@ export interface SqsFunctionDefinitionInput<
   readonly queue?: string;
   readonly queues?: SqsQueueListInput;
   readonly synthesis?: FunctionSynthesisConfig;
+  /** Resource Links: the resource keys this Function reads through `context.resource`. */
+  readonly resources?: TResources;
   readonly variables?: TVariables;
 }
 
@@ -358,28 +368,38 @@ type SqsFunctionDefinition<
 export function sqs<
   const TMessageSchema extends AnyStandardSchema,
   const TVariables extends RuntimeVariableCatalog = Record<never, never>,
+  const TResources extends readonly string[] = readonly [],
 >(
   definition: SqsFunctionDefinitionInput<
     TMessageSchema,
     "include",
-    TVariables
+    TVariables,
+    TResources
   > & { readonly invalidMessageBody: "include" }
 ): SqsFunctionDefinition<TMessageSchema, "include", TVariables>;
 export function sqs<
   const TMessageSchema extends AnyStandardSchema,
   const TVariables extends RuntimeVariableCatalog = Record<never, never>,
+  const TResources extends readonly string[] = readonly [],
 >(
-  definition: SqsFunctionDefinitionInput<TMessageSchema, "fail", TVariables>
+  definition: SqsFunctionDefinitionInput<
+    TMessageSchema,
+    "fail",
+    TVariables,
+    TResources
+  >
 ): SqsFunctionDefinition<TMessageSchema, "fail", TVariables>;
 export function sqs<
   TMessageSchema extends AnyStandardSchema,
   TInvalidMessageBody extends SqsInvalidMessageBodyMode,
   TVariables extends RuntimeVariableCatalog,
+  TResources extends readonly string[],
 >(
   definition: SqsFunctionDefinitionInput<
     TMessageSchema,
     TInvalidMessageBody,
-    TVariables
+    TVariables,
+    TResources
   >
 ): SqsFunctionDefinition<TMessageSchema, TInvalidMessageBody, TVariables> {
   if (definition.queue !== undefined && definition.queues !== undefined) {
@@ -412,6 +432,7 @@ export function sqs<
     key: "",
     kind: "event",
     name: definition.name,
+    resources: definition.resources,
     routes: [],
     synthesis: definition.synthesis,
     variables: definition.variables,
@@ -472,8 +493,75 @@ const queueKindIssue = ({
       };
 };
 
+/**
+ * The dead-letter queue a consumed queue owns, or `undefined` when it has none: the queue opted out
+ * with `sqsQueue({ deadLetterQueue: false })`, or its hand-written properties already redrive.
+ */
+const queueDeadLetterQueue = ({
+  eventSource,
+  model,
+}: AwsEventSourceContext): { fifo: boolean; logicalId: string } | undefined => {
+  const queue = eventSource.resource ?? "";
+  const resource = model.resources[queue];
+
+  if (
+    resource === undefined ||
+    resourceProvider(resource).deadLetterQueue === false ||
+    resource.properties.RedrivePolicy !== undefined
+  ) {
+    return undefined;
+  }
+
+  return {
+    // A FIFO queue's dead-letter queue must be FIFO too, or the stack does not deploy.
+    fifo: resource.properties.FifoQueue === true,
+    logicalId: deadLetterQueueLogicalId(toLogicalId(queue)),
+  };
+};
+
 /** How an SQS Event Source runs on Lambda and synthesizes to an event source mapping. */
+export const sqsEventRuntimeAdapter: AwsEventSourceRuntimeAdapter = {
+  source: "sqs",
+  toInvocation: (event) => sqsInvocationFromAwsEvent(event as SqsAwsEvent),
+  // The handler already returns Lambda's SQS batch response shape.
+  toResponse: (result) => result,
+};
+
 export const sqsEventSourceAdapter: AwsEventSourceAdapter = {
+  // SQS itself moves a message to the queue's dead-letter queue, so no Function role needs access.
+  resourceProperties: (context, properties) => {
+    const deadLetterQueue = queueDeadLetterQueue(context);
+
+    if (deadLetterQueue === undefined) {
+      return { ...properties };
+    }
+
+    return {
+      ...properties,
+      RedrivePolicy: {
+        deadLetterTargetArn: deadLetterQueueArn(deadLetterQueue.logicalId),
+        maxReceiveCount: sqsMaxReceiveCount,
+      },
+    };
+  },
+  // A consuming Function needs to poll and delete from its queue whether or not it links it;
+  // sending to the queue takes a Resource Link, whose statement already covers consuming.
+  roleStatements: ({ eventSource, functionKey, model }) =>
+    model.functions[functionKey]?.links.includes(eventSource.resource ?? "")
+      ? []
+      : [
+          {
+            Action: [
+              "sqs:ReceiveMessage",
+              "sqs:DeleteMessage",
+              "sqs:GetQueueAttributes",
+            ],
+            Effect: "Allow",
+            Resource: {
+              "Fn::GetAtt": [toLogicalId(eventSource.resource ?? ""), "Arn"],
+            },
+          },
+        ],
   source: "sqs",
   synthesize: (context) => {
     const issue = queueKindIssue(context);
@@ -486,9 +574,17 @@ export const sqsEventSourceAdapter: AwsEventSourceAdapter = {
     const queueLogicalId = toLogicalId(eventSource.resource ?? "");
     const { batchSize, enabled, maxBatchingWindowSeconds } =
       eventSource.properties;
+    const deadLetterQueue = queueDeadLetterQueue(context);
 
     return {
       resources: {
+        ...(deadLetterQueue === undefined
+          ? {}
+          : {
+              [deadLetterQueue.logicalId]: deadLetterQueueResource({
+                fifo: deadLetterQueue.fifo,
+              }),
+            }),
         [`${lambdaLogicalId}${queueLogicalId}EventSourceMapping`]: {
           Properties: {
             BatchSize: batchSize ?? 10,
@@ -503,9 +599,6 @@ export const sqsEventSourceAdapter: AwsEventSourceAdapter = {
       },
     };
   },
-  toInvocation: (event) => sqsInvocationFromAwsEvent(event as SqsAwsEvent),
-  // The handler already returns Lambda's SQS batch response shape.
-  toResponse: (result) => result,
   validate: (context) => {
     const issue = queueKindIssue(context);
 

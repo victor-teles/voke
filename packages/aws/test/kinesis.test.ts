@@ -232,8 +232,10 @@ test("kinesis() stores the mapping settings with stream defaults applied", () =>
       properties: {
         batchSize: 100,
         bisectOnError: true,
+        deadLetterQueue: true,
         enabled: true,
         maxBatchingWindowSeconds: 0,
+        maxRetryAttempts: 10,
         startingPosition: "trimHorizon",
       },
       resource: "clicksStream",

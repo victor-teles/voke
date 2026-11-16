@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test";
 
-import { bindResource } from "@voke/aws";
 import {
   dynamodbTable,
   sqsQueue,
@@ -11,7 +10,7 @@ import { createInvokeTestClient, createTestClient } from "@voke/testing";
 import { Hono } from "hono";
 
 import { voke } from "../src/app";
-import { createFunctions, fn, withInvokeTrace } from "../src/invoke";
+import { createFunctions, fn, http, withInvokeTrace } from "../src/invoke";
 import type { StandardSchemaV1 } from "../src/invoke";
 import { ok as json } from "../src/response";
 import { withEnv } from "./support/env";
@@ -344,28 +343,35 @@ test("exposes local resource bindings to API and function code", async () => {
     endpoint: "http://localhost:4566",
     template,
   });
-  const ordersQueue = bindResource("ordersQueue", "url");
   const functions = createFunctions({
+    api: http({
+      resources: ["ordersQueue"],
+      routes: (route) => [
+        route.get("/bindings", {
+          handler: async (
+            _request,
+            context
+          ): Promise<{ apiQueueUrl: string; worker: unknown }> => ({
+            apiQueueUrl: context.resource("ordersQueue"),
+            worker: await functions.invoke("readQueue"),
+          }),
+        }),
+      ],
+    }),
     readQueue: fn({
-      handler: () => ({
-        queueUrl: ordersQueue.value(),
+      handler: (_payload, context) => ({
+        queueUrl: context.resource("ordersQueue"),
       }),
       output: schema<{ queueUrl: string }>(),
+      resources: ["ordersQueue"],
     }),
   });
-  voke(functions, { config: { name: "api" } });
-
-  const app = new Hono();
-
-  app.get("/bindings", async () =>
-    json({
-      apiQueueUrl: ordersQueue.value(),
-      worker: await functions.invoke("readQueue"),
-    })
-  );
+  const gateway = voke(functions, {
+    config: { name: "api", resources: { ordersQueue: sqsQueue() } },
+  });
 
   await withEnv(stack.bindings, async () => {
-    const response = await createTestClient(app).get("/bindings");
+    const response = await gateway.request("/bindings");
 
     expect(await response.json()).toEqual({
       data: {

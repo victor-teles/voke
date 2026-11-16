@@ -113,7 +113,10 @@
                     "dynamodb:UpdateItem",
                     "dynamodb:DeleteItem",
                     "dynamodb:Query",
-                    "dynamodb:Scan"
+                    "dynamodb:Scan",
+                    "dynamodb:BatchGetItem",
+                    "dynamodb:BatchWriteItem",
+                    "dynamodb:ConditionCheckItem"
                   ],
                   "Effect": "Allow",
                   "Resource": {
@@ -138,6 +141,7 @@
         "VokeRoutes": ["GET /health"]
       },
       "Properties": {
+        "Architectures": ["arm64"],
         "Code": {
           "ZipFile": "exports.handler = async () => ({ statusCode: 501, body: \"Build and upload this Voke function before deploying.\" });"
         },
@@ -154,7 +158,6 @@
         },
         "FunctionName": "orders-api-prod-http",
         "Handler": "index.http",
-        "Architectures": ["arm64"],
         "LoggingConfig": {
           "LogGroup": {
             "Ref": "FunctionLogGroup"

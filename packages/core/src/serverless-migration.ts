@@ -3649,7 +3649,7 @@ const pluginCompatibilityCatalog: Record<
         "Review every per-function IAM statement and translate the required permissions into Voke resource bindings or CloudFormation policy configuration.",
       ],
       notes: [
-        "Voke generates one function role policy surface today; per-function IAM isolation is not converted automatically.",
+        "Voke scopes each Function role to the resources that Function links; per-function IAM statements are still not converted automatically.",
       ],
       status: "manual",
       summary: "Per-function IAM behavior requires explicit security review.",

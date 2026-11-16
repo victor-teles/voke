@@ -6,7 +6,18 @@ import type { VokeModelRecord } from "voke";
 
 import { createBatchResult } from "./batch-result";
 import type { BatchItemFailure } from "./batch-result";
-import type { CloudFormationValue } from "./cloudformation-template";
+import type {
+  CloudFormationResource,
+  CloudFormationValue,
+} from "./cloudformation-template";
+import {
+  deadLetterQueueArn,
+  deadLetterQueueLogicalId,
+  deadLetterQueueOptionIssues,
+  deadLetterQueueResource,
+  hasDeadLetterQueue,
+  streamMaxRetryAttemptsWithDeadLetterQueue,
+} from "./dead-letter-queue";
 import type { AwsEventSourceContext, VokeIssue } from "./event-sources";
 
 /**
@@ -34,21 +45,26 @@ export interface StreamEventSourceOptions {
   batchSize?: number;
   /** Split a batch in two and retry when the handler throws. Default true. */
   bisectOnError?: boolean;
+  /**
+   * Keep a record of batches Lambda gives up on in a dead-letter queue. The message holds the
+   * stream, shard and sequence numbers, not the records. Default true.
+   */
+  deadLetterQueue?: boolean;
   /** Default true. */
   enabled?: boolean;
   /** Seconds to gather records before invoking, 0 to 300. Default 0. */
   maxBatchingWindowSeconds?: number;
   /**
-   * Retries before Lambda discards a failing batch, -1 (until the record expires) to 10000.
-   * Unset by default: Lambda retries until the record expires, because without a failure
-   * destination a capped mapping drops records silently.
+   * Retries before Lambda gives up on a failing batch, -1 (until the record expires) to 10000.
+   * Default 10 with a dead-letter queue. Without one it is unset, so Lambda retries until the
+   * record expires rather than discarding it silently.
    */
   maxRetryAttempts?: number;
   /** Where a new mapping starts reading. Default `"trimHorizon"`, so no record is skipped. */
   startingPosition?: StreamStartingPosition;
 }
 
-/** The stored mapping settings: defaults applied, `maxRetryAttempts` only when set. */
+/** The stored mapping settings: defaults applied, `maxRetryAttempts` only when set or defaulted. */
 export type StreamEventSourceProperties = Required<
   Omit<StreamEventSourceOptions, "maxRetryAttempts">
 > &
@@ -56,16 +72,25 @@ export type StreamEventSourceProperties = Required<
 
 export const streamEventSourceProperties = (
   options: StreamEventSourceOptions
-): StreamEventSourceProperties => ({
-  batchSize: options.batchSize ?? 100,
-  bisectOnError: options.bisectOnError ?? true,
-  enabled: options.enabled ?? true,
-  maxBatchingWindowSeconds: options.maxBatchingWindowSeconds ?? 0,
-  ...(options.maxRetryAttempts === undefined
-    ? {}
-    : { maxRetryAttempts: options.maxRetryAttempts }),
-  startingPosition: options.startingPosition ?? "trimHorizon",
-});
+): StreamEventSourceProperties => {
+  const deadLetterQueue = options.deadLetterQueue ?? true;
+  // A cap without a dead-letter queue would discard records silently, so only a queue sets one.
+  const maxRetryAttempts =
+    options.maxRetryAttempts ??
+    (deadLetterQueue === false
+      ? undefined
+      : streamMaxRetryAttemptsWithDeadLetterQueue);
+
+  return {
+    batchSize: options.batchSize ?? 100,
+    bisectOnError: options.bisectOnError ?? true,
+    deadLetterQueue,
+    enabled: options.enabled ?? true,
+    maxBatchingWindowSeconds: options.maxBatchingWindowSeconds ?? 0,
+    ...(maxRetryAttempts === undefined ? {} : { maxRetryAttempts }),
+    startingPosition: options.startingPosition ?? "trimHorizon",
+  };
+};
 
 const integerRanges = {
   batchSize: { max: 10_000, min: 1 },
@@ -79,12 +104,11 @@ const startingPositions: Record<StreamStartingPosition, string> = {
 };
 
 /** Range checks for the mapping settings of one stream Event Source. */
-export const streamOptionIssues = ({
-  eventSource,
-  eventSourceIndex,
-  functionKey,
-}: AwsEventSourceContext): VokeIssue[] => {
-  const issues: VokeIssue[] = [];
+export const streamOptionIssues = (
+  context: AwsEventSourceContext
+): VokeIssue[] => {
+  const { eventSource, eventSourceIndex, functionKey } = context;
+  const issues: VokeIssue[] = deadLetterQueueOptionIssues(context);
   const path = `functions.${functionKey}.eventSources.${eventSourceIndex}.properties`;
 
   for (const [option, { max, min }] of Object.entries(integerRanges)) {
@@ -124,6 +148,8 @@ export const streamOptionIssues = ({
 
 /** The `AWS::Lambda::EventSourceMapping` properties for one stream Event Source. */
 export const streamEventSourceMappingProperties = (options: {
+  /** The Function's dead-letter queue, when the Event Source has one. */
+  deadLetterQueueArn?: CloudFormationValue;
   eventSourceArn: CloudFormationValue;
   lambdaLogicalId: string;
   properties: VokeModelRecord;
@@ -146,7 +172,46 @@ export const streamEventSourceMappingProperties = (options: {
     mapping.MaximumRetryAttempts = properties.maxRetryAttempts as number;
   }
 
+  if (options.deadLetterQueueArn !== undefined) {
+    mapping.DestinationConfig = {
+      OnFailure: { Destination: options.deadLetterQueueArn },
+    };
+  }
+
   return mapping;
+};
+
+/**
+ * A stream Event Source's mapping, plus the Function's dead-letter queue unless it opted out. Lambda
+ * sends the queue a record of the batch it gave up on: stream, shard and sequence numbers only.
+ */
+export const streamEventSourceResources = (options: {
+  eventSource: AwsEventSourceContext["eventSource"];
+  eventSourceArn: CloudFormationValue;
+  lambdaLogicalId: string;
+  mappingLogicalId: string;
+}): Record<string, CloudFormationResource> => {
+  const { eventSource, lambdaLogicalId } = options;
+  const queueLogicalId = hasDeadLetterQueue(options)
+    ? deadLetterQueueLogicalId(lambdaLogicalId)
+    : undefined;
+
+  return {
+    ...(queueLogicalId === undefined
+      ? {}
+      : { [queueLogicalId]: deadLetterQueueResource() }),
+    [options.mappingLogicalId]: {
+      Properties: streamEventSourceMappingProperties({
+        ...(queueLogicalId === undefined
+          ? {}
+          : { deadLetterQueueArn: deadLetterQueueArn(queueLogicalId) }),
+        eventSourceArn: options.eventSourceArn,
+        lambdaLogicalId,
+        properties: eventSource.properties,
+      }),
+      Type: "AWS::Lambda::EventSourceMapping",
+    },
+  };
 };
 
 /** The batch every stream handler receives, before the source-specific fields. */

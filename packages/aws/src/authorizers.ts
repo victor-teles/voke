@@ -75,8 +75,9 @@ export const createAuthorizers = <
 export const requestAuthorizer = <
   const TContext extends Record<string, unknown> = Record<string, unknown>,
   const TVariables extends RuntimeVariableCatalog = Record<never, never>,
+  const TResources extends readonly string[] = readonly [],
 >(
-  input: RequestAuthorizerFunctionInput<TContext, TVariables>
+  input: RequestAuthorizerFunctionInput<TContext, TVariables, TResources>
 ): RequestAuthorizerFunctionDefinition<string, TContext, TVariables> =>
   Object.freeze({
     context: input.context,
@@ -84,6 +85,7 @@ export const requestAuthorizer = <
     key: "",
     kind: "authorizer" as const,
     name: input.name,
+    resources: input.resources,
     routes: Object.freeze([]) as readonly [],
     synthesis: input.synthesis,
     variables: input.variables,

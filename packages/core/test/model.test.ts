@@ -59,6 +59,7 @@ test("builds a small serializable model from normalized config", () => {
     }),
     functions: createFunctions({
       api: http({
+        resources: ["eventsQueue", "ordersTable"],
         routes: [
           app.get("/orders", { handler: () => [] }),
           app.post("/orders", { handler: () => ({ created: true }) }),
@@ -111,6 +112,7 @@ test("builds a small serializable model from normalized config", () => {
         eventSources: [],
         handler: "index.api",
         invokable: false,
+        links: ["eventsQueue", "ordersTable"],
         memory: 512,
         routes: ["GET /orders", "POST /orders"],
         timeout: 15,
@@ -185,6 +187,9 @@ test("builds a small serializable model from normalized config", () => {
             "dynamodb:DeleteItem",
             "dynamodb:Query",
             "dynamodb:Scan",
+            "dynamodb:BatchGetItem",
+            "dynamodb:BatchWriteItem",
+            "dynamodb:ConditionCheckItem",
           ],
           level: "readWrite",
         },
@@ -337,6 +342,7 @@ test("maps explicit function definitions from config into the model", () => {
     input: schema<{ email: string }>(),
     name: "sendWelcomeEmail",
     output: schema<{ queued: boolean; to: string }>(),
+    resources: ["eventsQueue"],
     synthesis: {
       entrypoint: "./src/functions/send-welcome-email.ts",
       environment: {
@@ -381,6 +387,7 @@ test("maps explicit function definitions from config into the model", () => {
     eventSources: [],
     handler: "send-welcome-email.handler",
     invokable: true,
+    links: ["eventsQueue"],
     memory: 256,
     provider: {
       aws: { properties: { architecture: "x86_64" }, type: "lambda.function" },
@@ -885,4 +892,122 @@ test("carries normalized CORS onto the HTTP API model", () => {
     methods: ["*"],
     origins: ["*"],
   });
+});
+
+const linkConfig = {
+  name: "links-api",
+  resources: {
+    ordersQueue: sqsQueue(),
+    signingSecret: cloudFormationSecret(),
+    usersTable: dynamodbTable(),
+  },
+};
+
+test("gives each Function the bindings of the resources it links and no others", () => {
+  const model = createInternalModel({
+    ...linkConfig,
+    functions: createFunctions({
+      listUsers: fn({
+        handler: () => "ok",
+        output: schema<string>(),
+        resources: ["usersTable"],
+      }),
+      ping: fn({ handler: () => "ok", output: schema<string>() }),
+    }),
+  });
+
+  expect(model.functions.listUsers).toMatchObject({
+    bindings: [
+      {
+        attribute: "name",
+        env: "VOKE_RESOURCE_USERS_TABLE_NAME",
+        resource: "usersTable",
+      },
+    ],
+    links: ["usersTable"],
+  });
+  expect(model.functions.ping).toMatchObject({ bindings: [], links: [] });
+});
+
+test("keeps one Resource Link and one binding for a resource linked twice", () => {
+  const model = createInternalModel({
+    ...linkConfig,
+    functions: createFunctions({
+      listUsers: fn({
+        handler: () => "ok",
+        output: schema<string>(),
+        resources: ["usersTable", "usersTable"],
+      }),
+    }),
+  });
+
+  expect(model.functions.listUsers?.links).toEqual(["usersTable"]);
+  expect(model.functions.listUsers?.bindings).toHaveLength(1);
+});
+
+test("gives a Function the binding a fromResource Runtime Variable reads without a Resource Link", () => {
+  const model = createInternalModel({
+    ...linkConfig,
+    functions: createFunctions({
+      sign: fn({
+        handler: () => "ok",
+        output: schema<string>(),
+        variables: { signingKey: secret.fromResource("signingSecret") },
+      }),
+    }),
+  });
+
+  expect(model.functions.sign).toMatchObject({
+    bindings: [
+      {
+        attribute: "id",
+        env: "VOKE_RESOURCE_SIGNING_SECRET_ID",
+        resource: "signingSecret",
+      },
+    ],
+    links: [],
+  });
+});
+
+const linkIssues = (resources: readonly unknown[]): unknown => {
+  try {
+    createInternalModel({
+      ...linkConfig,
+      functions: createFunctions({
+        listUsers: {
+          ...fn({ handler: () => "ok", output: schema<string>() }),
+          resources: resources as readonly string[],
+        },
+      }),
+    });
+  } catch (error) {
+    expect(error).toBeInstanceOf(VokeConfigError);
+
+    return (error as VokeConfigError).issues;
+  }
+
+  throw new Error("expected createInternalModel to throw");
+};
+
+test("rejects a Resource Link to a resource the config does not define", () => {
+  expect(linkIssues(["usrsTable"])).toEqual([
+    {
+      message:
+        'Function "listUsers" links resource "usrsTable", but no matching resource is defined.',
+      path: "functions.listUsers.resources.0",
+    },
+  ]);
+});
+
+test("rejects a Resource Link that is not a non-empty resource key", () => {
+  expect(linkIssues(["usersTable", "", 42])).toEqual([
+    {
+      message: 'expected a resource key; received ""',
+      path: "functions.listUsers.resources.1",
+    },
+    {
+      message: "expected a resource key; received 42",
+      path: "functions.listUsers.resources.2",
+    },
+  ]);
 });

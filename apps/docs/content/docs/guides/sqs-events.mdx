@@ -160,8 +160,8 @@ An invalid message has `valid: false`, `rawBody` (the body as received) and `err
 
 <Callout type="warn" title="Invalid messages still count as failed">
 
-An invalid message is still reported as a failure, so SQS delivers it again. With no dead-letter
-queue (see [Limits](#limits)), it is retried until the queue's retention period ends.
+An invalid message is still reported as a failure, so SQS delivers it again. After 5 failed
+receives, SQS moves it to the queue's [dead-letter queue](/docs/guides/dead-letter-queues), where it stays for 14 days.
 
 </Callout>
 
@@ -184,6 +184,8 @@ const settlePayment = async (paymentId: string): Promise<void> => {
 // ---cut---
 export const settle = sqs({
   queue: "paymentsQueue",
+  // The Plugin's table is linked like any resource.
+  resources: ["idempotencyTable"],
   message: schema.object({
     paymentId: schema.string(),
     amount: schema.number(),
@@ -197,6 +199,14 @@ export const settle = sqs({
 
 A message that throws is reported as a batch item failure, and a message that was already processed
 counts as a success. See [Idempotency](/docs/guides/idempotency).
+
+## What gets deployed
+
+The consuming Function's role gets `sqs:ReceiveMessage`, `sqs:DeleteMessage` and
+`sqs:GetQueueAttributes` on its queue, which the event source mapping needs to poll it. That is all:
+the role cannot send to the queue, and the Function gets no `VOKE_RESOURCE_*` binding for it. A
+handler that sends messages, to its own queue or another, links that queue with `resources`. See
+[Resources and bindings](/docs/guides/resources#access-a-link-grants).
 
 ## Batch options
 
@@ -306,8 +316,9 @@ See [Testing](/docs/guides/testing) for test setup.
 
 <Callout type="info" title="SQS support is intentionally small in v1">
 
-- There is no dead-letter queue or redrive policy. `sqsQueue()` has no option for them, and failed
-  messages are retried until the queue's retention period ends.
+- The dead-letter queue always moves a message after 5 receives and keeps it 14 days.
+  `sqsQueue({ deadLetterQueue: false })` turns it off; a queue you write by hand with its own
+  `RedrivePolicy` keeps that policy. See [Dead-letter queues](/docs/guides/dead-letter-queues).
 - An `sqs()` Function cannot have HTTP routes or an output schema. Its output is always the batch
   result. Put routes on a separate Function in the same registry.
 - The Event Source options are only `batchSize`, `maxBatchingWindowSeconds` and `enabled`.

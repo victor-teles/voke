@@ -12,11 +12,17 @@ import type {
 } from "voke";
 
 import { toLogicalId } from "./cloudformation-template";
+import {
+  asyncFailureResourcesFor,
+  deadLetterQueueOptionIssues,
+  functionDeadLetterQueueStatements,
+} from "./dead-letter-queue";
 import { parseJsonEventPayload } from "./event-payload";
 import {
   eventSourceResourceKindIssue,
   lambdaInvokePermissionResource,
 } from "./event-source-resources";
+import type { AwsEventSourceRuntimeAdapter } from "./event-source-runtime";
 import type {
   AwsEventSourceAdapter,
   AwsEventSourceContext,
@@ -34,6 +40,7 @@ export type SnsFilterPolicy = VokeModelRecord;
 /** An SNS Event Source as `sns()` stores it: the topic resource key plus the filter settings that were set. */
 export interface SnsEventSourceDefinition extends EventSourceDefinition {
   readonly properties: {
+    readonly deadLetterQueue: boolean;
     readonly filterPolicy?: SnsFilterPolicy;
     readonly filterPolicyScope?: SnsFilterPolicyScope;
   };
@@ -113,14 +120,17 @@ export interface SnsMessageSchema<
 export interface SnsFunctionDefinitionInput<
   TMessageSchema extends AnyStandardSchema,
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+  TResources extends readonly string[] = readonly string[],
 > {
+  /** Keep events this Function fails after Lambda's retries in a dead-letter queue. Default true. */
+  readonly deadLetterQueue?: boolean;
   /** A subscription filter policy; SNS only delivers matching messages. */
   readonly filterPolicy?: SnsFilterPolicy;
   /** What `filterPolicy` matches. SNS defaults to `"MessageAttributes"`. */
   readonly filterPolicyScope?: SnsFilterPolicyScope;
   readonly handler: (
     message: SnsMessage<StandardSchemaOutput<TMessageSchema>>,
-    context: InvokeContext<TVariables>
+    context: InvokeContext<TVariables, TResources[number]>
   ) => void | Promise<void>;
   /** A Standard Schema for one JSON message body. */
   readonly message: TMessageSchema;
@@ -128,6 +138,8 @@ export interface SnsFunctionDefinitionInput<
   readonly synthesis?: FunctionSynthesisConfig;
   /** The key of an `snsTopic()` resource. */
   readonly topic: string;
+  /** Resource Links: the resource keys this Function reads through `context.resource`. */
+  readonly resources?: TResources;
   readonly variables?: TVariables;
 }
 
@@ -216,7 +228,11 @@ const snsMessageSchema = <const TBodySchema extends AnyStandardSchema>(
 const snsEventSource = (
   definition: SnsFunctionDefinitionInput<AnyStandardSchema, never>
 ): SnsEventSourceDefinition => {
-  const properties: VokeModelRecord = {};
+  const properties: {
+    deadLetterQueue: boolean;
+    filterPolicy?: SnsFilterPolicy;
+    filterPolicyScope?: SnsFilterPolicyScope;
+  } = { deadLetterQueue: definition.deadLetterQueue ?? true };
 
   if (definition.filterPolicy !== undefined) {
     properties.filterPolicy = definition.filterPolicy;
@@ -237,8 +253,9 @@ const snsEventSource = (
 export const sns = <
   const TMessageSchema extends AnyStandardSchema,
   const TVariables extends RuntimeVariableCatalog = Record<never, never>,
+  const TResources extends readonly string[] = readonly [],
 >(
-  definition: SnsFunctionDefinitionInput<TMessageSchema, TVariables>
+  definition: SnsFunctionDefinitionInput<TMessageSchema, TVariables, TResources>
 ): EventFunctionDefinition<
   string,
   SnsMessageSchema<TMessageSchema>,
@@ -271,6 +288,7 @@ export const sns = <
     key: "",
     kind: "event",
     name: definition.name,
+    resources: definition.resources,
     routes: [],
     synthesis: definition.synthesis,
     variables: definition.variables,
@@ -305,11 +323,23 @@ const topicKind = {
 const topicIssues = (context: AwsEventSourceContext): VokeIssue[] => {
   const issue = eventSourceResourceKindIssue(context, topicKind);
 
-  return issue === undefined ? [] : [issue];
+  return [
+    ...(issue === undefined ? [] : [issue]),
+    ...deadLetterQueueOptionIssues(context),
+  ];
 };
 
 /** How an SNS Event Source runs on Lambda and synthesizes to a subscription and a permission. */
+export const snsEventRuntimeAdapter: AwsEventSourceRuntimeAdapter = {
+  source: "sns",
+  toInvocation: (event) => snsInvocationFromAwsEvent(event as SnsAwsEvent),
+  toResponse: () => {
+    // SNS invokes asynchronously and ignores the result.
+  },
+};
+
 export const snsEventSourceAdapter: AwsEventSourceAdapter = {
+  roleStatements: functionDeadLetterQueueStatements,
   source: "sns",
   synthesize: (context) => {
     const issues = topicIssues(context);
@@ -339,6 +369,7 @@ export const snsEventSourceAdapter: AwsEventSourceAdapter = {
 
     return {
       resources: {
+        ...asyncFailureResourcesFor(context),
         [`${prefix}Permission`]: lambdaInvokePermissionResource(
           lambdaLogicalId,
           "sns.amazonaws.com",
@@ -350,10 +381,6 @@ export const snsEventSourceAdapter: AwsEventSourceAdapter = {
         },
       },
     };
-  },
-  toInvocation: (event) => snsInvocationFromAwsEvent(event as SnsAwsEvent),
-  toResponse: () => {
-    // SNS invokes asynchronously and ignores the result.
   },
   validate: topicIssues,
 };

@@ -261,18 +261,98 @@ test("idempotency() contributes the idempotencyTable resource with time to live"
   });
 });
 
-test("idempotency() reads its table binding when a wrapped handler first runs, not at setup", async () => {
-  const { charges, functions } = chargeFunctions();
+const tableBinding = "VOKE_RESOURCE_IDEMPOTENCY_TABLE_NAME";
 
-  delete process.env.VOKE_RESOURCE_IDEMPOTENCY_TABLE_NAME;
+// Runs `run` with the table binding unset, restoring it afterwards.
+const withoutTableBinding = async (run: () => Promise<void>): Promise<void> => {
+  const previous = process.env[tableBinding];
+
+  Reflect.deleteProperty(process.env, tableBinding);
+
+  try {
+    await run();
+  } finally {
+    if (previous !== undefined) {
+      process.env[tableBinding] = previous;
+    }
+  }
+};
+
+const linkedChargeFunctions = (resources: readonly string[]) => {
+  const charges: string[] = [];
+  const functions = createFunctions({
+    charge: fn({
+      handler: idempotent(
+        (payload) => {
+          charges.push(payload.orderId);
+
+          return { chargeId: `ch_${charges.length}` };
+        },
+        { key: (payload) => payload.orderId }
+      ),
+      input: chargeInput,
+      output: chargeOutput,
+      resources,
+    }),
+  });
+
   voke(functions, { config: config([idempotency()]) });
 
-  const rejection = await functions
-    .invoke("charge", { amount: 10, orderId: "ord_1" })
-    .catch((error) => error);
+  return { charges, functions };
+};
 
-  expect(rejection).toBeInstanceOf(VokeResourceBindingError);
+test("a Function that links the idempotency table reads its name through the binding", async () => {
+  const { charges, functions } = linkedChargeFunctions(["idempotencyTable"]);
+
+  // The link passes, so the next check is the binding itself; the handler never runs.
+  await withoutTableBinding(async () => {
+    const rejection = await functions
+      .invoke("charge", { amount: 10, orderId: "ord_1" })
+      .catch((error: unknown) => error);
+
+    expect(rejection).toBeInstanceOf(VokeResourceBindingError);
+    expect((rejection as Error).message).toBe(
+      `Missing resource binding: ${tableBinding}`
+    );
+  });
   expect(charges).toEqual([]);
+});
+
+test("a Function that does not link the idempotency table fails before its handler runs", async () => {
+  const { charges, functions } = linkedChargeFunctions([]);
+  const previous = process.env[tableBinding];
+
+  process.env[tableBinding] = "orders-dev-idempotency";
+
+  try {
+    const rejection = await functions
+      .invoke("charge", { amount: 10, orderId: "ord_1" })
+      .catch((error: unknown) => error);
+
+    expect(rejection).toBeInstanceOf(VokeResourceBindingError);
+    expect((rejection as Error).message).toBe(
+      'Function "charge" does not link resource "idempotencyTable". Add it to the Function: resources: ["idempotencyTable"]'
+    );
+  } finally {
+    if (previous === undefined) {
+      Reflect.deleteProperty(process.env, tableBinding);
+    } else {
+      process.env[tableBinding] = previous;
+    }
+  }
+
+  expect(charges).toEqual([]);
+});
+
+test("idempotency({ store }) needs no Resource Link", async () => {
+  const { charges, functions } = chargeFunctions();
+
+  voke(functions, { config: config([idempotency({ store: memoryStore() })]) });
+
+  await expect(
+    functions.invoke("charge", { amount: 10, orderId: "ord_1" })
+  ).resolves.toEqual({ chargeId: "ch_1" });
+  expect(charges).toEqual(["ord_1"]);
 });
 
 test("idempotency({ table }) contributes the table under that key", () => {

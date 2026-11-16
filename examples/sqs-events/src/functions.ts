@@ -38,6 +38,8 @@ export const settlePayment = sqs({
   ),
   message: paymentMessageSchema,
   queue: "paymentsQueue",
+  // The idempotency Plugin's table is linked like any resource.
+  resources: ["idempotencyTable"],
 });
 
 export const functions = createFunctions({ processOrder, settlePayment });

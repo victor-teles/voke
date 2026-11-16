@@ -4,7 +4,11 @@ import type {
   SqsValidMessage,
 } from "@voke/aws";
 
-import { assertIdempotencyOptions, runWithOptions } from "./idempotent";
+import {
+  assertIdempotencyOptions,
+  resolveScope,
+  runWithOptions,
+} from "./idempotent";
 import type { IdempotencyOptions } from "./idempotent";
 
 // The message id and receive attributes change on every redelivery, so only the body is compared.
@@ -30,6 +34,9 @@ export const idempotentBatch = <TBody, TContext>(
   assertIdempotencyOptions(options, "idempotentBatch()");
 
   return async (batch, context) => {
+    // Outside the loop, so a Function that does not link the table fails the invocation instead
+    // of reporting every message as a batch item failure.
+    resolveScope(options.store);
     const result = batch.batchResult();
 
     for (const message of batch.messages) {

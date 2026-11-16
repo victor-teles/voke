@@ -23,7 +23,7 @@ export default defineConfig({
 });
 ```
 
-The Plugin contributes a DynamoDB table under the resource key `idempotencyTable`, with time to live on its `expiration` attribute. `voke synth` and `voke deploy` add it to the stack, and `voke local bootstrap` creates it locally. Like every resource, every Function can read and write it, and every Function gets its binding, `VOKE_RESOURCE_IDEMPOTENCY_TABLE_NAME`. Like every table, it is kept with its data when it leaves the stack or the stage is removed; to delete it instead, exclude its key with `aws({ retainData })`. See [Data retention](/docs/guides/resources#data-retention).
+The Plugin contributes a DynamoDB table under the resource key `idempotencyTable`, with time to live on its `expiration` attribute. `voke synth` and `voke deploy` add it to the stack, and `voke local bootstrap` creates it locally. A Function that uses `idempotent` or `idempotentBatch` links it like any resource, `resources: ["idempotencyTable"]`, which gives that Function's role access to the table and its binding, `VOKE_RESOURCE_IDEMPOTENCY_TABLE_NAME`. No other Function can read the stored results. See [Resource Links](/docs/guides/resources#read-a-resource-from-a-function). Like every table, it is kept with its data when it leaves the stack or the stage is removed; to delete it instead, exclude its key with `aws({ retainData })`. See [Data retention](/docs/guides/resources#data-retention).
 
 | Option                | Default              | What it does                                                                    |
 | --------------------- | -------------------- | ------------------------------------------------------------------------------- |
@@ -54,6 +54,7 @@ export const functions = createFunctions({
   charge: fn({
     input: schema.object({ orderId: schema.string(), amount: schema.number() }),
     output: schema.object({ chargeId: schema.string() }),
+    resources: ["idempotencyTable"],
     handler: idempotent(
       async (payload) => await chargeCard(payload.orderId, payload.amount),
       { key: (payload) => payload.orderId }
@@ -63,6 +64,14 @@ export const functions = createFunctions({
 ```
 
 The first `functions.invoke("charge", { orderId: "ord_1", amount: 10 })` runs the handler and stores its result. A second call with `orderId: "ord_1"` returns the stored `{ chargeId }` without running it. The types of `payload` and of the result are the same as without `idempotent`.
+
+Without `resources: ["idempotencyTable"]`, every call rejects before the handler runs, in `voke dev` and in tests as on AWS:
+
+```txt
+VokeResourceBindingError: Function "charge" does not link resource "idempotencyTable". Add it to the Function: resources: ["idempotencyTable"]
+```
+
+With `idempotency({ store })` there is no table, so no link is needed.
 
 ## Wrap a route
 
@@ -91,6 +100,7 @@ const createOrder = idempotent(
 
 export const functions = createFunctions({
   orders: http({
+    resources: ["idempotencyTable"],
     routes: [
       route.post("/orders", {
         body: schema.object({ item: schema.string() }),
@@ -134,6 +144,7 @@ const settlePayment = async (paymentId: string): Promise<void> => {
 // ---cut---
 export const settle = sqs({
   queue: "paymentsQueue",
+  resources: ["idempotencyTable"],
   message: schema.object({
     paymentId: schema.string(),
     amount: schema.number(),
@@ -147,6 +158,7 @@ export const settle = sqs({
 
 - A message whose function throws, or whose key is in progress in another invocation, is reported in `batchItemFailures`, so SQS delivers it again.
 - A message that was already processed counts as a success and is not processed again.
+- In a Function that does not link the table, the whole invocation fails before any message runs, so SQS delivers the batch again instead of reporting each message as failed.
 - `validate` defaults to the message body: the message id and receive count change on every delivery.
 
 ## Choose a key
@@ -277,7 +289,7 @@ A second start with the same `executionName` returns the existing execution. `@v
 
 - Results must be JSON. A `Response`, a function or a value with a `BigInt` cannot be stored.
 - A DynamoDB item holds at most 400 KB, so a stored result must be smaller.
-- Every Function can read and write the table, as with every resource today.
+- Only the Functions that link the table can read and write it.
 - The messages of one SQS batch run one after another.
 - `idempotentBatch` works with SQS. Other Event Sources can wrap their handler with `idempotent`.
 

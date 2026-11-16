@@ -1,6 +1,8 @@
-// The Event Sources the AWS Provider supports. Core carries each Event Source as an open record
-// (`{ source, resource?, properties }`); everything AWS-specific about a source lives in its adapter.
-// The table is internal: there is no public registration API yet.
+// Deploy-time module: validation and synthesis of the Event Sources the AWS Provider supports. Core
+// carries each Event Source as an open record (`{ source, resource?, properties }`); everything
+// AWS-specific about a source lives in its adapters. The run-time half (`toInvocation`,
+// `toResponse`) is in `./event-source-runtime`, so the Lambda Bundle never loads this table.
+// The tables are internal: there is no public registration API yet.
 import { VokeConfigError } from "voke";
 import type { VokeModel, VokeModelEventSource, VokeModelError } from "voke";
 
@@ -9,6 +11,7 @@ import type {
   CloudFormationValue,
 } from "./cloudformation-template";
 import { dynamodbStreamEventSourceAdapter } from "./dynamodb-stream";
+import { unsupportedEventSourceMessage } from "./event-source-runtime";
 import { eventBridgeEventSourceAdapter } from "./eventbridge";
 import { kinesisEventSourceAdapter } from "./kinesis";
 import { s3EventSourceAdapter } from "./s3";
@@ -33,10 +36,6 @@ export interface AwsEventSourceSynthesisContext extends AwsEventSourceContext {
 
 export interface AwsEventSourceAdapter {
   readonly source: string;
-  /** AWS Lambda event → the Function's Event Invocation input. */
-  toInvocation(event: unknown): unknown;
-  /** The handler's result → the value the Lambda handler returns. */
-  toResponse(result: unknown): unknown;
   /** Resource kind and property checks for one Event Source in the model. */
   validate(context: AwsEventSourceContext): VokeIssue[];
   /** CloudFormation resources for one Event Source, keyed by logical id. */
@@ -53,9 +52,11 @@ export interface AwsEventSourceAdapter {
   };
   /**
    * IAM statements for the role of the Function the Event Source triggers, and no other role:
-   * for example, reading the stream a mapping polls.
+   * for example, reading the stream a mapping polls, or sending to the Function's dead-letter queue.
    */
-  roleStatements?(context: AwsEventSourceContext): CloudFormationValue[];
+  roleStatements?(
+    context: AwsEventSourceSynthesisContext
+  ): CloudFormationValue[];
   /**
    * The properties of the resource the Event Source references (`eventSource.resource`), given its
    * current properties: for example, turning on a bucket's EventBridge delivery. Return every
@@ -69,34 +70,33 @@ export interface AwsEventSourceAdapter {
   ): Record<string, CloudFormationValue>;
 }
 
-const adapters: ReadonlyMap<string, AwsEventSourceAdapter> = new Map(
-  [
-    sqsEventSourceAdapter,
-    snsEventSourceAdapter,
-    eventBridgeEventSourceAdapter,
-    scheduleEventSourceAdapter,
-    kinesisEventSourceAdapter,
-    dynamodbStreamEventSourceAdapter,
-    s3EventSourceAdapter,
-  ].map((adapter) => [adapter.source, adapter])
-);
+// An array literal, not a Map built at load time, so a bundle that imports this module only for its
+// types or a resource builder's dependencies keeps none of the adapters.
+const adapters: readonly AwsEventSourceAdapter[] = [
+  sqsEventSourceAdapter,
+  snsEventSourceAdapter,
+  eventBridgeEventSourceAdapter,
+  scheduleEventSourceAdapter,
+  kinesisEventSourceAdapter,
+  dynamodbStreamEventSourceAdapter,
+  s3EventSourceAdapter,
+];
 
-export const unsupportedEventSourceMessage = (
-  functionKey: string,
-  source: string
-): string =>
-  `Function "${functionKey}" uses Event Source "${source}", which the AWS Provider does not support.`;
+/** The Event Sources with a deploy-time adapter; the run-time table must list the same ones. */
+export const awsEventSources = (): string[] =>
+  adapters.map(({ source }) => source);
 
 export const findAwsEventSourceAdapter = (
   source: string
-): AwsEventSourceAdapter | undefined => adapters.get(source);
+): AwsEventSourceAdapter | undefined =>
+  adapters.find((adapter) => adapter.source === source);
 
 /** The adapter for `source`; an unknown source is an error, never a skip. */
 export const requireAwsEventSourceAdapter = (
   source: string,
   functionKey: string
 ): AwsEventSourceAdapter => {
-  const adapter = adapters.get(source);
+  const adapter = findAwsEventSourceAdapter(source);
 
   if (adapter === undefined) {
     throw new VokeConfigError(

@@ -22,6 +22,12 @@
   ],
   "type": "module",
   "types": "./src/index.ts",
+  "imports": {
+    "#provider": {
+      "voke-runtime": "./src/provider-runtime.ts",
+      "default": "./src/provider.ts"
+    }
+  },
   "exports": {
     ".": "./src/index.ts",
     "./cloudformation": "./src/cloudformation.ts",

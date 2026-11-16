@@ -44,6 +44,8 @@ export interface AwsCloudFormationResourceProvider {
   bindingValue: AwsResourceBindingValue;
   /** Set by the builders whose resource holds data: `dynamodbTable`, `s3Bucket`, `secret`. */
   dataBearing?: boolean;
+  /** `false` when `sqsQueue({ deadLetterQueue: false })` turned the queue's dead-letter queue off. */
+  deadLetterQueue?: boolean;
   policyResource: AwsResourcePolicyResource;
   outputName: string;
 }

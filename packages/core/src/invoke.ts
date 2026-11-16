@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+
 import type { Context, Hono, MiddlewareHandler } from "hono";
 
 import packageJson from "../package.json";
@@ -8,7 +10,7 @@ import type {
   RequestAuthorizerHandler,
 } from "./authorizers";
 import type { VokeEnv } from "./context";
-import { VokeConfigError } from "./errors";
+import { VokeConfigError, VokeResourceBindingError } from "./errors";
 import { json, jsonError } from "./http";
 import type {
   VokeModelProviderExtensionRecord,
@@ -97,8 +99,16 @@ export class InvokeError extends Error {
 
 export interface InvokeContext<
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+  TResource extends string = string,
 > {
   functionName: string;
+  /**
+   * The binding value of a resource this Function links in `resources` (a table name, a queue
+   * URL, a topic ARN, ...). Throws VokeResourceBindingError for a resource it does not link.
+   */
+  // Method syntax on purpose: its parameter is compared bivariantly, so a handler annotated with
+  // the plain `InvokeContext` still fits a Function whose `resources` narrow the key.
+  resource(key: TResource): string;
   trace: InvokeTrace;
   variables: RuntimeVariableHandles<TVariables>;
 }
@@ -189,9 +199,10 @@ export type RouteHandler<
   THeaders,
   TResult,
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+  TResource extends string = string,
 > = (
   request: RouteRequest<TBody, TParams, TQuery, THeaders>,
-  context: InvokeContext<TVariables>
+  context: InvokeContext<TVariables, TResource>
 ) => RouteReturn<TResult>;
 
 // A slot without a schema infers to the wide `StandardSchemaV1<unknown, unknown>`, so a schema
@@ -244,6 +255,7 @@ export interface RouteDefinitionInput<
   TOutputSchema extends AnyStandardSchema | undefined,
   TResult,
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+  TResource extends string = string,
 > {
   readonly authorizer?: RouteAuthorizerReference;
   readonly body?: TBodySchema;
@@ -253,7 +265,8 @@ export interface RouteDefinitionInput<
     RouteSchemaOutput<TQuerySchema, RouteRecord>,
     RouteSchemaOutput<THeadersSchema, RouteRecord>,
     RouteHandlerResult<TOutputSchema, TResult>,
-    TVariables
+    TVariables,
+    TResource
   >;
   readonly headers?: THeadersSchema;
   readonly meta?: RouteMeta;
@@ -283,6 +296,7 @@ export interface RouteDefinition<
     | undefined,
   TResult = unknown,
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+  TResource extends string = string,
 > extends RouteDefinitionInput<
   TMethod,
   TPath,
@@ -292,7 +306,8 @@ export interface RouteDefinition<
   THeadersSchema,
   TOutputSchema,
   TResult,
-  TVariables
+  TVariables,
+  TResource
 > {
   readonly method: TMethod;
   readonly middleware: readonly MiddlewareHandler<VokeEnv>[];
@@ -409,18 +424,20 @@ export type FunctionHandler<
   TPayload,
   TResult,
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+  TResource extends string = string,
 > = (
   payload: TPayload,
-  context: InvokeContext<TVariables>
+  context: InvokeContext<TVariables, TResource>
 ) => TResult | Promise<TResult>;
 
 export type EventFunctionHandler<
   TPayload,
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
   TResult = unknown,
+  TResource extends string = string,
 > = (
   payload: TPayload,
-  context: InvokeContext<TVariables>
+  context: InvokeContext<TVariables, TResource>
 ) => TResult | Promise<TResult>;
 
 export interface BaseFunctionDefinition<
@@ -431,6 +448,8 @@ export interface BaseFunctionDefinition<
   readonly key: TKey;
   readonly kind: TKind;
   readonly name?: string;
+  /** Resource Links: the resource keys this Function reads through `context.resource`. */
+  readonly resources?: readonly string[];
   readonly synthesis?: FunctionSynthesisConfig;
   readonly variables?: TVariables;
 }
@@ -507,6 +526,7 @@ export type AnyFunctionDefinition = BaseFunctionDefinition<string> & {
 
 interface FunctionDefinitionInputBase {
   name?: string;
+  resources?: readonly string[];
   routes?: readonly AnyRouteDefinition[];
   synthesis?: FunctionSynthesisConfig;
   variables?: RuntimeVariableCatalog;
@@ -516,29 +536,35 @@ type InvokableFunctionWithInputDefinitionInput<
   TInputSchema extends AnyStandardSchema,
   TOutputSchema extends AnyStandardSchema,
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+  TResources extends readonly string[] = readonly string[],
 > = FunctionDefinitionInputBase & {
   handler: FunctionHandler<
     StandardSchemaOutput<TInputSchema>,
     | StandardSchemaInput<TOutputSchema>
     | Promise<StandardSchemaInput<TOutputSchema>>,
-    TVariables
+    TVariables,
+    TResources[number]
   >;
   input: TInputSchema;
   output: TOutputSchema;
+  resources?: TResources;
   variables?: TVariables;
 };
 
 type InvokableZeroInputFunctionDefinitionInput<
   TOutputSchema extends AnyStandardSchema,
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+  TResources extends readonly string[] = readonly string[],
 > = FunctionDefinitionInputBase & {
   handler: FunctionHandler<
     undefined,
     | StandardSchemaInput<TOutputSchema>
     | Promise<StandardSchemaInput<TOutputSchema>>,
-    TVariables
+    TVariables,
+    TResources[number]
   >;
   output: TOutputSchema;
+  resources?: TResources;
   variables?: TVariables;
 };
 
@@ -557,10 +583,15 @@ type RouteInputList<
 export interface HttpFunctionDefinitionInput<
   TRoutes extends AnyRouteDefinition | readonly AnyRouteDefinition[],
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
-> extends Omit<FunctionDefinitionInputBase, "routes"> {
+  TResources extends readonly string[] = readonly string[],
+> extends Omit<FunctionDefinitionInputBase, "resources" | "routes"> {
   readonly authorizer?: string;
   readonly authorizers?: AuthorizerRegistryInput;
-  readonly routes: TRoutes | ((route: Voke<TVariables>) => TRoutes);
+  /** Resource Links: every route of this Function may read these resources. */
+  readonly resources?: TResources;
+  readonly routes:
+    | TRoutes
+    | ((route: Voke<TVariables, TResources[number]>) => TRoutes);
   readonly variables?: TVariables;
 }
 
@@ -853,6 +884,8 @@ interface FunctionRegistryActivation {
   unregisteredVariableProviders: "defer" | "error";
   variableOverrides?: RuntimeVariableOverrides;
   variableProviders: readonly RuntimeVariableProvider[];
+  /** Resource key → its binding variable name. Absent when the registry has no config. */
+  resourceBindings?: Readonly<Record<string, string>>;
   /** Plugin Function Wraps, outermost first. Absent when no Plugin wraps. */
   wraps?: readonly PluginFunctionWrap[];
 }
@@ -908,6 +941,8 @@ export const activateFunctionRegistry = (
   options: {
     /** The Provider's invoke capability; its `target` can route Functions through its transport. */
     invoke?: ProviderInvokeCapability;
+    /** Resource key → its binding variable name, from the config's resources. */
+    resourceBindings?: Readonly<Record<string, string>>;
     variableOverrides?: RuntimeVariableOverrides;
     variableProviders?: readonly RuntimeVariableProvider[];
     /** Plugin Function Wraps around every handler call, outermost first. */
@@ -929,6 +964,9 @@ export const activateFunctionRegistry = (
   const activation: FunctionRegistryActivation = {
     activationKey,
     invoke: options.invoke,
+    ...(options.resourceBindings === undefined
+      ? {}
+      : { resourceBindings: options.resourceBindings }),
     // Without any provider (no configured Provider, no explicit providers), Runtime Variables
     // can still resolve from overrides and the environment, so provider checks wait for load.
     unregisteredVariableProviders:
@@ -1006,6 +1044,84 @@ const runWrapped = async (
   return await dispatch(0);
 };
 
+interface EntryFunction {
+  readonly entry: BaseFunctionDefinition;
+}
+
+// The Function a handler call entered the process through. An in-process `functions.invoke` runs
+// with that Function's deployed role and environment, so a read must be linked by it as well.
+const entryFunction = new AsyncLocalStorage<EntryFunction | undefined>();
+
+/** Runs `run` with `definition` as the entry Function, unless an entry is already set. */
+const runAsEntry = <TResult>(
+  definition: BaseFunctionDefinition,
+  run: () => TResult
+): TResult =>
+  entryFunction.getStore() === undefined
+    ? entryFunction.run({ entry: definition }, run)
+    : run();
+
+/** Runs `run` outside every entry: the invocation leaves the process, so it starts a new one. */
+const runOutsideEntry = <TResult>(run: () => TResult): TResult =>
+  entryFunction.run(undefined, run);
+
+const notLinkedError = (
+  functionKey: string,
+  resource: string
+): VokeResourceBindingError =>
+  new VokeResourceBindingError(
+    `Function "${functionKey}" does not link resource "${resource}". Add it to the Function: resources: ["${resource}"]`
+  );
+
+const isLinked = (
+  definition: BaseFunctionDefinition,
+  resource: string
+): boolean => definition.resources?.includes(resource) === true;
+
+// Checks run when the handler reads, so the entry Function is the one of that call.
+const readResource = (
+  definition: BaseFunctionDefinition,
+  activation: FunctionRegistryActivation | undefined,
+  resource: string
+): string => {
+  if (!isLinked(definition, resource)) {
+    throw notLinkedError(definition.key, resource);
+  }
+
+  const entry = entryFunction.getStore()?.entry;
+
+  if (
+    entry !== undefined &&
+    entry !== definition &&
+    !isLinked(entry, resource)
+  ) {
+    throw new VokeResourceBindingError(
+      `Function "${definition.key}" reads resource "${resource}" while running in-process inside Function "${entry.key}", which does not link it. An in-process invocation runs with the caller's role: add resources: ["${resource}"] to "${entry.key}"`
+    );
+  }
+
+  if (activation?.resourceBindings === undefined) {
+    throw new VokeResourceBindingError(
+      `Function "${definition.key}" reads resource "${resource}", but its Function Registry was activated without a config, so Voke cannot resolve the binding. Create the Gateway with the config: voke(functions, { config })`
+    );
+  }
+
+  const envName = activation.resourceBindings[resource];
+
+  // The model rejects a link to an unknown resource, so this is a link the config lacks.
+  if (envName === undefined) {
+    throw notLinkedError(definition.key, resource);
+  }
+
+  const value = readEnv(envName);
+
+  if (value === undefined || value === "") {
+    throw new VokeResourceBindingError(`Missing resource binding: ${envName}`);
+  }
+
+  return value;
+};
+
 const createInvokeContext = <TVariables extends RuntimeVariableCatalog>(
   definition: BaseFunctionDefinition<string, FunctionKind, TVariables>,
   options: InvokeOptions
@@ -1015,6 +1131,8 @@ const createInvokeContext = <TVariables extends RuntimeVariableCatalog>(
 
   return {
     functionName,
+    resource: (key) =>
+      readResource(definition as BaseFunctionDefinition, activation, key),
     trace: resolveTrace(options),
     variables: createRuntimeVariables({
       cache: activation?.variableCache,
@@ -1371,6 +1489,9 @@ const runRouteHandler = async (
     definition === undefined
       ? {
           functionName: routeName(route),
+          resource: (key: string): string => {
+            throw notLinkedError(routeName(route), key);
+          },
           trace: currentTrace(),
           variables: createRuntimeVariables({
             functionKey: routeName(route),
@@ -1388,15 +1509,18 @@ const runRouteHandler = async (
     unknown,
     RuntimeVariableCatalog
   >;
-  const wraps =
-    definition === undefined ? undefined : functionWraps(definition);
-  const result =
-    wraps === undefined || definition === undefined
-      ? await handler(
-          request as RouteRequest<never, never, never, never>,
-          context
-        )
-      : await runWrapped(
+  const run = () =>
+    handler(request as RouteRequest<never, never, never, never>, context);
+
+  if (definition === undefined) {
+    return await parseRouteOutput(route, await run());
+  }
+
+  const wraps = functionWraps(definition);
+  const result = await runAsEntry(definition, () =>
+    wraps === undefined
+      ? run()
+      : runWrapped(
           wraps,
           {
             context,
@@ -1405,12 +1529,9 @@ const runRouteHandler = async (
             kind: "route",
             route: routeName(route),
           },
-          () =>
-            handler(
-              request as RouteRequest<never, never, never, never>,
-              context
-            )
-        );
+          run
+        )
+  );
 
   return await parseRouteOutput(route, result);
 };
@@ -1516,19 +1637,22 @@ export const runRequestAuthorizer = async (
   );
   await loadRuntimeVariablesBeforeHandler(runtimeContext.variables);
   const wraps = functionWraps(definition);
-  const result =
-    wraps === undefined
-      ? await handler(request, runtimeContext)
-      : ((await runWrapped(
-          wraps,
-          {
-            context: runtimeContext,
-            functionKey: definition.key,
-            input: request,
-            kind: "authorizer",
-          },
-          () => handler(request, runtimeContext)
-        )) as Awaited<ReturnType<RequestAuthorizerHandler>> | undefined);
+  const result = (await runAsEntry(
+    definition as unknown as BaseFunctionDefinition,
+    () =>
+      wraps === undefined
+        ? handler(request, runtimeContext)
+        : runWrapped(
+            wraps,
+            {
+              context: runtimeContext,
+              functionKey: definition.key,
+              input: request,
+              kind: "authorizer",
+            },
+            () => handler(request, runtimeContext)
+          )
+  )) as Awaited<ReturnType<RequestAuthorizerHandler>> | undefined;
 
   if (typeof result?.authorized !== "boolean") {
     throw new InvokeError("Invalid authorizer result", {
@@ -1783,18 +1907,20 @@ const runLocalFunction = async <
   await loadRuntimeVariablesBeforeHandler(context.variables);
   const wraps = functionWraps(definition);
   const result = await withTimeout(
-    wraps === undefined
-      ? definition.handler(parsedPayload, context)
-      : (runWrapped(
-          wraps,
-          {
-            context,
-            functionKey: definition.key,
-            input: parsedPayload,
-            kind: "invokable",
-          },
-          () => definition.handler(parsedPayload, context)
-        ) as Promise<StandardSchemaInput<TOutputSchema>>),
+    runAsEntry(definition, () =>
+      wraps === undefined
+        ? definition.handler(parsedPayload, context)
+        : (runWrapped(
+            wraps,
+            {
+              context,
+              functionKey: definition.key,
+              input: parsedPayload,
+              kind: "invokable",
+            },
+            () => definition.handler(parsedPayload, context)
+          ) as Promise<StandardSchemaInput<TOutputSchema>>)
+    ),
     options.timeoutMs,
     `invoke("${functionName}") timed out after ${options.timeoutMs}ms`,
     functionName
@@ -2007,12 +2133,14 @@ const invokeFunction = async (
   if (routed !== undefined) {
     const functionName = deployedName(definition);
 
-    return await invokeThroughTransport(definition, payload, invokeOptions, {
-      envelope: false,
-      functionName: routed.target.functionName,
-      missingTransportMessage: `invoke("${functionName}") is routed by the Provider, which supplies no invoke transport`,
-      transport: routed.capability.transport?.(),
-    });
+    return await runOutsideEntry(() =>
+      invokeThroughTransport(definition, payload, invokeOptions, {
+        envelope: false,
+        functionName: routed.target.functionName,
+        missingTransportMessage: `invoke("${functionName}") is routed by the Provider, which supplies no invoke transport`,
+        transport: routed.capability.transport?.(),
+      })
+    );
   }
 
   const acceptsExecutionName =
@@ -2031,7 +2159,9 @@ const invokeFunction = async (
   }
 
   if (resolveRuntime(invokeOptions) === "aws") {
-    return await invokeAws(definition, payload, invokeOptions);
+    return await runOutsideEntry(() =>
+      invokeAws(definition, payload, invokeOptions)
+    );
   }
 
   if (options.mode === "async") {
@@ -2094,14 +2224,19 @@ const sendEventToFunction = async (
   await loadRuntimeVariablesBeforeHandler(context.variables);
   const wraps = functionWraps(definition);
 
-  if (wraps === undefined) {
-    return await definition.handler(parsedEvent, context);
-  }
-
-  return await runWrapped(
-    wraps,
-    { context, functionKey: definition.key, input: parsedEvent, kind: "event" },
-    () => definition.handler(parsedEvent, context)
+  return await runAsEntry(definition, () =>
+    wraps === undefined
+      ? definition.handler(parsedEvent, context)
+      : runWrapped(
+          wraps,
+          {
+            context,
+            functionKey: definition.key,
+            input: parsedEvent,
+            kind: "event",
+          },
+          () => definition.handler(parsedEvent, context)
+        )
   );
 };
 
@@ -2109,20 +2244,24 @@ export function fn<
   const TInputSchema extends AnyStandardSchema,
   const TOutputSchema extends AnyStandardSchema,
   const TVariables extends RuntimeVariableCatalog = Record<never, never>,
+  const TResources extends readonly string[] = readonly [],
 >(
   definition: InvokableFunctionWithInputDefinitionInput<
     TInputSchema,
     TOutputSchema,
-    TVariables
+    TVariables,
+    TResources
   >
 ): InvokableFunctionDefinition<string, TInputSchema, TOutputSchema, TVariables>;
 export function fn<
   const TOutputSchema extends AnyStandardSchema,
   const TVariables extends RuntimeVariableCatalog = Record<never, never>,
+  const TResources extends readonly string[] = readonly [],
 >(
   definition: InvokableZeroInputFunctionDefinitionInput<
     TOutputSchema,
-    TVariables
+    TVariables,
+    TResources
   >
 ): InvokableFunctionDefinition<string, undefined, TOutputSchema, TVariables>;
 export function fn<
@@ -2166,12 +2305,13 @@ export function fn(
 export const http = <
   const TRoutes extends AnyRouteDefinition | readonly AnyRouteDefinition[],
   const TVariables extends RuntimeVariableCatalog = Record<never, never>,
+  const TResources extends readonly string[] = readonly [],
 >(
-  definition: HttpFunctionDefinitionInput<TRoutes, TVariables>
+  definition: HttpFunctionDefinitionInput<TRoutes, TVariables, TResources>
 ): RouteFunctionDefinition<string, RouteInputList<TRoutes>, TVariables> => {
   const routeInput =
     typeof definition.routes === "function"
-      ? definition.routes(new Voke<TVariables>())
+      ? definition.routes(new Voke<TVariables, TResources[number]>())
       : definition.routes;
   const routes = (Array.isArray(routeInput)
     ? routeInput
@@ -2183,6 +2323,7 @@ export const http = <
     key: "",
     kind: "route",
     name: definition.name,
+    resources: definition.resources,
     routes: Object.freeze([...routes]) as unknown as RouteInputList<TRoutes>,
     synthesis: definition.synthesis,
     variables: definition.variables,

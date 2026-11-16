@@ -159,3 +159,50 @@ kinesis({
   startingPosition: "TRIM_HORIZON",
   stream: "clicksStream",
 });
+
+// Resource Links: each handler reads only the resource keys its Function lists in `resources`.
+createFunctions({
+  linkedAudit: dynamodbStream({
+    handler: (batch, context) => {
+      const _bucket: string = context.resource("auditBucket");
+      // @ts-expect-error the Function does not link ordersTable.
+      void context.resource("ordersTable");
+
+      return batch.ok();
+    },
+    resources: ["auditBucket"],
+    table: "ordersTable",
+  }),
+  linkedClicks: kinesis({
+    handler: (batch, context) => {
+      const _id: string | undefined = batch.records[0]?.data.id;
+      const _bucket: string = context.resource("auditBucket");
+      // @ts-expect-error the Function does not link clicksStream.
+      void context.resource("clicksStream");
+
+      return batch.ok();
+    },
+    record: schema<{ id: string }>(),
+    resources: ["auditBucket"],
+    stream: "clicksStream",
+  }),
+  unlinkedAudit: dynamodbStream({
+    handler: (batch, context) => {
+      // @ts-expect-error a Function without resources links nothing.
+      void context.resource("ordersTable");
+
+      return batch.ok();
+    },
+    table: "ordersTable",
+  }),
+  unlinkedClicks: kinesis({
+    handler: (batch, context) => {
+      // @ts-expect-error a Function without resources links nothing.
+      void context.resource("clicksStream");
+
+      return batch.ok();
+    },
+    record: schema<{ id: string }>(),
+    stream: "clicksStream",
+  }),
+});

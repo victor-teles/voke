@@ -5,6 +5,7 @@ import { fn, createFunctions, http } from "../src/invoke";
 import type {
   AsyncInvokeResult,
   EventFunctionDefinition,
+  InvokeContext,
   StandardSchemaV1,
 } from "../src/invoke";
 import { createVariableSource } from "../src/variables";
@@ -247,4 +248,97 @@ fn({
     // @ts-expect-error The Lambda runtime moved to synthesis.provider (awsLambda from @voke/aws).
     runtime: "nodejs24.x",
   },
+});
+
+// Resource Links: a handler reads only the resource keys its Function lists in `resources`.
+fn({
+  handler: (_payload, context) => {
+    const _table: string = context.resource("usersTable");
+    // @ts-expect-error the Function does not link ordersQueue.
+    void context.resource("ordersQueue");
+
+    return "ok";
+  },
+  output: schema<string>(),
+  resources: ["usersTable"],
+});
+
+fn({
+  handler: (_payload, context) => {
+    // @ts-expect-error a Function without resources links nothing.
+    void context.resource("usersTable");
+
+    return "ok";
+  },
+  output: schema<string>(),
+});
+
+fn({
+  handler: (payload, context) => {
+    const _table: string = context.resource("usersTable");
+    // @ts-expect-error the Function does not link ordersQueue.
+    void context.resource("ordersQueue");
+
+    return payload.id;
+  },
+  input: schema<{ id: string }>(),
+  output: schema<string>(),
+  resources: ["usersTable"],
+});
+
+http({
+  resources: ["usersTable"],
+  routes: (route) => [
+    route.get("/users", {
+      handler: (_request, context) => {
+        const _table: string = context.resource("usersTable");
+        // @ts-expect-error the Function does not link ordersQueue.
+        void context.resource("ordersQueue");
+
+        return [];
+      },
+    }),
+  ],
+});
+
+http({
+  routes: (route) =>
+    route.get("/users", {
+      handler: (_request, context) => {
+        // @ts-expect-error a Function without resources links nothing.
+        void context.resource("usersTable");
+
+        return [];
+      },
+    }),
+});
+
+requestAuthorizer({
+  handler: (_request, context) => {
+    const _table: string = context.resource("usersTable");
+    // @ts-expect-error the Function does not link ordersQueue.
+    void context.resource("ordersQueue");
+
+    return { authorized: true };
+  },
+  resources: ["usersTable"],
+});
+
+requestAuthorizer({
+  handler: (_request, context) => {
+    // @ts-expect-error a Function without resources links nothing.
+    void context.resource("usersTable");
+
+    return { authorized: true };
+  },
+});
+
+// A handler declared on its own with the plain InvokeContext fits a Function that links resources.
+const readUsersTable = (_payload: undefined, context: InvokeContext): string =>
+  context.resource("usersTable");
+
+fn({
+  handler: readUsersTable,
+  output: schema<string>(),
+  resources: ["usersTable"],
 });

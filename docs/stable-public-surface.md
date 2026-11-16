@@ -45,7 +45,7 @@ Use `@voke/aws` for AWS-specific authoring and runtime binding helpers:
 - Durable Function test helpers in `@voke/aws/testing`: `setupDurableTests`, `teardownDurableTests`, `runDurable`
 - Generated Lambda handlers: `createLambdaHandlers` (used by the entry module `voke build` generates)
 - API Gateway authorizer helpers: `createAuthorizers`, `jwtAuthorizer`, `lambdaAuthorizer`, `requestAuthorizer`
-- Runtime binding helpers: `bindResource`, `createAwsClientConfig`
+- Runtime AWS client helper: `createAwsClientConfig`. Handlers read resource bindings with `context.resource(key)` for the resources their Function links in `resources`
 - Plugin Provider Extension Record: `awsPolicy` (IAM statements a Plugin adds to every Function role)
 - Provider: `aws`
 

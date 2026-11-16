@@ -81,11 +81,33 @@ const { total } = await functions.invoke("countUsers");
 
 A handler receives a second argument, the invoke context:
 
-| Field          | Description                                                                                |
-| -------------- | ------------------------------------------------------------------------------------------ |
-| `functionName` | The Function's deployed name: `name` when set, otherwise the registry key.                 |
-| `trace`        | The trace metadata passed with `invoke(..., { trace })`.                                   |
-| `variables`    | The Function's Runtime Variables. See [Runtime Variables](/docs/guides/runtime-variables). |
+| Field           | Description                                                                                |
+| --------------- | ------------------------------------------------------------------------------------------ |
+| `functionName`  | The Function's deployed name: `name` when set, otherwise the registry key.                 |
+| `resource(key)` | The binding value of a resource the Function links in `resources`. See below.              |
+| `trace`         | The trace metadata passed with `invoke(..., { trace })`.                                   |
+| `variables`     | The Function's Runtime Variables. See [Runtime Variables](/docs/guides/runtime-variables). |
+
+### Use a resource
+
+A Function lists the resources it uses from `voke.config.ts` in `resources`, by resource key. Every
+Function builder takes it. The handler reads a linked resource with `context.resource(key)`, and the
+Function's IAM role gets access to the linked resources and no others:
+
+```ts twoslash
+import { schema } from "@voke/schema";
+import { fn } from "voke";
+
+// ---cut---
+const archiveUser = fn({
+  input: schema.object({ id: schema.string() }),
+  output: schema.object({ table: schema.string() }),
+  resources: ["usersTable"],
+  handler: (payload, context) => ({ table: context.resource("usersTable") }),
+});
+```
+
+See [Resources and bindings](/docs/guides/resources#read-a-resource-from-a-function).
 
 ## Activate the registry
 

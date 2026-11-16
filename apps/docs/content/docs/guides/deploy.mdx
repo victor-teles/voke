@@ -190,6 +190,7 @@ The identity that runs `voke deploy` needs:
 - IAM: create roles and pass them to Lambda.
 - Lambda and API Gateway (HTTP APIs): create, update, and delete functions, APIs, routes, and permissions.
 - The services behind the resources you declare (DynamoDB, SQS, SNS, EventBridge, S3) and, for Runtime Variables, Secrets Manager and SSM parameters.
+- SQS, as soon as the project has an Event Source Function, even without a declared queue: every Event Source gets a [dead-letter queue](/docs/guides/dead-letter-queues).
 
 ## Next steps
 

@@ -35,8 +35,12 @@ export const functions = createFunctions({
     on: ["created"],
     prefix: "incoming/",
     suffix: ".jpg",
-    handler: async (event) => {
-      console.info(`${event.key} (${event.size} bytes) in ${event.bucket}`);
+    // Links the bucket, so the handler can read the uploaded object.
+    resources: ["uploadsBucket"],
+    handler: async (event, context) => {
+      console.info(
+        `${event.key} (${event.size} bytes) in ${context.resource("uploadsBucket")}`
+      );
     },
   }),
 });
@@ -49,6 +53,8 @@ export const functions = createFunctions({
 - `prefix` and `suffix` are optional. With them, only keys that start with `prefix` and end with
   `suffix` invoke the Function. They compare the key exactly as EventBridge delivers it (see
   [Object keys](#object-keys)).
+- `resources: ["uploadsBucket"]` links the bucket. The trigger does not need it; reading or writing
+  the bucket's objects does.
 - A Function has one bucket. To react to two buckets, create two Functions.
 
 ## Handle an event
@@ -79,11 +85,13 @@ An event that is not an S3 object event fails the invocation with an `InvokeErro
 
 </Callout>
 
-EventBridge invokes the Function asynchronously, so Lambda retries a failed invocation and then
-drops the event.
+EventBridge invokes the Function asynchronously, so Lambda retries a failed invocation twice and
+then sends the event to the Function's [dead-letter queue](/docs/guides/dead-letter-queues).
 
-The Function's role can already read, write and delete the bucket's objects, so the handler can read
-the object with the bucket binding. See [Resources and bindings](/docs/guides/resources).
+To read the object, the Function links the bucket with `resources: ["uploadsBucket"]`. The link
+gives its role read, write and delete access to the bucket's objects and gives the handler the
+bucket name through `context.resource("uploadsBucket")`. Without the link the role has no access to
+the bucket. See [Resources and bindings](/docs/guides/resources#access-a-link-grants).
 
 ## Object keys
 
@@ -154,11 +162,13 @@ See [Testing](/docs/guides/testing) for test setup.
   `source: ["aws.s3"]`, the `detail-type` values from `on` (`Object Created`, `Object Deleted`), the
   bucket by name, and the key filter, with the Function as its target;
 - an `AWS::Lambda::Permission` that lets `events.amazonaws.com` invoke the Function, only from that
-  rule.
+  rule;
+- an `AWS::SQS::Queue` dead-letter queue and an `AWS::Lambda::EventInvokeConfig` that sends failed
+  events to it, unless you pass `deadLetterQueue: false`. See [Dead-letter queues](/docs/guides/dead-letter-queues).
 
 Voke does not use classic bucket notifications to Lambda. They would make the bucket depend on the
-Function, and every Function's role depends on the bucket, so CloudFormation would reject the stack
-as a circular dependency.
+Function, and the role of a Function that links the bucket depends on the bucket, so CloudFormation
+would reject the stack as a circular dependency.
 
 ## Good to know
 

@@ -95,3 +95,61 @@ sns({
   message: orderCreated,
   topic: "ordersTopic",
 });
+
+// Resource Links: each handler reads only the resource keys its Function lists in `resources`.
+createFunctions({
+  linkedNightly: schedule({
+    expression: "rate(1 day)",
+    handler: (_event, context) => {
+      const _table: string = context.resource("ordersTable");
+      // @ts-expect-error the Function does not link ordersTopic.
+      void context.resource("ordersTopic");
+    },
+    resources: ["ordersTable"],
+  }),
+  linkedOnEvent: eventBridge({
+    detail: orderCreated,
+    handler: (event, context) => {
+      const _orderId: string = event.detail.orderId;
+      const _table: string = context.resource("ordersTable");
+      // @ts-expect-error the Function does not link ordersTopic.
+      void context.resource("ordersTopic");
+    },
+    pattern: { source: ["orders"] },
+    resources: ["ordersTable"],
+  }),
+  linkedOnOrder: sns({
+    handler: (message, context) => {
+      const _orderId: string = message.body.orderId;
+      const _table: string = context.resource("ordersTable");
+      // @ts-expect-error the Function does not link ordersTopic.
+      void context.resource("ordersTopic");
+    },
+    message: orderCreated,
+    resources: ["ordersTable"],
+    topic: "ordersTopic",
+  }),
+  unlinkedNightly: schedule({
+    expression: "rate(1 day)",
+    handler: (_event, context) => {
+      // @ts-expect-error a Function without resources links nothing.
+      void context.resource("ordersTable");
+    },
+  }),
+  unlinkedOnEvent: eventBridge({
+    detail: orderCreated,
+    handler: (_event, context) => {
+      // @ts-expect-error a Function without resources links nothing.
+      void context.resource("ordersTable");
+    },
+    pattern: { source: ["orders"] },
+  }),
+  unlinkedOnOrder: sns({
+    handler: (_message, context) => {
+      // @ts-expect-error a Function without resources links nothing.
+      void context.resource("ordersTable");
+    },
+    message: orderCreated,
+    topic: "ordersTopic",
+  }),
+});

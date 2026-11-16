@@ -154,7 +154,7 @@ export const audit = (options: { bucketArn: string }): VokePlugin => ({
 
 - `functions` adds **Plugin Functions**. They are route-backed Functions from `http()`: the Gateway serves them, and `voke synth` and `voke deploy` deploy them with their API routes, like your own. The registry key is `<plugin>-<name>`, here `audit-status`; the deployed Lambda is `<name>-<stage>-audit-status`. A Plugin Function is not part of your typed Function Registry: reach it with `gateway.request("/audit/status")`, not `functions.route(...)`. A route that duplicates one of yours, or a Function key that equals one of yours, is a config error.
 - `resources` and `environment` join the config's own. A key that your config or another Plugin already uses with a different value is a `VokeConfigError` at `plugins.<name>.contributions.resources.<key>`.
-- `provider` holds one **Provider Extension Record** per Provider name. The AWS Provider reads `awsPolicy({ statements })` from `@voke/aws`: each statement allows `actions` on `resources` for every Function role. A resource you contribute needs no statement; its access comes with it.
+- `provider` holds one **Provider Extension Record** per Provider name. The AWS Provider reads `awsPolicy({ statements })` from `@voke/aws`: each statement allows `actions` on `resources` for every Function role, because a Plugin's Function Wrap runs around every Function. A resource you contribute needs no statement: a Function that uses it links it with `resources: ["<key>"]`, like any resource, and gets its access and binding from the link. Document the key for your Plugin's users.
 
 ## Add a command
 
@@ -196,11 +196,24 @@ A command that takes arguments declares them in `positionals`, for example `posi
 
 Built-in commands win: a Plugin with `cli` cannot be named like a built-in command (`build`, `deploy`, `dev`, ...) or `help`.
 
-<Callout type="warn" title="Command dependencies end up in the Lambda bundle">
-  The config is imported by the deployed Functions too, so a command's
-  dependencies end up in the Lambda bundle. Load command-only dependencies with
-  `await import(...)` inside `run`.
+<Callout type="warn" title="Command dependencies end up in the Lambda Bundle">
+  The deployed Functions import the config too, so every module the config
+  imports is in the Lambda Bundle, and so is a local module that `run` loads
+  with `import()`. Only `node:` built-ins and `build.external` modules stay out.
 </Callout>
+
+A Plugin package keeps command-only code out of the Lambda Bundle with the `voke-runtime` package condition. `voke build` resolves imports with it, and every other command resolves `default`. `@voke/aws` uses it for `aws()`: a deployed Function gets the run-time half only.
+
+```json title="package.json"
+"imports": {
+  "#plugin": {
+    "voke-runtime": "./src/plugin-runtime.ts",
+    "default": "./src/plugin.ts"
+  }
+}
+```
+
+The package's entry then exports the Plugin from `"#plugin"`. Both files export the same names; the `voke-runtime` one leaves out `cli` and its dependencies.
 
 ## Test a Plugin
 

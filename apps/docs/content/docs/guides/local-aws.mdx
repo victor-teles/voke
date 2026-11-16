@@ -17,7 +17,7 @@ voke local stop        # stop the Local AWS Provider
 ## What runs where
 
 - **Resources run in the Local AWS Provider.** `voke local bootstrap` deploys a CloudFormation template with the resources you declare (tables, queues, buckets, ...) through the emulator's CloudFormation API. With the AWS Emulator, it then writes the generated resource names to `.voke/local/outputs.json`. The local template retains nothing, whatever `aws({ retainData })` says: local data is disposable, and `voke local reset` clears it.
-- **Functions run in the local Gateway.** `voke dev` runs your code with Bun, as usual, and sets the `VOKE_RESOURCE_*` bindings for your resources. Bootstrap does not create Lambdas, APIs, or SQS triggers in the AWS Emulator: its Lambda runtime cannot load a Voke bundle, and an emulator SQS trigger would consume your messages.
+- **Functions run in the local Gateway.** `voke dev` runs your code with Bun, as usual, and sets the `VOKE_RESOURCE_*` bindings for all your resources in its one process. `context.resource(key)` still checks that the Function links the resource, so a missing link fails locally as it would on AWS. Bootstrap does not create Lambdas, APIs, or SQS triggers in the AWS Emulator: its Lambda runtime cannot load a Voke bundle, and an emulator SQS trigger would consume your messages.
 
 ## Run your project locally
 

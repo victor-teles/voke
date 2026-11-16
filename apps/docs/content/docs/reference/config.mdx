@@ -70,7 +70,7 @@ Settings of the bundle that `voke build` writes.
 | `build.outdir`      | `string`   | `"./dist"`       | Output directory of `voke build`.                                                                                                  |
 | `build.external`    | `string[]` | `["@aws-sdk/*"]` | Module patterns left out of the bundle. The default uses the AWS SDK that the Lambda runtime ships. Set `[]` to bundle everything. |
 
-Voke always builds an ESM bundle for the Lambda Node.js runtime and writes a `package.json` with `"type": "module"` next to it. With `aws()`, the bundle is `<outdir>/index.js`, with one Lambda handler per Function, and `<outdir>/voke-manifest.json` maps each Function to its handler.
+Voke always builds an ESM bundle for the Lambda Node.js runtime and writes a `package.json` with `"type": "module"` next to it. With `aws()`, the bundle is `<outdir>/index.js`, with one Lambda handler per Function, and `<outdir>/voke-manifest.json` maps each Function to its handler. The bundle holds run-time code only (the `voke-runtime` package condition leaves deploy code out) and is minified without renaming identifiers, so stack traces keep function names. Voke writes no source map.
 
 ## CloudFormation
 
@@ -216,6 +216,8 @@ A freshly deployed stack needs no tuning. These defaults apply unless you set th
 | Log retention          | 14 days                                         | `aws({ lambda: { logRetentionDays } })`                         |
 | Data retention         | tables, buckets and secrets kept on every stage | `aws({ retainData })`                                           |
 | SQS visibility timeout | 6 × the consumer's timeout + batch window       | `sqsQueue({ visibilityTimeoutSeconds })`                        |
+| Dead-letter queue      | on for every Event Source                       | `sqsQueue({ deadLetterQueue })`; per Function `deadLetterQueue` |
+| Stream retries         | 10 (with a dead-letter queue)                   | `kinesis()` / `dynamodbStream()` `maxRetryAttempts`             |
 
 An explicit queue visibility timeout lower than a consumer's timeout is an error.
 

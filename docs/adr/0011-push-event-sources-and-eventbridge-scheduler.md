@@ -9,3 +9,5 @@ Schedules use EventBridge Scheduler (`AWS::Scheduler::Schedule`) and only it. Sc
 The shared role needs a stack-level step, so the internal Event Source adapter interface gains an optional `synthesizeStack` member. Synthesis calls it once, after every Function, with every Event Source of that type. Like everything else Function-side, these triggers, permissions and the Scheduler role are absent from the resources-only template that `voke local bootstrap` deploys.
 
 Deferred: one-time `at(...)` schedules, a typed static input per schedule, flexible time windows, per-schedule retry policies and dead-letter queues, Lambda `OnFailure` destinations, plural forms, delivery of emulator events to `voke dev`, and generating these helpers from `serverless.yml` (the migrator only points to them).
+
+Superseded in part by ADR 0020, "Failed events go to a dead-letter queue by default" (`0020-dead-letter-queues.md`).

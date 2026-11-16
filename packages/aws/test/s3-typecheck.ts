@@ -61,3 +61,23 @@ s3({
 });
 // @ts-expect-error bucket is required.
 s3({ handler: ignoreEvent });
+
+// Resource Links: the handler reads only the resource keys the Function lists in `resources`.
+createFunctions({
+  linkedUpload: s3({
+    bucket: "uploadsBucket",
+    handler: (_event, context) => {
+      const _bucket: string = context.resource("uploadsBucket");
+      // @ts-expect-error the Function does not link ordersTable.
+      void context.resource("ordersTable");
+    },
+    resources: ["uploadsBucket"],
+  }),
+  unlinkedUpload: s3({
+    bucket: "uploadsBucket",
+    handler: (_event, context) => {
+      // @ts-expect-error a Function without resources links nothing.
+      void context.resource("uploadsBucket");
+    },
+  }),
+});

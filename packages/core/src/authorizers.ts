@@ -50,18 +50,26 @@ export interface AuthorizerResult<
 export type RequestAuthorizerHandler<
   TContext extends Record<string, unknown> = Record<string, unknown>,
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+  TResource extends string = string,
 > = (
   request: AuthorizerRequest,
-  context: InvokeContext<TVariables>
+  context: InvokeContext<TVariables, TResource>
 ) => AuthorizerResult<TContext> | Promise<AuthorizerResult<TContext>>;
 
 export interface RequestAuthorizerFunctionInput<
   TContext extends Record<string, unknown> = Record<string, unknown>,
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+  TResources extends readonly string[] = readonly string[],
 > {
   readonly context?: StandardSchemaV1<unknown, TContext>;
-  readonly handler: RequestAuthorizerHandler<TContext, TVariables>;
+  readonly handler: RequestAuthorizerHandler<
+    TContext,
+    TVariables,
+    TResources[number]
+  >;
   readonly name?: string;
+  /** Resource Links: the resource keys this Function reads through `context.resource`. */
+  readonly resources?: TResources;
   readonly synthesis?: FunctionSynthesisConfig;
   readonly variables?: TVariables;
 }
@@ -76,6 +84,7 @@ export interface RequestAuthorizerFunctionDefinition<
   readonly key: TKey;
   readonly kind: "authorizer";
   readonly name?: string;
+  readonly resources?: readonly string[];
   readonly routes: readonly [];
   readonly synthesis?: RequestAuthorizerFunctionInput<TContext>["synthesis"];
   readonly variables?: TVariables;

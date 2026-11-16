@@ -100,27 +100,6 @@
             "PolicyDocument": {
               "Statement": [
                 {
-                  "Action": ["kinesis:PutRecord", "kinesis:PutRecords"],
-                  "Effect": "Allow",
-                  "Resource": {
-                    "Fn::GetAtt": ["ClicksStream", "Arn"]
-                  }
-                },
-                {
-                  "Action": [
-                    "dynamodb:GetItem",
-                    "dynamodb:PutItem",
-                    "dynamodb:UpdateItem",
-                    "dynamodb:DeleteItem",
-                    "dynamodb:Query",
-                    "dynamodb:Scan"
-                  ],
-                  "Effect": "Allow",
-                  "Resource": {
-                    "Fn::GetAtt": ["OrdersTable", "Arn"]
-                  }
-                },
-                {
                   "Action": [
                     "kinesis:DescribeStream",
                     "kinesis:DescribeStreamSummary",
@@ -131,6 +110,13 @@
                   "Effect": "Allow",
                   "Resource": {
                     "Fn::GetAtt": ["ClicksStream", "Arn"]
+                  }
+                },
+                {
+                  "Action": ["sqs:SendMessage"],
+                  "Effect": "Allow",
+                  "Resource": {
+                    "Fn::GetAtt": ["IngestClicksFunctionDeadLetterQueue", "Arn"]
                   }
                 }
               ],
@@ -156,14 +142,7 @@
           "ZipFile": "exports.handler = async () => ({ statusCode: 501, body: \"Build and upload this Voke function before deploying.\" });"
         },
         "Environment": {
-          "Variables": {
-            "VOKE_RESOURCE_CLICKS_STREAM_NAME": {
-              "Ref": "ClicksStream"
-            },
-            "VOKE_RESOURCE_ORDERS_TABLE_NAME": {
-              "Ref": "OrdersTable"
-            }
-          }
+          "Variables": {}
         },
         "FunctionName": "streams-test-ingestClicks",
         "Handler": "index.ingestClicks",
@@ -188,6 +167,12 @@
       },
       "Type": "AWS::Logs::LogGroup"
     },
+    "IngestClicksFunctionDeadLetterQueue": {
+      "Properties": {
+        "MessageRetentionPeriod": 1209600
+      },
+      "Type": "AWS::SQS::Queue"
+    },
     "IngestClicksFunctionClicksStreamEventSourceMapping": {
       "Properties": {
         "BatchSize": 100,
@@ -201,7 +186,15 @@
         },
         "FunctionResponseTypes": ["ReportBatchItemFailures"],
         "MaximumBatchingWindowInSeconds": 0,
-        "StartingPosition": "TRIM_HORIZON"
+        "StartingPosition": "TRIM_HORIZON",
+        "MaximumRetryAttempts": 10,
+        "DestinationConfig": {
+          "OnFailure": {
+            "Destination": {
+              "Fn::GetAtt": ["IngestClicksFunctionDeadLetterQueue", "Arn"]
+            }
+          }
+        }
       },
       "Type": "AWS::Lambda::EventSourceMapping"
     },
@@ -227,27 +220,6 @@
             "PolicyDocument": {
               "Statement": [
                 {
-                  "Action": ["kinesis:PutRecord", "kinesis:PutRecords"],
-                  "Effect": "Allow",
-                  "Resource": {
-                    "Fn::GetAtt": ["ClicksStream", "Arn"]
-                  }
-                },
-                {
-                  "Action": [
-                    "dynamodb:GetItem",
-                    "dynamodb:PutItem",
-                    "dynamodb:UpdateItem",
-                    "dynamodb:DeleteItem",
-                    "dynamodb:Query",
-                    "dynamodb:Scan"
-                  ],
-                  "Effect": "Allow",
-                  "Resource": {
-                    "Fn::GetAtt": ["OrdersTable", "Arn"]
-                  }
-                },
-                {
                   "Action": [
                     "dynamodb:DescribeStream",
                     "dynamodb:GetRecords",
@@ -262,6 +234,16 @@
                   "Action": ["dynamodb:ListStreams"],
                   "Effect": "Allow",
                   "Resource": "*"
+                },
+                {
+                  "Action": ["sqs:SendMessage"],
+                  "Effect": "Allow",
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "ProjectOrdersFunctionDeadLetterQueue",
+                      "Arn"
+                    ]
+                  }
                 }
               ],
               "Version": "2012-10-17"
@@ -286,14 +268,7 @@
           "ZipFile": "exports.handler = async () => ({ statusCode: 501, body: \"Build and upload this Voke function before deploying.\" });"
         },
         "Environment": {
-          "Variables": {
-            "VOKE_RESOURCE_CLICKS_STREAM_NAME": {
-              "Ref": "ClicksStream"
-            },
-            "VOKE_RESOURCE_ORDERS_TABLE_NAME": {
-              "Ref": "OrdersTable"
-            }
-          }
+          "Variables": {}
         },
         "FunctionName": "streams-test-projectOrders",
         "Handler": "index.projectOrders",
@@ -318,6 +293,12 @@
       },
       "Type": "AWS::Logs::LogGroup"
     },
+    "ProjectOrdersFunctionDeadLetterQueue": {
+      "Properties": {
+        "MessageRetentionPeriod": 1209600
+      },
+      "Type": "AWS::SQS::Queue"
+    },
     "ProjectOrdersFunctionOrdersTableEventSourceMapping": {
       "Properties": {
         "BatchSize": 100,
@@ -331,7 +312,15 @@
         },
         "FunctionResponseTypes": ["ReportBatchItemFailures"],
         "MaximumBatchingWindowInSeconds": 0,
-        "StartingPosition": "TRIM_HORIZON"
+        "StartingPosition": "TRIM_HORIZON",
+        "MaximumRetryAttempts": 10,
+        "DestinationConfig": {
+          "OnFailure": {
+            "Destination": {
+              "Fn::GetAtt": ["ProjectOrdersFunctionDeadLetterQueue", "Arn"]
+            }
+          }
+        }
       },
       "Type": "AWS::Lambda::EventSourceMapping"
     },
@@ -362,20 +351,6 @@
                   "Resource": {
                     "Fn::GetAtt": ["ClicksStream", "Arn"]
                   }
-                },
-                {
-                  "Action": [
-                    "dynamodb:GetItem",
-                    "dynamodb:PutItem",
-                    "dynamodb:UpdateItem",
-                    "dynamodb:DeleteItem",
-                    "dynamodb:Query",
-                    "dynamodb:Scan"
-                  ],
-                  "Effect": "Allow",
-                  "Resource": {
-                    "Fn::GetAtt": ["OrdersTable", "Arn"]
-                  }
                 }
               ],
               "Version": "2012-10-17"
@@ -403,9 +378,6 @@
           "Variables": {
             "VOKE_RESOURCE_CLICKS_STREAM_NAME": {
               "Ref": "ClicksStream"
-            },
-            "VOKE_RESOURCE_ORDERS_TABLE_NAME": {
-              "Ref": "OrdersTable"
             }
           }
         },

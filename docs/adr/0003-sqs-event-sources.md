@@ -13,3 +13,5 @@ Partial batch failure reporting is the default for every SQS Event Source. Voke 
 Local tests should use Event Invocation through the Function Registry, not direct handler calls or `functions.invoke(...)`. `functions.sendEvent(functionKey, payload)` defaults to SQS in v1 and accepts minimal body-first message inputs while Voke synthesizes SQS-like metadata. The same normalization and validation path should run locally and in deployed AWS runtime.
 
 Voke will own the deployed SQS Lambda adapter. The adapter detects SQS events, normalizes records, parses and validates message bodies, executes the SQS Function handler, combines automatic invalid-message failures with handler-reported failures, and converts the result into Lambda's SQS batch response shape. This is intentionally batteries-included because the adapter and partial failure behavior are the most error-prone parts of SQS support.
+
+Superseded in part by ADR 0020, "Failed events go to a dead-letter queue by default" (`0020-dead-letter-queues.md`).

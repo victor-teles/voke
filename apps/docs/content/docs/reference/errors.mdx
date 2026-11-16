@@ -47,9 +47,19 @@ All classes below are exported by `voke`:
 | `VokeConfigError`          | `CONFIG_ERROR`           | `voke.config.ts` is missing, has no default export, has an invalid or removed setting, or the `aws()` options are invalid. Also for a missing `voke dev` entrypoint and a missing remote target.  |
 | `VokeModelError`           | `MODEL_ERROR`            | The project model is inconsistent (for example, a Function references a resource that is not declared), or a Function breaks a Provider limit (Lambda memory, timeout, the 30-second HTTP limit). |
 | `VokeDeployError`          | `DEPLOY_ERROR`           | A deploy or removal fails in the Provider: no valid AWS credentials, a failed stack or change set, or a bundle that cannot be packaged.                                                           |
-| `VokeResourceBindingError` | `RESOURCE_BINDING_ERROR` | A resource binding is read at runtime, but its environment variable is missing, for example `Missing AWS resource binding: VOKE_RESOURCE_USERS_TABLE_NAME`.                                       |
+| `VokeResourceBindingError` | `RESOURCE_BINDING_ERROR` | `context.resource(key)` cannot return a binding. See the messages below.                                                                                                                          |
 | `VokeRuntimeVariableError` | `RUNTIME_VARIABLE_ERROR` | A Runtime Variable cannot be loaded or resolved, is not valid JSON, fails its schema, has no registered provider, or a provider returns a non-string value.                                       |
 | `VokeError`                | Any code                 | The base class. Voke throws it directly when `voke doctor` finds a failing check (`CONFIG_ERROR`) and when `voke create` cannot run `bun install` (`CREATE_ERROR`).                               |
+
+`context.resource(key)` throws `VokeResourceBindingError` with one of these messages, in the order
+it checks:
+
+- `Function "<key>" does not link resource "<resource>". Add it to the Function: resources: ["<resource>"]`
+- `Function "<key>" reads resource "<resource>" while running in-process inside Function "<entry>", which does not link it. An in-process invocation runs with the caller's role: add resources: ["<resource>"] to "<entry>"`
+- `Function "<key>" reads resource "<resource>", but its Function Registry was activated without a config, so Voke cannot resolve the binding. Create the Gateway with the config: voke(functions, { config })`
+- `Missing resource binding: VOKE_RESOURCE_USERS_TABLE_NAME`, when the variable is unset or empty.
+
+See [Resources and bindings](/docs/guides/resources#read-a-resource-from-a-function).
 
 Catch the base class to handle every framework error, or a subclass to handle one kind:
 

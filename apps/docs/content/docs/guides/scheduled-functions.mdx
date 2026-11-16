@@ -51,8 +51,9 @@ The handler receives:
 | `executionId`   | The id EventBridge Scheduler gives the attempt.                                 |
 | `raw`           | The payload as the schedule sent it.                                            |
 
-The handler returns nothing. If it throws, the invocation fails and Lambda retries it. Make the job
-safe to run twice: use `scheduledTime` to tell runs apart.
+The handler returns nothing. If it throws, the invocation fails and Lambda retries it twice, then
+sends the event to the Function's [dead-letter queue](/docs/guides/dead-letter-queues). Make the job safe to run twice: use
+`scheduledTime` to tell runs apart.
 
 <Callout type="warn" title="Invalid payloads fail the invocation">
 
@@ -108,8 +109,12 @@ higher quota. `voke synth` adds:
 - one `AWS::Scheduler::Schedule` per scheduled Function, in the account's default schedule group,
   with no flexible time window;
 - one `AWS::IAM::Role`, `VokeSchedulerRole`, for the whole stack. EventBridge Scheduler assumes it,
-  only for schedules in this account, and it may invoke exactly the scheduled Functions. No
-  `AWS::Lambda::Permission` is needed.
+  only for schedules in this account, and it may invoke exactly the scheduled Functions and send to
+  their dead-letter queues. No `AWS::Lambda::Permission` is needed;
+- per scheduled Function, an `AWS::SQS::Queue` dead-letter queue and an
+  `AWS::Lambda::EventInvokeConfig` that sends failed events to it. The schedule's target sends an
+  invocation EventBridge Scheduler could not deliver to the same queue. `deadLetterQueue: false`
+  removes all three. See [Dead-letter queues](/docs/guides/dead-letter-queues).
 
 The identity that runs `voke deploy` needs permission to manage EventBridge Scheduler schedules
 (`scheduler:CreateSchedule`, `scheduler:UpdateSchedule`, `scheduler:DeleteSchedule`,
@@ -121,7 +126,7 @@ every Voke deploy needs. See [Deploy](/docs/guides/deploy).
 <Callout type="info" title="Schedule support is intentionally small in v1">
 
 - One schedule per Function, and only recurring `rate(...)` and `cron(...)` expressions.
-- There is no static input per schedule, flexible time window, retry policy or dead-letter queue.
+- There is no static input per schedule, flexible time window or retry policy.
 - A `schedule()` Function cannot have HTTP routes or an output schema.
 
 </Callout>

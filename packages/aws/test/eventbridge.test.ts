@@ -112,7 +112,10 @@ test("eventBridge() stores the bus and the pattern it was given", () => {
 
   expect(onBus.events).toEqual([
     {
-      properties: { pattern: { detailType: ["OrderPaid"] } },
+      properties: {
+        deadLetterQueue: true,
+        pattern: { detailType: ["OrderPaid"] },
+      },
       resource: "ordersBus",
       source: "eventBridge",
     },
@@ -120,6 +123,7 @@ test("eventBridge() stores the bus and the pattern it was given", () => {
   expect(onDefaultBus.events).toEqual([
     {
       properties: {
+        deadLetterQueue: true,
         pattern: { detail: { status: ["PAID"] }, source: ["orders"] },
       },
       source: "eventBridge",

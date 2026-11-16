@@ -162,7 +162,7 @@ if (process.env.VOKE_SYNTH !== "1") {
 }
 ```
 
-`voke build` then writes `.voke/build/index.ts`, a generated module that exports one Lambda handler per Function, and bundles it to `dist/index.js`. `dist/voke-manifest.json` records the handler of each Function.
+`voke build` then writes `.voke/build/index.ts`, a generated module that exports one Lambda handler per Function, and bundles it, run-time code only, to `dist/index.js`. `dist/voke-manifest.json` records the handler of each Function.
 
 Handler export names come from the registry keys:
 

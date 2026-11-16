@@ -100,7 +100,7 @@ voke build
 voke build ./src/index.ts ./dist
 ```
 
-`voke build` bundles the entrypoint into one ESM bundle for the AWS Lambda Node.js runtime, with one generated handler per Function, and writes a `package.json` with `"type": "module"` next to it. Modules that match `build.external` stay out of the bundle; the default, `["@aws-sdk/*"]`, uses the AWS SDK that ships with the Lambda runtime. It prints `Built <outdir>`. `voke deploy` runs the build for you. See [Deploy](/docs/guides/deploy).
+`voke build` bundles the entrypoint into one ESM bundle for the AWS Lambda Node.js runtime, with one generated handler per Function, and writes a `package.json` with `"type": "module"` next to it. The bundle holds run-time code only: the Provider's deploy code, such as synthesis and deploy, is left out through the `voke-runtime` package condition. It is minified without renaming identifiers, so stack traces keep function names, and it has no source map. Modules that match `build.external` stay out of the bundle; the default, `["@aws-sdk/*"]`, uses the AWS SDK that ships with the Lambda runtime. It prints `Built <outdir>`. `voke deploy` runs the build for you. See [Deploy](/docs/guides/deploy).
 
 Give the entrypoint and the output directory as arguments or as `--entrypoint` and `--outdir`, not both.
 

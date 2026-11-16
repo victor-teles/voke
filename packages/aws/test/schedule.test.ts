@@ -58,6 +58,7 @@ test("schedule() stores the expression with UTC and enabled as defaults", () => 
   ).toEqual([
     {
       properties: {
+        deadLetterQueue: true,
         enabled: true,
         expression: "rate(5 minutes)",
         timezone: "UTC",
@@ -73,6 +74,7 @@ test("schedule() stores the expression with UTC and enabled as defaults", () => 
       timezone: "America/Sao_Paulo",
     }).events[0]?.properties
   ).toEqual({
+    deadLetterQueue: true,
     enabled: false,
     expression: "cron(0 9 * * ? *)",
     timezone: "America/Sao_Paulo",

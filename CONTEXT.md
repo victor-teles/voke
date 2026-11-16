@@ -84,6 +84,10 @@ _Avoid_: Core resource kind, CloudFormation metadata, untyped plugin state
 The **Provider** that adapts a **Gateway** to AWS runtime, deployment, synthesis, and local workflow behavior.
 _Avoid_: CloudFormation only, Lambda handler helper
 
+**Lambda Bundle**:
+The file `voke build` writes for deployed **Functions**. It holds run-time code only: a package's deploy-time code is left out through the `voke-runtime` condition.
+_Avoid_: artifact, dist, deployment package
+
 **Local AWS Provider**:
 A local development implementation that emulates AWS services for a **Voke Project**.
 _Avoid_: Provider, Gateway provider, local runtime
@@ -228,6 +232,10 @@ _Avoid_: Raw stream event as primary contract, shard batch
 The handler result that tells a stream Event Source the first record to deliver again.
 _Avoid_: SQS Batch Result for streams, checkpoint response
 
+**Dead-Letter Queue**:
+The SQS queue Voke creates to keep an event that a **Function** could not process after its **Event Source**'s retries. A consumed queue owns one; for every other **Event Source** the **Function** owns one.
+_Avoid_: DLQ as a user-declared resource, error queue, failure topic
+
 **Event Invocation**:
 The local test/runtime path that delivers an event-shaped payload to an Event Source Function.
 _Avoid_: Function invocation, route invocation
@@ -251,6 +259,10 @@ _Avoid_: Resource declaration, CloudFormation secret, environment variable bindi
 **Runtime Variable Key**:
 The app-facing name a **Function** uses to read a **Runtime Variable** from runtime context.
 _Avoid_: AWS secret name, parameter path, resource key
+
+**Resource Link**:
+A **Function**'s declaration, by resource key, that it uses one of the project's resources. The link gives the Function the resource's binding and gives its role the resource's access.
+_Avoid_: Grant, permission, attachment, resource binding (the binding is the value a link provides)
 
 **Plugin**:
 A named unit declared in `voke.config.ts` that extends a **Voke Project** at run time and at deploy time without being a **Provider**.
@@ -373,6 +385,7 @@ _Avoid_: idempotency cache, persistence layer
 - The root project model validates provider-neutral structure, while each **Provider** validates its own **Provider Extension Records**.
 - Runtime source code can pass a **Provider** to a **Gateway** when it needs provider behavior or an explicit override.
 - The **AWS Provider** supplies AWS-specific runtime, deployment, synthesis, and local workflow behavior for a **Gateway**.
+- The **AWS Provider** gives a **Lambda Bundle** only its runtime and invocation **Provider Capabilities**.
 - A **Local AWS Provider** is distinct from a **Provider** because it emulates local AWS services rather than defining the Gateway's deployment target.
 - A **Gateway** is the runtime source of truth for dev-visible **Function** and **Event Source** details.
 - A **Gateway** can synthesize an **HTTP API** when it contains route-backed **Functions**.
@@ -477,6 +490,11 @@ _Avoid_: idempotency cache, persistence layer
 - An **Idempotency Record** belongs to one **Function** and one **Idempotency Key**; two **Functions** with the same key value do not share a record.
 - An **SQS Message Batch** handled with `idempotentBatch(...)` has one **Idempotency Record** per message.
 - A **Durable Function** start uses `executionName` as its idempotency, not an **Idempotency Record**.
+- A **Function** reads only the resources it has a **Resource Link** to, through `context.resource(key)`; its role and environment hold those resources and no others.
+- An **Event Source** gives its **Function** trigger access to the source resource and no **Resource Link**.
+- A **Runtime Variable** built with `fromResource(key)` gives its **Function** that resource's read access and binding, but no **Resource Link**.
+- A **Plugin Contribution** resource is linked like any other resource; `awsPolicy()` statements reach every **Function** role.
+- An in-process invocation runs with the **Resource Links** of the **Function** that was entered first; an invocation that leaves the process starts with its own.
 
 ## Flagged ambiguities
 
@@ -550,10 +568,10 @@ _Avoid_: idempotency cache, persistence layer
 > **Domain expert:** "No, an SQS Function can list multiple **SQS Event Sources** as long as they are the same entrypoint kind."
 >
 > **Dev:** "Does an SQS Event Source configure queue redrive behavior?"
-> **Domain expert:** "No, an SQS Event Source configures Lambda trigger behavior; queue redrive belongs to the queue resource."
+> **Domain expert:** "No, an SQS Event Source configures Lambda trigger behavior; queue redrive belongs to the queue resource. A queue that a Function consumes gets a **Dead-Letter Queue** and a redrive policy by default, and `sqsQueue({ deadLetterQueue: false })` turns it off."
 >
-> **Dev:** "Is DLQ/redrive part of SQS Event Source v1?"
-> **Domain expert:** "No, DLQ/redrive is deferred from SQS Event Source v1 because it belongs to queue resource lifecycle design."
+> **Dev:** "Where do failed events of the other Event Sources go?"
+> **Domain expert:** "To the **Function**'s own **Dead-Letter Queue**, on by default; `deadLetterQueue: false` on the Event Source Function turns it off. Sending events back from it stays manual."
 >
 > **Dev:** "Does an invalid SQS message body fail the whole batch?"
 > **Domain expert:** "No, invalid message bodies are automatic per-message failures by default, and only valid parsed messages reach the handler unless that behavior is disabled."
@@ -717,7 +735,7 @@ _Avoid_: idempotency cache, persistence layer
 - Event Source Functions do not mix with HTTP routes or invokable handlers in v1.
 - SQS Functions use plural `events` and may attach multiple **SQS Event Sources**.
 - SQS Event Source v1 options are limited to batch size, maximum batching window, and enabled state.
-- DLQ/redrive configuration is deferred from SQS Event Source v1.
+- Every **Event Source** has a **Dead-Letter Queue** by default: `deadLetterQueue: false` on `sqsQueue()` turns it off for SQS, and on the Event Source Function for every other source. Redrive stays manual.
 - Invalid SQS message bodies are automatic per-message failures by default, with an explicit opt-out for handlers that need to inspect invalid messages.
 - `sqs()` uses `invalidMessageBody: "fail" | "include"` to control invalid body handling.
 - `sqs()` treats SQS message bodies as JSON in v1, validated with its `message` schema.

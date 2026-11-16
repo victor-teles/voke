@@ -59,7 +59,15 @@ export const handlerModule = (file: string, outdir: string): string =>
     .replace(/\.js$/u, "");
 
 /**
- * The provider-neutral build plan: one Node.js ESM bundle per entrypoint, the AWS SDK and other
+ * The package condition every Lambda Bundle is built with. A package resolves its run-time half
+ * through it in its `package.json` `exports` or `imports`, so deploy-time code stays out of the
+ * bundle, as `@voke/aws` does for `aws()`. A public contract: docs/adr/0022-runtime-only-lambda-bundle.md.
+ */
+const runtimeCondition = "voke-runtime";
+
+/**
+ * The provider-neutral build plan: one Node.js ESM bundle per entrypoint, resolved with the
+ * `voke-runtime` condition and minified without renaming identifiers, the AWS SDK and other
  * `build.external` modules left out, and a sibling package.json so Node loads the bundle as ESM.
  * Functions with an explicit `synthesis.entrypoint` get their own bundle entry and handler.
  */
@@ -109,6 +117,12 @@ export const createBuildPlan = (input: BaseBuildPlanInput): BuildPlan => {
       "node",
       "--format",
       "esm",
+      "--conditions",
+      runtimeCondition,
+      // Names stay as written so a stack frame still reads `at chargeCard (index.js:1:51234)`;
+      // identifiers are never renamed, and no source map is written (docs/adr/0022-runtime-only-lambda-bundle.md).
+      "--minify-whitespace",
+      "--minify-syntax",
       ...input.build.external.flatMap((pattern) => ["--external", pattern]),
     ],
     entrypoints,

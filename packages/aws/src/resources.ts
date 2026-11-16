@@ -1,15 +1,6 @@
-import { VokeResourceBindingError } from "voke";
-
 export interface AwsClientConfig {
   region: string;
   endpoint?: string;
-}
-
-export interface ResourceBinding<TValue extends string = string> {
-  name: string;
-  attribute: string;
-  envName: string;
-  value: () => TValue;
 }
 
 export const toEnvKey = (value: string): string =>
@@ -23,30 +14,6 @@ export const createResourceBindingName = (
   name: string,
   attribute: string
 ): string => `VOKE_RESOURCE_${toEnvKey(name)}_${toEnvKey(attribute)}`;
-
-export const bindResource = <TValue extends string = string>(
-  name: string,
-  attribute: string
-): ResourceBinding<TValue> => {
-  const envName = createResourceBindingName(name, attribute);
-
-  return {
-    attribute,
-    envName,
-    name,
-    value: () => {
-      const value = process.env[envName];
-
-      if (value === undefined || value === "") {
-        throw new VokeResourceBindingError(
-          `Missing AWS resource binding: ${envName}`
-        );
-      }
-
-      return value as TValue;
-    },
-  };
-};
 
 /**
  * Config for every AWS SDK client: `new SQSClient(createAwsClientConfig())`. Under a Local AWS

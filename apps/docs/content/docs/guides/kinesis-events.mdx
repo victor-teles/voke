@@ -184,7 +184,8 @@ record you have handled, return a result without it, such as `{ batchItemFailure
 | `batchSize`                | `100`           | The largest number of records in one batch, 1 to 10000.                                      |
 | `maxBatchingWindowSeconds` | `0`             | How long Lambda gathers records before it calls the Function, 0 to 300.                      |
 | `bisectOnError`            | `true`          | Split a batch in two and retry when the handler throws.                                      |
-| `maxRetryAttempts`         | not set         | Retries before Lambda discards a batch, -1 to 10000. Unset retries until the record expires. |
+| `maxRetryAttempts`         | `10`            | Retries before Lambda gives up on a batch, -1 to 10000. Not set without a dead-letter queue. |
+| `deadLetterQueue`          | `true`          | Send a record of each batch Lambda gives up on to the Function's dead-letter queue.          |
 | `enabled`                  | `true`          | `false` creates the mapping turned off.                                                      |
 
 `startingPosition` only applies when the mapping is created. Changing it replaces the mapping, which
@@ -192,16 +193,17 @@ starts reading again from the new position.
 
 ## When a record can never succeed
 
-A record that always fails blocks its shard: Lambda delivers it again until it succeeds or expires
-from the stream (24 hours by default, `retentionHours` at most). Records behind it in the shard wait,
-and the `IteratorAge` metric grows.
+Lambda splits a failing batch in two until it isolates the record (splitting does not use up
+retries), then retries it 10 times. After that, Lambda sends a message to the Function's
+[dead-letter queue](/docs/guides/dead-letter-queues) and the shard moves on. Records behind it no longer wait.
 
-Voke leaves `maxRetryAttempts` unset on purpose. A capped mapping discards a record after its last
-attempt, and Voke has no failure destination to keep it yet, so a short outage downstream could lose
-data within seconds. A stalled shard is visible and loses nothing until the retention period ends.
+The message holds the stream ARN, the shard and the first and last sequence numbers, not the records.
+Read the records from the stream before they expire (24 hours by default, `retentionHours` at most).
 
-To stop a record from blocking the shard, handle it in your code: log it, store it, and return a
-result that does not fail it. If losing records is acceptable, set `maxRetryAttempts`.
+With `deadLetterQueue: false`, Voke leaves `maxRetryAttempts` unset: without a place to keep a
+failed batch, a capped mapping would discard it silently. A failing record then blocks its shard
+until it expires, and the `IteratorAge` metric grows. To move past it, handle it in your code: log
+it, store it, and return a result that does not fail it.
 
 ## Test a Kinesis Function
 
@@ -250,9 +252,13 @@ For each `kinesis()` Function, `voke synth` adds:
 - Read access on the Function's own role only, scoped to the stream: `kinesis:DescribeStream`,
   `kinesis:DescribeStreamSummary`, `kinesis:GetRecords`, `kinesis:GetShardIterator` and
   `kinesis:ListShards`.
+- An `AWS::SQS::Queue` dead-letter queue, set as the mapping's `OnFailure` destination with
+  `MaximumRetryAttempts: 10`, and `sqs:SendMessage` on it for the Function's own role. Not with
+  `deadLetterQueue: false`.
 
-Every Function role gets `kinesis:PutRecord` and `kinesis:PutRecords` on the stream, so any Function
-can produce to it. See [Resources and bindings](/docs/guides/resources).
+Only a Function that links the stream, `resources: ["clicksStream"]`, gets `kinesis:PutRecord` and
+`kinesis:PutRecords` on it and can produce to it. The consumer does not need the link. See
+[Resources and bindings](/docs/guides/resources#access-a-link-grants).
 
 ## Limits
 
@@ -260,7 +266,8 @@ can produce to it. See [Resources and bindings](/docs/guides/resources).
 
 - One stream per Function, read through a shared-throughput (standard) iterator. Enhanced fan-out,
   `ParallelizationFactor`, tumbling windows, `AT_TIMESTAMP` and event filtering are not supported.
-- There is no failure destination for discarded records.
+- The dead-letter queue keeps pointers to failed records, not the records. Records cannot go to an
+  S3 bucket.
 - Payloads must be JSON. Read aggregated or binary payloads with `invalidRecord: "include"`.
 
 </Callout>

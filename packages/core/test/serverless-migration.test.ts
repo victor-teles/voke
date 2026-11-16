@@ -1054,7 +1054,7 @@ test("reports Serverless Framework plugin compatibility deterministically", () =
       ],
       name: "serverless-iam-roles-per-function",
       notes: [
-        "Voke generates one function role policy surface today; per-function IAM isolation is not converted automatically.",
+        "Voke scopes each Function role to the resources that Function links; per-function IAM statements are still not converted automatically.",
       ],
       status: "manual",
       summary: "Per-function IAM behavior requires explicit security review.",

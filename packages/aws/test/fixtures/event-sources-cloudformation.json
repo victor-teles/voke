@@ -76,17 +76,13 @@
             "PolicyDocument": {
               "Statement": [
                 {
-                  "Action": ["events:PutEvents"],
+                  "Action": ["sqs:SendMessage"],
                   "Effect": "Allow",
                   "Resource": {
-                    "Fn::GetAtt": ["OrdersBus", "Arn"]
-                  }
-                },
-                {
-                  "Action": ["sns:Publish"],
-                  "Effect": "Allow",
-                  "Resource": {
-                    "Ref": "OrdersTopic"
+                    "Fn::GetAtt": [
+                      "NightlyCleanupFunctionDeadLetterQueue",
+                      "Arn"
+                    ]
                   }
                 }
               ],
@@ -112,14 +108,7 @@
           "ZipFile": "exports.handler = async () => ({ statusCode: 501, body: \"Build and upload this Voke function before deploying.\" });"
         },
         "Environment": {
-          "Variables": {
-            "VOKE_RESOURCE_ORDERS_BUS_NAME": {
-              "Ref": "OrdersBus"
-            },
-            "VOKE_RESOURCE_ORDERS_TOPIC_ARN": {
-              "Ref": "OrdersTopic"
-            }
-          }
+          "Variables": {}
         },
         "FunctionName": "orders-events-prod-nightlyCleanup",
         "Handler": "index.nightlyCleanup",
@@ -144,6 +133,28 @@
       },
       "Type": "AWS::Logs::LogGroup"
     },
+    "NightlyCleanupFunctionDeadLetterQueue": {
+      "Properties": {
+        "MessageRetentionPeriod": 1209600
+      },
+      "Type": "AWS::SQS::Queue"
+    },
+    "NightlyCleanupFunctionEventInvokeConfig": {
+      "Properties": {
+        "DestinationConfig": {
+          "OnFailure": {
+            "Destination": {
+              "Fn::GetAtt": ["NightlyCleanupFunctionDeadLetterQueue", "Arn"]
+            }
+          }
+        },
+        "FunctionName": {
+          "Ref": "NightlyCleanupFunction"
+        },
+        "Qualifier": "$LATEST"
+      },
+      "Type": "AWS::Lambda::EventInvokeConfig"
+    },
     "NightlyCleanupFunctionSchedule": {
       "Properties": {
         "FlexibleTimeWindow": {
@@ -155,6 +166,11 @@
         "Target": {
           "Arn": {
             "Fn::GetAtt": ["NightlyCleanupFunction", "Arn"]
+          },
+          "DeadLetterConfig": {
+            "Arn": {
+              "Fn::GetAtt": ["NightlyCleanupFunctionDeadLetterQueue", "Arn"]
+            }
           },
           "Input": "{\"attempt\":\"<aws.scheduler.attempt-number>\",\"executionId\":\"<aws.scheduler.execution-id>\",\"scheduledTime\":\"<aws.scheduler.scheduled-time>\",\"voke\":\"schedule\"}",
           "RoleArn": {
@@ -186,17 +202,10 @@
             "PolicyDocument": {
               "Statement": [
                 {
-                  "Action": ["events:PutEvents"],
+                  "Action": ["sqs:SendMessage"],
                   "Effect": "Allow",
                   "Resource": {
-                    "Fn::GetAtt": ["OrdersBus", "Arn"]
-                  }
-                },
-                {
-                  "Action": ["sns:Publish"],
-                  "Effect": "Allow",
-                  "Resource": {
-                    "Ref": "OrdersTopic"
+                    "Fn::GetAtt": ["OrderCreatedFunctionDeadLetterQueue", "Arn"]
                   }
                 }
               ],
@@ -222,14 +231,7 @@
           "ZipFile": "exports.handler = async () => ({ statusCode: 501, body: \"Build and upload this Voke function before deploying.\" });"
         },
         "Environment": {
-          "Variables": {
-            "VOKE_RESOURCE_ORDERS_BUS_NAME": {
-              "Ref": "OrdersBus"
-            },
-            "VOKE_RESOURCE_ORDERS_TOPIC_ARN": {
-              "Ref": "OrdersTopic"
-            }
-          }
+          "Variables": {}
         },
         "FunctionName": "orders-events-prod-orderCreated",
         "Handler": "index.orderCreated",
@@ -253,6 +255,28 @@
         "RetentionInDays": 14
       },
       "Type": "AWS::Logs::LogGroup"
+    },
+    "OrderCreatedFunctionDeadLetterQueue": {
+      "Properties": {
+        "MessageRetentionPeriod": 1209600
+      },
+      "Type": "AWS::SQS::Queue"
+    },
+    "OrderCreatedFunctionEventInvokeConfig": {
+      "Properties": {
+        "DestinationConfig": {
+          "OnFailure": {
+            "Destination": {
+              "Fn::GetAtt": ["OrderCreatedFunctionDeadLetterQueue", "Arn"]
+            }
+          }
+        },
+        "FunctionName": {
+          "Ref": "OrderCreatedFunction"
+        },
+        "Qualifier": "$LATEST"
+      },
+      "Type": "AWS::Lambda::EventInvokeConfig"
     },
     "OrderCreatedFunctionOrdersTopicPermission": {
       "Properties": {
@@ -304,17 +328,10 @@
             "PolicyDocument": {
               "Statement": [
                 {
-                  "Action": ["events:PutEvents"],
+                  "Action": ["sqs:SendMessage"],
                   "Effect": "Allow",
                   "Resource": {
-                    "Fn::GetAtt": ["OrdersBus", "Arn"]
-                  }
-                },
-                {
-                  "Action": ["sns:Publish"],
-                  "Effect": "Allow",
-                  "Resource": {
-                    "Ref": "OrdersTopic"
+                    "Fn::GetAtt": ["OrderPaidFunctionDeadLetterQueue", "Arn"]
                   }
                 }
               ],
@@ -340,14 +357,7 @@
           "ZipFile": "exports.handler = async () => ({ statusCode: 501, body: \"Build and upload this Voke function before deploying.\" });"
         },
         "Environment": {
-          "Variables": {
-            "VOKE_RESOURCE_ORDERS_BUS_NAME": {
-              "Ref": "OrdersBus"
-            },
-            "VOKE_RESOURCE_ORDERS_TOPIC_ARN": {
-              "Ref": "OrdersTopic"
-            }
-          }
+          "Variables": {}
         },
         "FunctionName": "orders-events-prod-orderPaid",
         "Handler": "index.orderPaid",
@@ -371,6 +381,28 @@
         "RetentionInDays": 14
       },
       "Type": "AWS::Logs::LogGroup"
+    },
+    "OrderPaidFunctionDeadLetterQueue": {
+      "Properties": {
+        "MessageRetentionPeriod": 1209600
+      },
+      "Type": "AWS::SQS::Queue"
+    },
+    "OrderPaidFunctionEventInvokeConfig": {
+      "Properties": {
+        "DestinationConfig": {
+          "OnFailure": {
+            "Destination": {
+              "Fn::GetAtt": ["OrderPaidFunctionDeadLetterQueue", "Arn"]
+            }
+          }
+        },
+        "FunctionName": {
+          "Ref": "OrderPaidFunction"
+        },
+        "Qualifier": "$LATEST"
+      },
+      "Type": "AWS::Lambda::EventInvokeConfig"
     },
     "OrderPaidFunctionOrdersBusRule": {
       "Properties": {
@@ -445,6 +477,18 @@
                   "Resource": [
                     {
                       "Fn::GetAtt": ["NightlyCleanupFunction", "Arn"]
+                    }
+                  ]
+                },
+                {
+                  "Action": "sqs:SendMessage",
+                  "Effect": "Allow",
+                  "Resource": [
+                    {
+                      "Fn::GetAtt": [
+                        "NightlyCleanupFunctionDeadLetterQueue",
+                        "Arn"
+                      ]
                     }
                   ]
                 }

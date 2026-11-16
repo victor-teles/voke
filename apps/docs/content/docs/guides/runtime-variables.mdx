@@ -248,18 +248,14 @@ gets one statement:
 The `-*` suffix matches the random suffix that Secrets Manager adds to secret ARNs. Only the
 Function that declares a variable gets the statement for it. Other Functions in the project do not.
 
-Two limits apply:
+A `.fromResource(key)` variable needs no [Resource Link](/docs/guides/resources#read-a-resource-from-a-function):
+the Function that declares it gets the resource's read statement and its binding, and no other
+Function does. The variable does not make `context.resource(key)` available; link the resource for
+that.
 
 <Callout type="warn" title="Voke grants no KMS permissions">
   A `SecureString` parameter or a secret encrypted with a customer-managed KMS
   key also needs `kms:Decrypt` on that key, which you must grant outside Voke.
-</Callout>
-
-<Callout type="warn" title="Declared resources are readable by every Function">
-  Resources declared in `resources` are a separate case: every Function gets
-  access to every declared resource. A `secret()` resource is readable by all
-  Functions, even those that do not declare `secret.fromResource(...)`. See
-  [Resources and bindings](/docs/guides/resources).
 </Callout>
 
 ## Next steps

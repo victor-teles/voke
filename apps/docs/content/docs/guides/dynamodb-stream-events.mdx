@@ -156,18 +156,20 @@ return a result without it.
 
 `dynamodbStream()` accepts the same mapping options as `kinesis()`: `startingPosition`
 (`"trimHorizon"` by default), `batchSize` (`100`), `maxBatchingWindowSeconds` (`0`),
-`bisectOnError` (`true`), `maxRetryAttempts` (not set) and `enabled` (`true`). See
+`bisectOnError` (`true`), `maxRetryAttempts` (`10`, not set without a dead-letter queue),
+`deadLetterQueue` (`true`) and `enabled` (`true`). See
 [Kinesis events](/docs/guides/kinesis-events#mapping-options) for their ranges.
 
 ## When a record can never succeed
 
-A record that always fails blocks its shard until it succeeds or leaves the stream, which DynamoDB
-Streams keeps for 24 hours. Voke leaves `maxRetryAttempts` unset on purpose: a capped mapping
-discards the record after its last attempt, and Voke has no failure destination to keep it yet. A
-stalled shard is visible; a discarded change is lost silently.
+Lambda splits a failing batch until it isolates the record, retries it 10 times, then sends a
+message to the Function's [dead-letter queue](/docs/guides/dead-letter-queues) and the shard moves on. The message holds the
+stream ARN, the shard and the sequence numbers, not the change itself: read it from the stream
+within 24 hours, which is how long DynamoDB Streams keeps records.
 
-To move past a record that cannot succeed, handle it in your code (log it or store it) and return a
-result without it. If losing changes is acceptable, set `maxRetryAttempts`.
+With `deadLetterQueue: false`, `maxRetryAttempts` stays unset, so a failing record blocks its shard
+for up to 24 hours instead of being discarded silently. To move past it, handle it in your code (log
+it or store it) and return a result without it.
 
 ## Test a DynamoDB stream Function
 
@@ -225,6 +227,8 @@ For each `dynamodbStream()` Function, `voke synth` adds:
 - Read access on the Function's own role only: `dynamodb:DescribeStream`, `dynamodb:GetRecords` and
   `dynamodb:GetShardIterator` on the table's stream, and `dynamodb:ListStreams` on `*`, the same
   set as the AWS managed policy `AWSLambdaDynamoDBExecutionRole`.
+- An `AWS::SQS::Queue` dead-letter queue, set as the mapping's `OnFailure` destination, and
+  `sqs:SendMessage` on it for the Function's own role. Not with `deadLetterQueue: false`.
 
 `dynamodbTable({ stream })` adds `StreamSpecification` to the table. A table without `stream` is
 synthesized exactly as before.
@@ -235,7 +239,8 @@ synthesized exactly as before.
 
 - One table per Function. `ParallelizationFactor`, tumbling windows and event filtering are not
   supported.
-- There is no failure destination for discarded records.
+- The dead-letter queue keeps pointers to failed records, not the changes. Records cannot go to an
+  S3 bucket.
 
 </Callout>
 

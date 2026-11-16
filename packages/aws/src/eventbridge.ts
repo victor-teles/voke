@@ -16,11 +16,17 @@ import type {
   CloudFormationResource,
   CloudFormationValue,
 } from "./cloudformation-template";
+import {
+  asyncFailureResourcesFor,
+  deadLetterQueueOptionIssues,
+  functionDeadLetterQueueStatements,
+} from "./dead-letter-queue";
 import { toAwsEventTime, validateEventPayload } from "./event-payload";
 import {
   eventSourceResourceKindIssue,
   lambdaInvokePermissionResource,
 } from "./event-source-resources";
+import type { AwsEventSourceRuntimeAdapter } from "./event-source-runtime";
 import type {
   AwsEventSourceAdapter,
   AwsEventSourceContext,
@@ -43,6 +49,7 @@ export interface EventBridgePattern {
 /** An EventBridge Event Source as `eventBridge()` stores it: the optional bus key and the pattern. */
 export interface EventBridgeEventSourceDefinition extends EventSourceDefinition {
   readonly properties: {
+    readonly deadLetterQueue: boolean;
     readonly pattern: {
       readonly detail?: VokeModelRecord;
       readonly detailType?: string[];
@@ -108,18 +115,23 @@ export interface EventBridgeEventSchema<
 export interface EventBridgeFunctionDefinitionInput<
   TDetailSchema extends AnyStandardSchema,
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+  TResources extends readonly string[] = readonly string[],
 > {
   /** The key of an `eventBus()` resource. The account's default event bus when omitted. */
   readonly bus?: string;
+  /** Keep events this Function fails after Lambda's retries in a dead-letter queue. Default true. */
+  readonly deadLetterQueue?: boolean;
   /** A Standard Schema for `event.detail`. */
   readonly detail: TDetailSchema;
   readonly handler: (
     event: EventBridgeEvent<StandardSchemaOutput<TDetailSchema>>,
-    context: InvokeContext<TVariables>
+    context: InvokeContext<TVariables, TResources[number]>
   ) => void | Promise<void>;
   readonly name?: string;
   readonly pattern: EventBridgePattern;
   readonly synthesis?: FunctionSynthesisConfig;
+  /** Resource Links: the resource keys this Function reads through `context.resource`. */
+  readonly resources?: TResources;
   readonly variables?: TVariables;
 }
 
@@ -212,9 +224,10 @@ const storedPattern = (
 
 const eventBridgeEventSource = (
   bus: string | undefined,
-  pattern: EventBridgePattern
+  pattern: EventBridgePattern,
+  deadLetterQueue: boolean
 ): EventBridgeEventSourceDefinition => ({
-  properties: { pattern: storedPattern(pattern) },
+  properties: { deadLetterQueue, pattern: storedPattern(pattern) },
   ...(bus === undefined ? {} : { resource: bus }),
   source: "eventBridge",
 });
@@ -223,8 +236,13 @@ const eventBridgeEventSource = (
 export const eventBridge = <
   const TDetailSchema extends AnyStandardSchema,
   const TVariables extends RuntimeVariableCatalog = Record<never, never>,
+  const TResources extends readonly string[] = readonly [],
 >(
-  definition: EventBridgeFunctionDefinitionInput<TDetailSchema, TVariables>
+  definition: EventBridgeFunctionDefinitionInput<
+    TDetailSchema,
+    TVariables,
+    TResources
+  >
 ): EventFunctionDefinition<
   string,
   EventBridgeEventSchema<TDetailSchema>,
@@ -249,12 +267,15 @@ export const eventBridge = <
   }
 
   return Object.freeze({
-    events: Object.freeze([eventBridgeEventSource(bus, pattern)]),
+    events: Object.freeze([
+      eventBridgeEventSource(bus, pattern, definition.deadLetterQueue ?? true),
+    ]),
     handler: definition.handler,
     input: eventBridgeEventSchema(definition.detail, pattern),
     key: "",
     kind: "event",
     name: definition.name,
+    resources: definition.resources,
     routes: [],
     synthesis: definition.synthesis,
     variables: definition.variables,
@@ -334,17 +355,36 @@ const busKind = {
 } as const;
 
 const busIssues = (context: AwsEventSourceContext): VokeIssue[] => {
-  if (context.eventSource.resource === undefined) {
-    return [];
-  }
+  const issue =
+    context.eventSource.resource === undefined
+      ? undefined
+      : eventSourceResourceKindIssue(context, busKind);
 
-  const issue = eventSourceResourceKindIssue(context, busKind);
-
-  return issue === undefined ? [] : [issue];
+  return [
+    ...(issue === undefined ? [] : [issue]),
+    ...deadLetterQueueOptionIssues(context),
+  ];
 };
 
 /** How an EventBridge Event Source runs on Lambda and synthesizes to a rule and a permission. */
+export const eventBridgeEventRuntimeAdapter: AwsEventSourceRuntimeAdapter = {
+  source: "eventBridge",
+  // The whole event is the raw input; the schema validates its `detail`, as for local events.
+  toInvocation: (event) => {
+    const raw = event as EventBridgeAwsEvent;
+
+    return {
+      detail: raw.detail,
+      raw,
+    } satisfies EventBridgeEventInvocationInput;
+  },
+  toResponse: () => {
+    // EventBridge invokes asynchronously and ignores the result.
+  },
+};
+
 export const eventBridgeEventSourceAdapter: AwsEventSourceAdapter = {
+  roleStatements: functionDeadLetterQueueStatements,
   source: "eventBridge",
   synthesize: (context) => {
     const issues = busIssues(context);
@@ -360,26 +400,17 @@ export const eventBridgeEventSourceAdapter: AwsEventSourceAdapter = {
         : toLogicalId(eventSource.resource);
 
     return {
-      resources: eventBridgeRuleResources({
-        busLogicalId,
-        lambdaLogicalId,
-        pattern: eventSource.properties
-          .pattern as EventBridgeRuleInput["pattern"],
-        ruleLogicalId: `${lambdaLogicalId}${busLogicalId ?? "DefaultBus"}Rule`,
-      }),
+      resources: {
+        ...asyncFailureResourcesFor(context),
+        ...eventBridgeRuleResources({
+          busLogicalId,
+          lambdaLogicalId,
+          pattern: eventSource.properties
+            .pattern as EventBridgeRuleInput["pattern"],
+          ruleLogicalId: `${lambdaLogicalId}${busLogicalId ?? "DefaultBus"}Rule`,
+        }),
+      },
     };
-  },
-  // The whole event is the raw input; the schema validates its `detail`, as for local events.
-  toInvocation: (event) => {
-    const raw = event as EventBridgeAwsEvent;
-
-    return {
-      detail: raw.detail,
-      raw,
-    } satisfies EventBridgeEventInvocationInput;
-  },
-  toResponse: () => {
-    // EventBridge invokes asynchronously and ignores the result.
   },
   validate: busIssues,
 };

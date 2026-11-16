@@ -21,6 +21,7 @@
     "guides/kinesis-events",
     "guides/dynamodb-stream-events",
     "guides/s3-events",
+    "guides/dead-letter-queues",
     "---Reliability---",
     "guides/durable-functions",
     "guides/idempotency",

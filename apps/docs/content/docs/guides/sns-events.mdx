@@ -77,8 +77,9 @@ A message whose body is not valid JSON, or does not match `message`, fails the i
 
 </Callout>
 
-SNS invokes the Function asynchronously, so Lambda retries a failed invocation and then drops the
-message. If the handler throws, the same retry applies.
+SNS invokes the Function asynchronously, so Lambda retries a failed invocation twice. If the handler
+throws, the same retry applies. After the last retry Lambda sends the event to the Function's
+[dead-letter queue](/docs/guides/dead-letter-queues).
 
 ## Filter messages
 
@@ -156,14 +157,17 @@ See [Testing](/docs/guides/testing) for test setup.
 - an `AWS::SNS::Subscription` with protocol `lambda` from the topic to the Function, with the filter
   policy when you set one;
 - an `AWS::Lambda::Permission` that lets `sns.amazonaws.com` invoke the Function, only from that
-  topic.
+  topic;
+- an `AWS::SQS::Queue` dead-letter queue and an `AWS::Lambda::EventInvokeConfig` that sends failed
+  events to it, unless you pass `deadLetterQueue: false`. See [Dead-letter queues](/docs/guides/dead-letter-queues).
 
 ## Limits
 
 <Callout type="info" title="SNS support is intentionally small in v1">
 
 - One topic per Function, and only standard topics. Lambda cannot subscribe to FIFO topics.
-- There is no dead-letter queue, redrive policy or Lambda `OnFailure` destination.
+- The subscription has no redrive policy, so a message SNS could not deliver to Lambda is not
+  kept. A message the Function fails goes to its dead-letter queue.
 - An `sns()` Function cannot have HTTP routes or an output schema.
 
 </Callout>

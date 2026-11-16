@@ -154,14 +154,19 @@ test("s3() stores the bucket key, the events and the filters it was given", () =
 
   expect(onUpload.events).toEqual([
     {
-      properties: { on: ["created"], prefix: "incoming/", suffix: ".jpg" },
+      properties: {
+        deadLetterQueue: true,
+        on: ["created"],
+        prefix: "incoming/",
+        suffix: ".jpg",
+      },
       resource: "uploadsBucket",
       source: "s3",
     },
   ]);
   expect(onDelete.events).toEqual([
     {
-      properties: { on: ["deleted"] },
+      properties: { deadLetterQueue: true, on: ["deleted"] },
       resource: "uploadsBucket",
       source: "s3",
     },

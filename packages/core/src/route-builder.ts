@@ -13,6 +13,7 @@ type AnyStandardSchema = StandardSchemaV1<unknown, unknown>;
 
 export class Voke<
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+  TResource extends string = string,
 > {
   readonly #middleware: readonly MiddlewareHandler<VokeEnv>[];
 
@@ -20,7 +21,7 @@ export class Voke<
     this.#middleware = Object.freeze([...middleware]);
   }
 
-  use(middleware: MiddlewareHandler<VokeEnv>): Voke<TVariables> {
+  use(middleware: MiddlewareHandler<VokeEnv>): Voke<TVariables, TResource> {
     return new Voke([...this.#middleware, middleware]);
   }
 
@@ -43,7 +44,8 @@ export class Voke<
       THeadersSchema,
       TOutputSchema,
       TResult,
-      TVariables
+      TVariables,
+      TResource
     >
   ): RouteDefinition<
     "DELETE",
@@ -78,7 +80,8 @@ export class Voke<
       THeadersSchema,
       TOutputSchema,
       TResult,
-      TVariables
+      TVariables,
+      TResource
     >
   ): RouteDefinition<
     "GET",
@@ -113,7 +116,8 @@ export class Voke<
       THeadersSchema,
       TOutputSchema,
       TResult,
-      TVariables
+      TVariables,
+      TResource
     >
   ): RouteDefinition<
     "HEAD",
@@ -148,7 +152,8 @@ export class Voke<
       THeadersSchema,
       TOutputSchema,
       TResult,
-      TVariables
+      TVariables,
+      TResource
     >
   ): RouteDefinition<
     "OPTIONS",
@@ -183,7 +188,8 @@ export class Voke<
       THeadersSchema,
       TOutputSchema,
       TResult,
-      TVariables
+      TVariables,
+      TResource
     >
   ): RouteDefinition<
     "PATCH",
@@ -218,7 +224,8 @@ export class Voke<
       THeadersSchema,
       TOutputSchema,
       TResult,
-      TVariables
+      TVariables,
+      TResource
     >
   ): RouteDefinition<
     "POST",
@@ -253,7 +260,8 @@ export class Voke<
       THeadersSchema,
       TOutputSchema,
       TResult,
-      TVariables
+      TVariables,
+      TResource
     >
   ): RouteDefinition<
     "PUT",
@@ -290,7 +298,8 @@ export class Voke<
       THeadersSchema,
       TOutputSchema,
       TResult,
-      TVariables
+      TVariables,
+      TResource
     >
   ): RouteDefinition<
     TMethod,

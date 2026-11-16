@@ -1,6 +1,6 @@
 // Run-time module: deployed Functions import it through voke.config.ts.
-import { bindResource } from "@voke/aws";
 import { dynamodbTable } from "@voke/aws/cloudformation";
+import { VokeConfigError } from "voke";
 import type { VokePlugin } from "voke";
 
 import { dynamoDbStore } from "./dynamodb-store";
@@ -23,8 +23,9 @@ export interface IdempotencyPluginOptions {
 const defaultTable = "idempotencyTable";
 
 /**
- * The idempotency Plugin for `voke.config.ts`. It contributes a DynamoDB table, readable and
- * writable by every Function, and runs every handler in the scope `idempotent(...)` reads.
+ * The idempotency Plugin for `voke.config.ts`. It contributes a DynamoDB table, and runs every
+ * handler in the scope `idempotent(...)` reads. A Function that uses `idempotent` or
+ * `idempotentBatch` links the table like any resource: `resources: ["idempotencyTable"]`.
  */
 export const idempotency = (
   options: IdempotencyPluginOptions = {}
@@ -35,11 +36,24 @@ export const idempotency = (
 
   assertExpiresAfterSeconds(expiresAfterSeconds, "idempotency()");
 
-  // The table name is read from the binding on first use, so synthesis, builds and tests that
-  // never call an idempotent handler need neither the variable nor AWS.
+  // Each idempotent handler call reads the table name through its Function's
+  // `context.resource`, so a Function that does not link the table fails before the store is
+  // used. Synthesis, builds and tests that never call an idempotent handler need neither the
+  // variable nor AWS.
+  let tableName: string | undefined;
   const store =
     options.store ??
-    dynamoDbStore({ tableName: () => bindResource(table, "name").value() });
+    dynamoDbStore({
+      tableName: () => {
+        if (tableName === undefined) {
+          throw new VokeConfigError(
+            `The idempotency table "${table}" was used before a Function read its binding`
+          );
+        }
+
+        return tableName;
+      },
+    });
 
   return {
     name: "idempotency",
@@ -70,6 +84,13 @@ export const idempotency = (
               {
                 expiresAfterSeconds,
                 functionKey: execution.functionKey,
+                ...(options.store === undefined
+                  ? {
+                      resolveTable: () => {
+                        tableName = execution.context.resource(table);
+                      },
+                    }
+                  : {}),
                 store,
                 timeoutSeconds:
                   timeouts.get(execution.functionKey) ?? config.runtime.timeout,

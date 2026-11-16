@@ -37,6 +37,12 @@ test("synthesizes one trigger per Event Source and one shared Scheduler role", (
     "AWS::Scheduler::Schedule",
   ]);
   expect(template.Resources.VokeSchedulerRole?.Type).toBe("AWS::IAM::Role");
+  // Each Function keeps the events it fails after Lambda's retries in its dead-letter queue.
+  expect(
+    Object.values(template.Resources).filter(
+      ({ Type }) => Type === "AWS::Lambda::EventInvokeConfig"
+    )
+  ).toHaveLength(4);
   expect(
     template.Resources.UploadsBucket?.Properties.NotificationConfiguration
   ).toEqual({ EventBridgeConfiguration: { EventBridgeEnabled: true } });

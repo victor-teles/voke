@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 
-import { bindResource } from "@voke/aws";
 import type { AwsClientConfig } from "@voke/aws";
 import { VokeResourceBindingError } from "voke";
 
@@ -66,6 +65,19 @@ const completedRecord: IdempotencyRecord = {
 };
 
 const tableNameVariable = "VOKE_RESOURCE_IDEMPOTENCY_TABLE_NAME";
+
+// Reads the binding the way a Function's `context.resource` does: a missing value throws.
+const readTableBinding = (): string => {
+  const value = process.env[tableNameVariable];
+
+  if (value === undefined || value === "") {
+    throw new VokeResourceBindingError(
+      `Missing resource binding: ${tableNameVariable}`
+    );
+  }
+
+  return value;
+};
 // Every variable a test below sets. Each is restored on its own: replacing process.env as a
 // whole would detach it from Bun.env for every later test file in the same process.
 const touchedVariables = [
@@ -281,7 +293,7 @@ test("a missing table binding surfaces on first use, not when the store is creat
   const created: AwsClientConfig[] = [];
   const store = dynamoDbStore(
     {
-      tableName: () => bindResource("idempotencyTable", "name").value(),
+      tableName: () => readTableBinding(),
     },
     {
       createClient: (config) => {

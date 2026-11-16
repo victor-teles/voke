@@ -38,7 +38,8 @@ export const durableInvokeTargetVariable = (key: string): string =>
 /** The handler context of a Durable Function: the Invoke Context plus the SDK's DurableContext. */
 export type DurableInvokeContext<
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
-> = InvokeContext<TVariables> & {
+  TResource extends string = string,
+> = InvokeContext<TVariables, TResource> & {
   /** The AWS durable execution SDK context: `step`, `wait`, `waitForCallback`, `invoke`, ... */
   readonly durable: DurableContext;
 };
@@ -47,13 +48,15 @@ export type DurableFunctionHandler<
   TPayload,
   TResult,
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+  TResource extends string = string,
 > = (
   payload: TPayload,
-  context: DurableInvokeContext<TVariables>
+  context: DurableInvokeContext<TVariables, TResource>
 ) => TResult | Promise<TResult>;
 
 interface DurableFunctionInputBase<
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+  TResources extends readonly string[] = readonly string[],
 > {
   /**
    * How long one execution may run in total, across every wait and replay. Required: Lambda
@@ -63,6 +66,8 @@ interface DurableFunctionInputBase<
   name?: string;
   /** Days Lambda keeps a finished execution's history (1-90). Default 14. */
   retentionDays?: number;
+  /** Resource Links: the resource keys this Function reads through `context.resource`. */
+  resources?: TResources;
   synthesis?: FunctionSynthesisConfig;
   variables?: TVariables;
 }
@@ -71,11 +76,13 @@ export interface DurableFunctionWithInputDefinitionInput<
   TInputSchema extends AnyStandardSchema,
   TOutputSchema extends AnyStandardSchema,
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
-> extends DurableFunctionInputBase<TVariables> {
+  TResources extends readonly string[] = readonly string[],
+> extends DurableFunctionInputBase<TVariables, TResources> {
   handler: DurableFunctionHandler<
     StandardSchemaOutput<TInputSchema>,
     StandardSchemaInput<TOutputSchema>,
-    TVariables
+    TVariables,
+    TResources[number]
   >;
   input: TInputSchema;
   output: TOutputSchema;
@@ -84,11 +91,13 @@ export interface DurableFunctionWithInputDefinitionInput<
 export interface DurableZeroInputFunctionDefinitionInput<
   TOutputSchema extends AnyStandardSchema,
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
-> extends DurableFunctionInputBase<TVariables> {
+  TResources extends readonly string[] = readonly string[],
+> extends DurableFunctionInputBase<TVariables, TResources> {
   handler: DurableFunctionHandler<
     undefined,
     StandardSchemaInput<TOutputSchema>,
-    TVariables
+    TVariables,
+    TResources[number]
   >;
   output: TOutputSchema;
 }
@@ -199,18 +208,25 @@ export function durable<
   const TInputSchema extends AnyStandardSchema,
   const TOutputSchema extends AnyStandardSchema,
   const TVariables extends RuntimeVariableCatalog = Record<never, never>,
+  const TResources extends readonly string[] = readonly [],
 >(
   definition: DurableFunctionWithInputDefinitionInput<
     TInputSchema,
     TOutputSchema,
-    TVariables
+    TVariables,
+    TResources
   >
 ): InvokableFunctionDefinition<string, TInputSchema, TOutputSchema, TVariables>;
 export function durable<
   const TOutputSchema extends AnyStandardSchema,
   const TVariables extends RuntimeVariableCatalog = Record<never, never>,
+  const TResources extends readonly string[] = readonly [],
 >(
-  definition: DurableZeroInputFunctionDefinitionInput<TOutputSchema, TVariables>
+  definition: DurableZeroInputFunctionDefinitionInput<
+    TOutputSchema,
+    TVariables,
+    TResources
+  >
 ): InvokableFunctionDefinition<string, undefined, TOutputSchema, TVariables>;
 /**
  * A Function that runs as an AWS Lambda durable function: its handler receives
@@ -252,6 +268,9 @@ export function durable(
     ...("input" in definition ? { input: definition.input } : {}),
     ...(definition.name === undefined ? {} : { name: definition.name }),
     output: definition.output,
+    ...(definition.resources === undefined
+      ? {}
+      : { resources: definition.resources }),
     synthesis: withDurableRecord(definition.synthesis, {
       executionTimeoutSeconds,
       ...(definition.retentionDays === undefined

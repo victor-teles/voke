@@ -1,0 +1,171 @@
+---
+title: Dead-letter queues
+description: Find, read and send back the events a Function could not process, and turn the dead-letter queue off.
+---
+
+After this page you can tell where a failed event goes for each Event Source, find and read it in
+AWS, send it back, and turn the dead-letter queue off.
+
+Every **Event Source** gets a dead-letter queue by default, on every stage. When the Function still
+fails an event after the source's retries, the event goes to an SQS queue that Voke creates. No
+source delivers a bad event forever, blocks a shard for a day, or drops it silently.
+
+## What happens to a failed event
+
+| Event Source                           | What retries                                     | When the event is dead-lettered                        | What the message contains                                                     |
+| -------------------------------------- | ------------------------------------------------ | ------------------------------------------------------ | ----------------------------------------------------------------------------- |
+| SQS                                    | SQS delivers the message again                   | After 5 receives that did not delete it                | The original message                                                          |
+| Kinesis, DynamoDB stream               | Lambda splits the batch, then retries it         | After 10 retries                                       | Pointers: stream ARN, shard, first and last sequence number. Not the records. |
+| SNS, EventBridge, S3, schedule         | Lambda retries the asynchronous invocation twice | After the last retry, or when the event is 6 hours old | An invocation record with the event in `requestPayload` and the error         |
+| Schedule, when Lambda refuses the call | EventBridge Scheduler retries the delivery       | When Scheduler gives up                                | The schedule's input, with the error in the message attributes                |
+
+A message stays in the queue for 14 days, the SQS maximum.
+
+<Callout type="warn" title="Stream messages hold pointers, not records">
+
+For a Kinesis or DynamoDB stream, read the records from the stream with the shard and sequence
+numbers before they expire: 24 hours for DynamoDB Streams and for `kinesisStream()` without
+`retentionHours`.
+
+</Callout>
+
+## Find the queue
+
+The queue's logical id is its owner's logical id plus `DeadLetterQueue`:
+
+- For SQS, the **queue** owns it, because one queue has one redrive policy and several Functions may
+  consume it. The queue `ordersQueue` gets `OrdersQueueDeadLetterQueue`. Only a queue that a Function
+  in the project consumes gets one.
+- For every other source, the **Function** owns it. The Function `orderCreated` gets
+  `OrderCreatedFunctionDeadLetterQueue`.
+
+CloudFormation names the queue. To print its URL, ask the stack, which is named `<name>-<stage>`:
+
+```sh
+aws cloudformation describe-stack-resource \
+  --stack-name orders-dev \
+  --logical-resource-id OrdersQueueDeadLetterQueue \
+  --query StackResourceDetail.PhysicalResourceId \
+  --output text
+```
+
+## Read the messages
+
+Open the queue in the SQS console and choose **Send and receive messages**, then **Poll for
+messages**. Or use the AWS CLI with the queue URL:
+
+```sh
+aws sqs receive-message \
+  --queue-url https://sqs.us-east-1.amazonaws.com/123456789012/orders-dev-OrdersQueueDeadLetterQueue-1ABC \
+  --attribute-names All \
+  --message-attribute-names All \
+  --max-number-of-messages 10
+```
+
+Receiving a message does not delete it. It becomes visible again after the queue's visibility
+timeout.
+
+## Send events back
+
+- **SQS**: in the SQS console, open the dead-letter queue and choose **Start DLQ redrive**. SQS moves
+  the messages back to the source queue. `aws sqs start-message-move-task --source-arn <dead-letter queue ARN>`
+  does the same.
+- **Every other source**: SQS redrive does not work, because SQS did not dead-letter these messages.
+  Fix the cause, then publish the event again (`requestPayload` for SNS, EventBridge, S3 and
+  schedules), or read the stream records the pointers name and process them.
+
+Make the handler safe to run twice before you send events back. See
+[Idempotency](/docs/guides/idempotency).
+
+## Turn it off
+
+Pass `deadLetterQueue: false` to the owner. For SQS that is the queue:
+
+```ts twoslash
+// voke.config.ts
+import { aws } from "@voke/aws";
+import { sqsQueue } from "@voke/aws/cloudformation";
+import { defineConfig } from "voke";
+
+export default defineConfig({
+  name: "orders",
+  provider: aws(),
+  resources: {
+    ordersQueue: sqsQueue({ deadLetterQueue: false }),
+  },
+});
+```
+
+A failing message is then delivered again until the queue's retention period ends. To use your own
+redrive policy instead, write the queue resource by hand with a `RedrivePolicy` in its properties;
+Voke leaves it untouched and adds no queue.
+
+For every other source, pass it to the Function:
+
+```ts twoslash
+import { sns } from "@voke/aws";
+import { schema } from "@voke/schema";
+import { createFunctions } from "voke";
+
+export const functions = createFunctions({
+  onOrderCreated: sns({
+    deadLetterQueue: false,
+    handler: (message) => {
+      console.info(message.body.orderId);
+    },
+    message: schema.object({ orderId: schema.string() }),
+    topic: "ordersTopic",
+  }),
+});
+```
+
+Without a dead-letter queue a stream mapping retries a failing record until it expires, and an
+asynchronous source drops the event after Lambda's two retries.
+
+<Callout type="warn" title="Removing the owner deletes the queue">
+
+A dead-letter queue is not kept when it leaves the stack. Renaming or removing its queue or Function,
+or setting `deadLetterQueue: false`, deletes the queue and the messages in it. Read or send them back
+first.
+
+</Callout>
+
+## What it costs
+
+Each dead-letter queue adds resources to the stack, which CloudFormation limits to 500:
+
+- one queue per consumed SQS queue;
+- one queue per Kinesis or DynamoDB stream Function;
+- two per SNS, EventBridge, S3 or schedule Function: the queue and an
+  `AWS::Lambda::EventInvokeConfig`.
+
+An empty queue costs nothing. The Function's own role, and for schedules `VokeSchedulerRole`, may
+send to its queue; no Function can read it. SQS moves SQS messages itself and needs no permission.
+
+## Local runs
+
+`functions.sendEvent` and `voke dev` never retry or dead-letter an event: the call returns the batch
+result or throws. Assert on `batchItemFailures` or the error in tests. `voke local bootstrap`
+leaves out every dead-letter queue and redrive policy.
+
+## Next steps
+
+<Cards>
+  <Card icon={<Mail />} href="/docs/guides/sqs-events" title="SQS events">
+    Report failed messages from a batch.
+  </Card>
+  <Card
+    icon={<Fingerprint />}
+    href="/docs/guides/idempotency"
+    title="Idempotency"
+  >
+    Make a handler safe to run again.
+  </Card>
+  <Card
+    icon={<LifeBuoy />}
+    href="/docs/guides/troubleshooting"
+    title="Troubleshooting"
+  >
+    Fix common errors.
+  </Card>
+</Cards>
