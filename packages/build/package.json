@@ -1,6 +1,6 @@
 {
   "name": "@voke/build",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Lambda bundle planning for Voke projects.",
   "license": "MIT",
   "repository": {
@@ -20,27 +20,36 @@
   },
   "files": [
     "src",
+    "dist",
     "README.md",
     "LICENSE"
   ],
   "type": "module",
-  "types": "./src/index.ts",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "@voke/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./src/index.ts"
+    }
   },
   "scripts": {
-    "build": "bun build ./src/index.ts --outdir ./dist --target bun",
+    "build": "rm -rf dist && bunx tsgo --project tsconfig.build.json",
     "test": "bun test",
     "typecheck": "bunx tsgo --project tsconfig.json --noEmit",
     "clean": "rm -rf dist coverage",
-    "prepack": "cp ../../LICENSE .",
+    "prepack": "bun run build && cp ../../LICENSE .",
     "postpack": "rm -f LICENSE"
   },
-  "dependencies": {
+  "devDependencies": {
+    "@types/bun": "catalog:",
+    "@typescript/native-preview": "catalog:",
     "voke": "workspace:*"
   },
-  "devDependencies": {
-    "@types/bun": "latest",
-    "@typescript/native-preview": "catalog:"
+  "peerDependencies": {
+    "voke": "workspace:*"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

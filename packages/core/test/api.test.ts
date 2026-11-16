@@ -17,6 +17,7 @@ import type {
   LambdaEvent,
 } from "hono/aws-lambda";
 
+import corePackageJson from "../package.json";
 import { voke } from "../src/app";
 import type { Middleware } from "../src/app";
 import { createApiProject, runCli } from "../src/cli";
@@ -301,10 +302,10 @@ test("creates a starter API project", async () => {
 
   expect(packageJson.name).toBe("created-api");
   expect(packageJson.dependencies).toEqual({
-    "@voke/aws": "^0.0.0",
-    "@voke/testing": "^0.0.0",
+    "@voke/aws": `^${corePackageJson.version}`,
+    "@voke/testing": `^${corePackageJson.version}`,
     hono: "^4.0.0",
-    voke: "^0.0.0",
+    voke: `^${corePackageJson.version}`,
   });
   expect(packageJson.license).toBeUndefined();
   expect(packageJson.scripts.deploy).toBe("voke deploy --stage dev");

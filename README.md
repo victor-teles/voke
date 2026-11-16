@@ -9,7 +9,7 @@ Voke is a TypeScript framework for AWS Lambda. You declare typed Functions in on
 Once Voke is published, three commands take you from nothing to a deployed API:
 
 ```bash
-voke create my-api      # writes the project and runs bun install
+bunx voke create my-api # writes the project and runs bun install
 cd my-api
 bun run deploy          # deploys the dev stage to AWS and prints the API URL
 ```

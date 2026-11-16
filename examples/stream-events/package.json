@@ -19,7 +19,7 @@
     "voke": "workspace:*"
   },
   "devDependencies": {
-    "@types/bun": "latest",
+    "@types/bun": "catalog:",
     "@typescript/native-preview": "^7.0.0-dev.20260516.1"
   }
 }

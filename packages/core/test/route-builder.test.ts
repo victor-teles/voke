@@ -9,6 +9,7 @@ import {
 } from "@voke/aws";
 import type { MiddlewareHandler } from "hono";
 
+import packageJson from "../package.json";
 import { voke } from "../src/app";
 import type { VokeEnv } from "../src/context";
 import { VokeConfigError } from "../src/errors";
@@ -357,7 +358,7 @@ test("prints a human function summary automatically under voke dev", () => {
   }
 
   expect(logs.map((log) => log.trimEnd())).toEqual([
-    `  ${ansi.cyan}${ansi.bold}VOKE${ansi.reset} ${ansi.dim}v0.0.0${ansi.reset}  ${ansi.green}ready in 0 ms${ansi.reset}
+    `  ${ansi.cyan}${ansi.bold}VOKE${ansi.reset} ${ansi.dim}v${packageJson.version}${ansi.reset}  ${ansi.green}ready in 0 ms${ansi.reset}
 
   ${ansi.green}➜${ansi.reset}  ${ansi.bold}Local:${ansi.reset}   http://localhost:3000/
   ${ansi.green}➜${ansi.reset}  ${ansi.bold}Network:${ansi.reset} use --hostname 0.0.0.0 to expose

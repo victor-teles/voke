@@ -1,6 +1,6 @@
 {
   "name": "voke",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "A TypeScript-first framework for AWS Lambda APIs: Functions, a Gateway, typed contracts and one-command deploys.",
   "keywords": [
     "api",
@@ -22,24 +22,32 @@
   },
   "files": [
     "src",
+    "dist",
     "README.md",
     "LICENSE"
   ],
   "type": "module",
-  "types": "./src/index.ts",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "@voke/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
-    "build": "bun build ./src/index.ts ./src/cli.ts --outdir ./dist --target bun",
+    "build": "rm -rf dist && bunx tsgo --project tsconfig.build.json",
     "test": "bun test",
     "typecheck": "bunx tsgo --project tsconfig.json --noEmit",
     "clean": "rm -rf dist coverage",
-    "prepack": "cp ../../LICENSE ../../README.md .",
+    "prepack": "bun run build && cp ../../LICENSE ../../README.md .",
     "postpack": "rm -f LICENSE README.md"
   },
   "devDependencies": {
-    "@types/bun": "latest",
+    "@types/bun": "catalog:",
     "@typescript/native-preview": "catalog:",
     "hono": "^4.0.0",
     "zod": "^4.6.7"

@@ -27,8 +27,10 @@ export interface CreateProjectOptions extends CreateApiProjectOptions {
 
 // Every Voke package moves in lockstep, so the starter pins all of them to the CLI's own version.
 const vokeDependencies = ["@voke/aws", "@voke/testing", "voke"] as const;
-// Matches the root package.json catalog entry.
-const typescriptNativePreviewVersion = "^7.0.0-dev.20260516.1";
+// Both match the root package.json catalog (scripts/release.test.ts checks it). The TypeScript
+// preview is pinned exactly because a caret on a nightly floats to newer nightlies.
+const bunTypesVersion = "^1.4.4";
+const typescriptNativePreviewVersion = "7.0.0-dev.20260516.1";
 const maxPackageNameLength = 214;
 const packageNamePattern =
   /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/u;
@@ -141,7 +143,7 @@ export const projectPackageJson = (name: string): Record<string, unknown> => ({
     hono: "^4.0.0",
   },
   devDependencies: {
-    "@types/bun": "latest",
+    "@types/bun": bunTypesVersion,
     "@typescript/native-preview": typescriptNativePreviewVersion,
   },
   name,

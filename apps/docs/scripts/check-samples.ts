@@ -16,6 +16,9 @@ const fencePattern =
 const twoslasher = createTwoslasher({
   compilerOptions: {
     baseUrl: undefined,
+    // Same as source.config.ts and the root tsconfig: resolve the workspace packages to their
+    // source, so samples compile without building declaration files first.
+    customConditions: ["@voke/source"],
     moduleResolution: ts.ModuleResolutionKind.Bundler,
     // Same as source.config.ts: samples may use process.env, Bun.env and bun:test.
     types: ["bun"],

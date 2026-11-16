@@ -70,6 +70,7 @@ export {
   createVariableProvider,
   createVariableSource,
   type RuntimeVariableCatalog,
+  type RuntimeVariableDescriptor,
   type RuntimeVariableOptions,
   type RuntimeVariableProvider,
   type RuntimeVariableSource,

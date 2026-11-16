@@ -7,8 +7,16 @@ Voke is split into a provider-neutral core, `voke`, and smaller packages for the
 
 <Callout type="info">
   The packages are not published yet, and the published names are not final. All
-  packages share one version (now `0.0.0`) and are released together.
+  packages share one version (`0.1.0`) and are released together.
 </Callout>
+
+## Install and versions
+
+- Create a new project with `bunx voke create my-api`. It lists `voke`, `@voke/aws` and `@voke/testing`.
+- Add another package with `bun add @voke/<name>`, for example `bun add @voke/schema`.
+- Every `@voke/*` package needs the same version of `voke`, so update them together: `bun update voke @voke/aws @voke/testing`, plus any other `@voke/*` package the project lists.
+- The project's `tsconfig.json` must use `"moduleResolution": "bundler"`. Voke ships declaration files, so stricter compiler flags apply to your code only.
+- The CLI and the packages run on Bun. The Lambda bundle that `voke build` writes runs on Node.
 
 <Cards>
   <Card icon={<Package />} href="#voke" title="voke">

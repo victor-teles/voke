@@ -9,7 +9,7 @@ A source-controlled application whose framework workflows are driven by `voke.co
 _Avoid_: Generated app, scaffold
 
 **Project Starter**:
-The initial files created by `voke create api` for a new **Voke Project**.
+The initial files created by `voke create <name>` for a new **Voke Project**.
 _Avoid_: Template output, boilerplate
 
 **Route Module**:
@@ -700,7 +700,7 @@ _Avoid_: idempotency cache, persistence layer
 
 ## Flagged ambiguities
 
-- "Project creation" means creating a **Project Starter** through `voke create api`, not migrating an existing Serverless project.
+- "Project creation" means creating a **Project Starter** through `voke create <name>`, not migrating an existing Serverless project.
 - "function" can mean a generic TypeScript function or a Voke **Function**; use **Function** only for the named serverless compute unit.
 - In `fn`, `http`, and `sqs`, "name" means an optional deployed AWS Lambda name, not the local registry key.
 - A **Function Registry** key is the stable project identity used for type-safe invocation.

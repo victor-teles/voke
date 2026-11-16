@@ -100,4 +100,4 @@ The CLI, compatibility adapters, and low-level Lambda adapter modules are implem
 - Prefer domain subpaths over broad root exports when a helper belongs to a specific area.
 - Do not add a package export just because a file exists under `src/`.
 - Add or update public surface tests whenever this inventory changes.
-- Treat `bun run typecheck` as a required release gate, alongside the relevant behavior tests, so public generics and model contracts stay stable.
+- Releases follow `docs/releasing.md`; `bun run release:check` is the gate.

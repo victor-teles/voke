@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 
+import corePackageJson from "../package.json";
 import { CliUsageError, createApiProject, runCli, synth } from "../src/cli";
 import { commandSpecs, formatCommandHelp, formatHelp } from "../src/cli-spec";
 import { defineConfig } from "../src/config";
@@ -68,7 +69,7 @@ test("prints useful run details for real CLI execution", async () => {
 
   expect(output).toEqual([
     [
-      "Voke v0.0.0",
+      `Voke v${corePackageJson.version}`,
       "Command: synth",
       `Run: voke synth --config=${configPath} --name=details-api --stage=qa --out=${templatePath}`,
       `Runtime: Bun ${Bun.version}`,
@@ -199,7 +200,7 @@ test("prints the version with --version and -v", async () => {
 
     await runCli([flag], { output: out.output });
 
-    expect(out.lines).toEqual(["voke 0.0.0"]);
+    expect(out.lines).toEqual([`voke ${corePackageJson.version}`]);
   }
 });
 
@@ -430,7 +431,9 @@ test("create writes the starter, installs through the runner, and prints next st
     .map(([, version]) => version);
 
   expect(manifest.name).toBe("orders-api");
-  expect(vokeVersions).toEqual(["^0.0.0", "^0.0.0", "^0.0.0"]);
+  expect(vokeVersions).toEqual(
+    Array.from({ length: 3 }, () => `^${corePackageJson.version}`)
+  );
   expect(runner.calls).toEqual([
     { command: ["bun", "install"], cwd: directory },
   ]);
