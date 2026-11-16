@@ -49,11 +49,14 @@
       "Type": "AWS::Kinesis::Stream"
     },
     "OrdersTable": {
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
       "Metadata": {
         "VokeBinding": {
           "Attribute": "name",
           "Resource": "ordersTable"
-        }
+        },
+        "VokeRetain": true
       },
       "Properties": {
         "AttributeDefinitions": [

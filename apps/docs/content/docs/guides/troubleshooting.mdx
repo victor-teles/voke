@@ -183,6 +183,21 @@ Function FulfilOrderFunction must be replaced, which CloudFormation cannot do fo
 
 **Fix:** Give the Function a new registry key or `name`, deploy, check that it works, then remove the old Function and deploy again. `voke deploy --dry-run` prints the same message as a warning. See [Durable Functions](/docs/guides/durable-functions#deploy).
 
+### A deploy would remove or replace data
+
+```txt
+Deploying hello-api-dev would remove or replace 1 resource(s) that hold data:
+  UsersTable (AWS::DynamoDB::Table, hello-api-dev-UsersTable-1ABC) would leave the stack. It is kept with its data, but no Function is bound to it afterwards.
+Nothing was changed. A resource key, and a table's partitionKey and sortKey, identify the resource: undo the rename or key change to keep using it.
+To go ahead anyway, run voke deploy again with --accept-data-loss.
+```
+
+`voke deploy` stops before it changes anything.
+
+**Cause:** The change set removes or replaces a table, a bucket or a secret. You renamed its resource key, deleted it from `resources`, or changed a table's `partitionKey` or `sortKey`. Your Functions would then be bound to a new, empty resource or to none.
+
+**Fix:** To keep using the data, undo the rename or the key change and deploy again. If you mean to drop the resource, run `voke deploy --accept-data-loss`, then delete or move each resource it lists as kept. `voke deploy --dry-run` prints the same lines as warnings. See [Changes that remove or replace data](/docs/guides/deploy#changes-that-remove-or-replace-data).
+
 ### A durable function needs a qualified name or ARN
 
 **Symptom:** Lambda rejects an invocation of a durable function by its unqualified name or ARN.

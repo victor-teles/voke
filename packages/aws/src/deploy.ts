@@ -12,6 +12,15 @@ import type {
 } from "voke";
 
 import { synthesizeCloudFormationFromModel } from "./cloudformation-synthesis";
+import {
+  dataBearingTypes,
+  dataLossMessage,
+  dataResourceChanges,
+  describeDataChange,
+  isKeptChange,
+  keptResourceLines,
+} from "./data-retention";
+import type { AwsRetainData, KeptResource } from "./data-retention";
 import type {
   ChangeSetDescription,
   DeployAwsClients,
@@ -29,6 +38,8 @@ export interface DeployDependencies {
   now?: () => number;
   pollIntervalMs?: number;
   readFile?: (path: string) => Promise<Uint8Array>;
+  /** `aws({ retainData })`: which data-bearing resources the template retains. Default `true`. */
+  retainData?: AwsRetainData;
   sleep?: (ms: number) => Promise<void>;
   /** Give up following a stack operation after this long. Defaults to one hour. */
   timeoutMs?: number;
@@ -189,10 +200,16 @@ const eventIds = async (
   return new Set(events.map((event) => event.id));
 };
 
+/**
+ * Deletes the stack and returns the events that appeared after the delete call. With the stack's
+ * id the events are read once more at the end: a deleted stack can be read by id but not by
+ * name, and its last events can arrive between two polls.
+ */
 const deleteStackAndWait = async (
   runtime: Runtime,
-  stackName: string
-): Promise<void> => {
+  stackName: string,
+  stackId?: string
+): Promise<StackEvent[]> => {
   const seen = await eventIds(runtime, stackName);
 
   await runtime.clients.deleteStack(stackName);
@@ -207,6 +224,18 @@ const deleteStackAndWait = async (
         : `Could not delete stack ${stackName}: ${failure.logicalId} (${failure.resourceType}) failed: ${failure.reason}. Fix or empty that resource, then run voke remove again.`
     );
   }
+
+  if (stackId === undefined) {
+    return events;
+  }
+
+  const lateEvents = await runtime.clients.describeStackEvents(stackId);
+
+  // Oldest first, like the events gathered while following.
+  return [
+    ...events,
+    ...lateEvents.filter((event) => !seen.has(event.id)).toReversed(),
+  ];
 };
 
 // ---- change sets -----------------------------------------------------------------------------
@@ -236,7 +265,11 @@ const waitForChangeSet = async (
 };
 
 interface StackDeployment {
+  /** The user accepted changes that remove or replace a data-bearing resource. */
+  acceptDataLoss: boolean;
   dryRun: boolean;
+  /** For the delete commands of kept resources. */
+  region: string;
   stackName: string;
   template: { body: string } | { url: string };
 }
@@ -313,7 +346,10 @@ const executeAndFollow = async (
     ? await eventIds(runtime, stackName)
     : new Set<string>();
 
-  await runtime.clients.executeChangeSet(changeSetId);
+  // A failed operation then deletes what it created, retained or not.
+  await runtime.clients.executeChangeSet(changeSetId, {
+    retainExceptOnCreate: true,
+  });
   const { events, status } = await followStack(runtime, stackName, seen);
 
   if (!isSuccessfulStackStatus(status)) {
@@ -350,6 +386,16 @@ const namedFunctionReplacements = (
         `Function ${change.logicalId} must be replaced, which CloudFormation cannot do for a named Lambda. Lambda sets durable execution only when it creates a function, so adding or removing durable(...) needs a new Function: give it a new registry key or name, deploy, then remove the old one.`
     );
 
+const printKept = (
+  runtime: Runtime,
+  resources: readonly KeptResource[],
+  region: string
+): void => {
+  for (const line of keptResourceLines(resources, region)) {
+    runtime.output(line);
+  }
+};
+
 /** Plans and (unless dry-run) applies one stack through a change set. */
 const deployStack = async (
   runtime: Runtime,
@@ -382,9 +428,13 @@ const deployStack = async (
   }
 
   const replacements = namedFunctionReplacements(description);
+  const dataChanges = dataResourceChanges(description.changes);
 
   if (deployment.dryRun) {
-    for (const message of replacements) {
+    for (const message of [
+      ...replacements,
+      ...dataChanges.map(describeDataChange),
+    ]) {
       runtime.output(`Warning: ${message}`);
     }
 
@@ -399,6 +449,12 @@ const deployStack = async (
     throw new VokeDeployError(replacements.join("\n"));
   }
 
+  if (dataChanges.length > 0 && !deployment.acceptDataLoss) {
+    await runtime.clients.deleteChangeSet(id);
+
+    throw new VokeDeployError(dataLossMessage(stackName, dataChanges));
+  }
+
   const outputs = await executeAndFollow(
     runtime,
     stackName,
@@ -406,12 +462,27 @@ const deployStack = async (
     existing !== undefined
   );
 
+  printKept(
+    runtime,
+    dataChanges
+      .filter(isKeptChange)
+      .flatMap((change) =>
+        change.physicalId === undefined
+          ? []
+          : [{ physicalId: change.physicalId, type: change.resourceType }]
+      ),
+    deployment.region
+  );
+
   return { outputs, status: "deployed" };
 };
 
 // ---- bootstrap and artifacts -----------------------------------------------------------------
 
-const ensureArtifactBucket = async (runtime: Runtime): Promise<string> => {
+const ensureArtifactBucket = async (
+  runtime: Runtime,
+  region: string
+): Promise<string> => {
   const existing = await runtime.clients.describeStack(bootstrapStackName);
   const existingBucket = existing?.outputs.ArtifactBucketName;
 
@@ -426,7 +497,9 @@ const ensureArtifactBucket = async (runtime: Runtime): Promise<string> => {
     `Creating the ${bootstrapStackName} stack for deployment artifacts`
   );
   const result = await deployStack(runtime, {
+    acceptDataLoss: false,
     dryRun: false,
+    region,
     stackName: bootstrapStackName,
     template: { body: bootstrapTemplate },
   });
@@ -529,7 +602,7 @@ export const deployAwsStack = async (
     `Packaged ${stackName} (${input.stage})  ${formatSize(bundle.byteLength)}`
   );
 
-  const bucket = await ensureArtifactBucket(runtime);
+  const bucket = await ensureArtifactBucket(runtime, region);
   const bundleKey = `${input.config.name}/${input.stage}/${bundleHash}.zip`;
   const uploaded = await uploadOnce(
     runtime,
@@ -547,6 +620,9 @@ export const deployAwsStack = async (
       {
         artifact: { bucket, key: bundleKey },
         ...(deps.lambda === undefined ? {} : { lambda: deps.lambda }),
+        ...(deps.retainData === undefined
+          ? {}
+          : { retainData: deps.retainData }),
       }
     ),
     null,
@@ -568,7 +644,9 @@ export const deployAwsStack = async (
   );
 
   const result = await deployStack(runtime, {
+    acceptDataLoss: input.acceptDataLoss,
     dryRun: input.dryRun,
+    region,
     stackName,
     template: { url: runtime.clients.objectUrl(bucket, templateKey) },
   });
@@ -590,13 +668,29 @@ export const removeAwsStack = async (
 ): Promise<{ status: "absent" | "removed" }> => {
   const runtime = runtimeFor(deps, input.output);
   const stackName = `${input.config.name}-${input.stage}`;
+  const region =
+    input.region ?? input.config.region ?? createAwsClientConfig().region;
+  const stack = await runtime.clients.describeStack(stackName);
 
-  if ((await runtime.clients.describeStack(stackName)) === undefined) {
+  if (stack === undefined) {
     return { status: "absent" };
   }
 
   runtime.output(`Removing stack ${stackName}`);
-  await deleteStackAndWait(runtime, stackName);
+  const events = await deleteStackAndWait(runtime, stackName, stack.id);
+
+  // CloudFormation reports each resource its DeletionPolicy kept as DELETE_SKIPPED.
+  printKept(
+    runtime,
+    events.flatMap((event) =>
+      event.status === "DELETE_SKIPPED" &&
+      dataBearingTypes.has(event.resourceType) &&
+      event.physicalId !== undefined
+        ? [{ physicalId: event.physicalId, type: event.resourceType }]
+        : []
+    ),
+    region
+  );
 
   return { status: "removed" };
 };

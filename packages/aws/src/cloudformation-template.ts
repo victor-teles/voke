@@ -42,6 +42,8 @@ export type AwsResourcePolicyResource =
 export interface AwsCloudFormationResourceProvider {
   cloudFormationType: string;
   bindingValue: AwsResourceBindingValue;
+  /** Set by the builders whose resource holds data: `dynamodbTable`, `s3Bucket`, `secret`. */
+  dataBearing?: boolean;
   policyResource: AwsResourcePolicyResource;
   outputName: string;
 }

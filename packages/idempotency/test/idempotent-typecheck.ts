@@ -43,7 +43,7 @@ const functions = createFunctions({
       route.post("/orders", {
         body: schema.object({ item: schema.string() }),
         handler: idempotent((request) => ({ item: request.body.item }), {
-          key: (request) => request.headers.get("idempotency-key") ?? undefined,
+          key: (request) => request.headers["idempotency-key"],
           validate: (request) => request.body,
         }),
       }),

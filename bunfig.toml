@@ -1,0 +1,6 @@
+# `bun test` from the repository root: one process for the framework packages and the examples.
+# The docs site is left out because its tests must run from apps/docs (Fumadocs resolves its
+# content from the working directory); `bun run test` covers it.
+[test]
+preload = ["./packages/core/test/support/isolate-env.ts"]
+pathIgnorePatterns = ["apps/**"]

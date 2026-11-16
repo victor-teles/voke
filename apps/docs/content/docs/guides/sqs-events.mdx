@@ -281,7 +281,7 @@ const functions = createFunctions({
 const result = await functions.sendEvent("processOrder", {
   messages: [
     { id: "m1", body: { orderId: "ord_1" } },
-    { id: "m2", body: "not json" },
+    { id: "m2", body: "not json" as never },
   ],
 });
 
@@ -290,7 +290,8 @@ console.info(result);
 ```
 
 Each message needs only a `body`. An object body is serialized to JSON; a string body is used as it
-is, so you can test bodies that are not valid JSON. Voke fills in the SQS metadata. `id` defaults to
+is, so you can test bodies that are not valid JSON. The body is typed from the message schema, so
+cast a deliberately invalid body with `as never`. Voke fills in the SQS metadata. `id` defaults to
 `msg_1`, `msg_2`, and so on.
 
 <Callout type="info" title="Local runs do not create the trigger">

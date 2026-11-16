@@ -93,7 +93,7 @@ Runtime variable "stripeKey" for Function "checkout" is not valid JSON.
 
 ## CLI errors
 
-`CliUsageError` extends `VokeError` with the code `CLI_USAGE_ERROR`. The CLI throws it for an unknown command, an unknown flag, a missing flag value, a missing Provider, a refused `voke deploy --stage local`, and a cancelled `voke remove`. It is not exported by `voke`; you see it as CLI output. The message gives the problem and the command's usage:
+`CliUsageError` extends `VokeError` with the code `CLI_USAGE_ERROR`. The CLI throws it for an unknown command, an unknown flag, an argument a command does not take, a short flag, a missing flag value, a missing Provider, a refused `voke deploy --stage local`, and a cancelled `voke remove`. It is not exported by `voke`; you see it as CLI output. The message gives the problem and the command's usage:
 
 ```txt
 Invalid CLI usage: Missing value for --stage
@@ -147,7 +147,7 @@ The message names the Function and the failure, for example `Invalid payload for
 
 ## HTTP error responses
 
-When a route fails, the Gateway answers with this JSON body, locally and on AWS:
+When a route fails, the Gateway answers with an **Error Envelope**, locally and on AWS:
 
 ```ts twoslash
 interface ErrorBody {
@@ -160,28 +160,39 @@ interface ErrorBody {
 }
 ```
 
-There are three cases:
+Every body the Gateway writes has a `code`. `code` is optional in the type because a handler's own `error()` response may leave it out.
 
-| Case                                                         | Status | Body                                                                                                |
-| ------------------------------------------------------------ | ------ | --------------------------------------------------------------------------------------------------- |
-| Invalid input (`InvokeError` with `INVALID_PAYLOAD`)         | 400    | `message` is `Invalid body`, `Invalid params`, `Invalid query` or `Invalid headers`, with `issues`. |
-| Invalid handler output (`InvokeError` with `INVALID_RESULT`) | 500    | `message` is `Invalid result`, with `issues`.                                                       |
-| Any other thrown error                                       | 500    | `code` is `INTERNAL_SERVER_ERROR` and `message` is `Internal server error`.                         |
+| Case                                                     | Status  | `code`                   | `message`                                                            | Extra                                     |
+| -------------------------------------------------------- | ------- | ------------------------ | -------------------------------------------------------------------- | ----------------------------------------- |
+| `body`, `params`, `query` or `headers` fails its schema  | 400     | `INVALID_REQUEST`        | `Invalid body`, `Invalid params`, `Invalid query`, `Invalid headers` | `issues`                                  |
+| The JSON body does not parse                             | 400     | `INVALID_REQUEST`        | `Invalid body`                                                       | one issue, `Malformed JSON` at `["body"]` |
+| A body that is not JSON for a route with a `body` schema | 415     | `UNSUPPORTED_MEDIA_TYPE` | `Unsupported content type: send application/json`                    | none                                      |
+| No route matches the method and path                     | 404     | `NOT_FOUND`              | `Route not found`                                                    | none                                      |
+| `HTTPException` with a status below 500, without `res`   | its own | from the status          | its message, or the status name                                      | none                                      |
+| `HTTPException` with `res`                               | its own | n/a                      | n/a                                                                  | that response, unchanged                  |
+| Anything else                                            | 500     | `INTERNAL_SERVER_ERROR`  | `Internal server error`                                              | `details.message` under `voke dev` only   |
+
+"Anything else" includes an `HTTPException` of 500 or more (its status is kept), a return value that fails the `output` schema, and every `InvokeError` thrown inside a route handler, for example by a nested `functions.invoke(...)`. Only a failure while Voke reads the request is the client's mistake.
+
+The `HTTPException` codes are `BAD_REQUEST` (400 and any other 4xx), `UNAUTHORIZED` (401), `FORBIDDEN` (403), `NOT_FOUND` (404), `METHOD_NOT_ALLOWED` (405), `CONFLICT` (409), `PAYLOAD_TOO_LARGE` (413), `UNSUPPORTED_MEDIA_TYPE` (415), `UNPROCESSABLE_ENTITY` (422) and `TOO_MANY_REQUESTS` (429).
 
 Each issue path starts with the part that failed:
 
 ```txt
-400 {"error":{"issues":[{"message":"Required","path":["body","name"]}],"message":"Invalid body"}}
-500 {"error":{"issues":[{"message":"Expected string","path":["result","id"]}],"message":"Invalid result"}}
+400 {"error":{"code":"INVALID_REQUEST","issues":[{"message":"Required","path":["body","name"]}],"message":"Invalid body"}}
+400 {"error":{"code":"INVALID_REQUEST","issues":[{"message":"Malformed JSON","path":["body"]}],"message":"Invalid body"}}
+415 {"error":{"code":"UNSUPPORTED_MEDIA_TYPE","message":"Unsupported content type: send application/json"}}
 500 {"error":{"code":"INTERNAL_SERVER_ERROR","message":"Internal server error"}}
 ```
 
+`functions.route(...)` does not write a response: it throws an `InvokeError` with `INVALID_PAYLOAD` for a request part, a malformed JSON body or an unsupported content type, and with `INVALID_RESULT` for the output, both with their full issues.
+
 <Callout type="warn" title="Thrown messages never reach the client">
-  For any other thrown error, the original message never reaches the client.
-  Voke logs the error once to `console.error` as one JSON line with `level`,
-  `message`, `name`, `stack`, and `code` when the error has one. Under `voke
-  dev` only, the response also carries `details.message`, so you can see the
-  cause locally. The stage does not turn this on.
+  For a server failure, the original message never reaches the client. Voke logs
+  the error once to `console.error` as one JSON line with `level`, `message`,
+  `name`, `stack`, `code` when the error has one, and `issues` when it has some.
+  Under `voke dev` only, the response also carries `details.message`, so you can
+  see the cause locally. The stage does not turn this on.
 </Callout>
 
 For a failure the client should see, handle it in the handler and return the response you want with `error()` from `@voke/http`. Do not rely on a thrown message. See [HTTP routes](/docs/guides/http-routes).

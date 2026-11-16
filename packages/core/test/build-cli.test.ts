@@ -42,18 +42,13 @@ test("build CLI builds the Provider's plan from the Functions the entrypoint dec
   const directory = tempPath(`voke-build-cli-${crypto.randomUUID()}`);
   const configPath = await writeProject(directory, { provider: true });
   const commands: string[][] = [];
-  const previousPwd = process.env.PWD;
 
-  try {
-    process.env.PWD = directory;
-    await runCli(["build", "--config", configPath], {
-      run: (command) => {
-        commands.push(command);
-      },
-    });
-  } finally {
-    process.env.PWD = previousPwd;
-  }
+  await runCli(["build", "--config", configPath], {
+    cwd: directory,
+    run: (command) => {
+      commands.push(command);
+    },
+  });
 
   expect(commands).toEqual([
     [
@@ -108,15 +103,17 @@ test("build CLI builds the Provider's plan from the Functions the entrypoint dec
 test("build CLI fails clearly when no Provider is configured", async () => {
   const directory = tempPath(`voke-build-no-provider-${crypto.randomUUID()}`);
   const configPath = await writeProject(directory, { provider: false });
-  const previousPwd = process.env.PWD;
 
   try {
-    process.env.PWD = directory;
     await expect(
-      runCli(["build", "--config", configPath], { run: () => {} })
-    ).rejects.toThrow("No provider configured for build.");
+      runCli(["build", "--config", configPath], {
+        cwd: directory,
+        run: () => {},
+      })
+    ).rejects.toThrow(
+      'No provider configured. Add a provider to voke.config.ts, for example:\n\n  import { aws } from "@voke/aws";\n  export default defineConfig({ name: "build-api", provider: aws() });'
+    );
   } finally {
-    process.env.PWD = previousPwd;
     await rm(directory, { force: true, recursive: true });
   }
 });

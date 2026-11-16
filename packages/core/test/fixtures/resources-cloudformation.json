@@ -39,11 +39,14 @@
       "Type": "AWS::SQS::Queue"
     },
     "OrdersTable": {
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
       "Metadata": {
         "VokeBinding": {
           "Attribute": "name",
           "Resource": "ordersTable"
-        }
+        },
+        "VokeRetain": true
       },
       "Properties": {
         "AttributeDefinitions": [

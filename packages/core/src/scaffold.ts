@@ -113,7 +113,7 @@ bun run remove   # delete the dev stage
 \`\`\`
 `;
 
-const tsconfig = {
+export const tsconfig = {
   compilerOptions: {
     allowImportingTsExtensions: true,
     lib: ["ESNext", "DOM"],
@@ -130,7 +130,7 @@ const tsconfig = {
   include: ["voke.config.ts", "src/**/*.ts", "test/**/*.ts"],
 };
 
-const projectPackageJson = (name: string): Record<string, unknown> => ({
+export const projectPackageJson = (name: string): Record<string, unknown> => ({
   dependencies: {
     ...Object.fromEntries(
       vokeDependencies.map((dependency) => [

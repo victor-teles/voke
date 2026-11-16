@@ -1,7 +1,9 @@
 import type {
   StandardJsonSchemaConverter,
   StandardJsonSchemaOptions,
+  StandardSchemaInput,
   StandardSchemaIssue,
+  StandardSchemaOutput,
   StandardSchemaResult,
   StandardSchemaV1,
 } from "voke";
@@ -20,33 +22,83 @@ interface VokeSchemaMetadata {
   optional?: boolean;
 }
 
-export type VokeSchema<TInput, TOutput = TInput> = StandardSchemaV1<
-  TInput,
-  TOutput
-> & {
+// `types` declares what a caller should pass; `validate` still accepts any value, as the
+// Standard Schema specification requires, so a schema can be run against untrusted data.
+export interface VokeSchema<TInput, TOutput = TInput> {
+  readonly "~standard": Omit<
+    StandardSchemaV1<TInput, TOutput>["~standard"],
+    "validate"
+  > & {
+    validate(
+      value: unknown
+    ): Validation<TOutput> | Promise<Validation<TOutput>>;
+  };
   readonly "~voke": VokeSchemaMetadata;
-};
+}
 
-type OptionalSchema<TOutput> = VokeSchema<unknown, TOutput | undefined> & {
+type AnySchema = StandardSchemaV1<unknown, unknown>;
+
+type OptionalSchema<TInput, TOutput> = VokeSchema<
+  TInput | undefined,
+  TOutput | undefined
+> & {
   readonly "~voke": VokeSchemaMetadata & { readonly optional: true };
 };
 
-type InferOutput<TSchema> =
-  TSchema extends StandardSchemaV1<unknown, infer TOutput> ? TOutput : never;
+interface OptionalMarker {
+  readonly "~voke": { readonly optional: true };
+}
 
-type InferObjectOutput<TShape extends Record<string, StandardSchemaV1>> = {
-  [TKey in keyof TShape as TShape[TKey] extends {
-    readonly "~voke": { readonly optional: true };
+// Resolves the intersection so an error message shows `{ id: string }`, not the mapped types.
+type Flatten<TObject> = TObject extends infer TResolved
+  ? { [TKey in keyof TResolved]: TResolved[TKey] }
+  : never;
+
+type ObjectInput<TShape extends Record<string, AnySchema>> = Flatten<
+  {
+    [TKey in keyof TShape as TShape[TKey] extends OptionalMarker
+      ? never
+      : TKey]: StandardSchemaInput<TShape[TKey]>;
+  } & {
+    [TKey in keyof TShape as TShape[TKey] extends OptionalMarker
+      ? TKey
+      : never]?: StandardSchemaInput<TShape[TKey]>;
   }
-    ? never
-    : TKey]: InferOutput<TShape[TKey]>;
-} & {
-  [TKey in keyof TShape as TShape[TKey] extends {
-    readonly "~voke": { readonly optional: true };
+>;
+
+type ObjectOutput<TShape extends Record<string, AnySchema>> = Flatten<
+  {
+    [TKey in keyof TShape as TShape[TKey] extends OptionalMarker
+      ? never
+      : TKey]: StandardSchemaOutput<TShape[TKey]>;
+  } & {
+    [TKey in keyof TShape as TShape[TKey] extends OptionalMarker
+      ? TKey
+      : never]?: StandardSchemaOutput<TShape[TKey]>;
   }
-    ? TKey
-    : never]?: InferOutput<TShape[TKey]>;
-};
+>;
+
+type ChildResult = Validation<unknown> | Promise<Validation<unknown>>;
+
+const isPending = (
+  result: ChildResult
+): result is Promise<Validation<unknown>> => result instanceof Promise;
+
+const isSettled = (
+  results: readonly ChildResult[]
+): results is readonly Validation<unknown>[] => !results.some(isPending);
+
+const settleLater = async <TOutput>(
+  results: readonly ChildResult[],
+  combine: (settled: readonly Validation<unknown>[]) => Validation<TOutput>
+): Promise<Validation<TOutput>> => combine(await Promise.all(results));
+
+// A child from another library may validate asynchronously. Only then is the result a promise.
+const settle = <TOutput>(
+  results: readonly ChildResult[],
+  combine: (settled: readonly Validation<unknown>[]) => Validation<TOutput>
+): Validation<TOutput> | Promise<Validation<TOutput>> =>
+  isSettled(results) ? combine(results) : settleLater(results, combine);
 
 function success(): Validation<undefined>;
 function success<TOutput>(value: TOutput): Validation<TOutput>;
@@ -118,7 +170,9 @@ const childJsonSchema = (
 
 const makeSchema = <TInput, TOutput>(
   metadata: VokeSchemaMetadata,
-  validate: (value: TInput) => Validation<TOutput>,
+  validate: (
+    value: unknown
+  ) => Validation<TOutput> | Promise<Validation<TOutput>>,
   jsonSchema: JsonSchemaProducer
 ): VokeSchema<TInput, TOutput> => ({
   "~standard": {
@@ -130,7 +184,7 @@ const makeSchema = <TInput, TOutput>(
   "~voke": metadata,
 });
 
-interface StringSchema extends VokeSchema<unknown, string> {
+interface StringSchema extends VokeSchema<string> {
   min(length: number): StringSchema;
   max(length: number): StringSchema;
 }
@@ -151,7 +205,7 @@ const stringWithRules = (
   rules: readonly ((value: string) => StandardSchemaIssue | undefined)[] = [],
   bounds: StringBounds = {}
 ): StringSchema => {
-  const schema = makeSchema<unknown, string>(
+  const schema = makeSchema<string, string>(
     { kind: "string" },
     (value) => {
       if (typeof value !== "string") {
@@ -193,10 +247,10 @@ const stringWithRules = (
   return Object.freeze(schema);
 };
 
-interface NumberSchema extends VokeSchema<unknown, number> {
-  int(): NumberSchema;
-  max(value: number): NumberSchema;
-  min(value: number): NumberSchema;
+interface NumberSchema<TInput = number> extends VokeSchema<TInput, number> {
+  int(): NumberSchema<TInput>;
+  max(value: number): NumberSchema<TInput>;
+  min(value: number): NumberSchema<TInput>;
 }
 
 interface NumberBounds {
@@ -219,16 +273,16 @@ const numberJsonSchema = (
     : number;
 };
 
-const numberWithRules = (
+const numberWithRules = <TInput = number>(
   options: {
     bounds?: NumberBounds;
     coerce?: boolean;
     rules?: readonly ((value: number) => StandardSchemaIssue | undefined)[];
   } = {}
-): NumberSchema => {
+): NumberSchema<TInput> => {
   const rules = options.rules ?? [];
   const bounds = options.bounds ?? {};
-  const schema = makeSchema<unknown, number>(
+  const schema = makeSchema<TInput, number>(
     { kind: "number" },
     (value) => {
       const candidate =
@@ -249,10 +303,10 @@ const numberWithRules = (
       return issues.length === 0 ? success(candidate) : { issues };
     },
     (side) => numberJsonSchema(bounds, options.coerce === true, side)
-  ) as NumberSchema;
+  ) as NumberSchema<TInput>;
 
   schema.int = () =>
-    numberWithRules({
+    numberWithRules<TInput>({
       ...options,
       bounds: { ...bounds, integer: true },
       rules: [
@@ -262,7 +316,7 @@ const numberWithRules = (
       ],
     });
   schema.min = (minimum) =>
-    numberWithRules({
+    numberWithRules<TInput>({
       ...options,
       bounds: {
         ...bounds,
@@ -277,7 +331,7 @@ const numberWithRules = (
       ],
     });
   schema.max = (maximum) =>
-    numberWithRules({
+    numberWithRules<TInput>({
       ...options,
       bounds: {
         ...bounds,
@@ -295,7 +349,7 @@ const numberWithRules = (
   return Object.freeze(schema);
 };
 
-const boolean = (): VokeSchema<unknown, boolean> =>
+const boolean = (): VokeSchema<boolean> =>
   makeSchema(
     { kind: "boolean" },
     (value) =>
@@ -313,7 +367,7 @@ const literalType = (value: string | number | boolean | null): string => {
 
 const literal = <const TValue extends string | number | boolean | null>(
   expected: TValue
-): VokeSchema<unknown, TValue> =>
+): VokeSchema<TValue> =>
   makeSchema(
     { kind: "literal" },
     (value) =>
@@ -325,7 +379,7 @@ const literal = <const TValue extends string | number | boolean | null>(
 
 const stringEnum = <const TValues extends readonly [string, ...string[]]>(
   values: TValues
-): VokeSchema<unknown, TValues[number]> =>
+): VokeSchema<TValues[number]> =>
   makeSchema(
     { kind: "enum" },
     (value) =>
@@ -338,19 +392,22 @@ const stringEnum = <const TValues extends readonly [string, ...string[]]>(
   );
 
 // The object that holds an optional schema leaves its key out of `required`.
-const optional = <const TSchema extends StandardSchemaV1>(
+const optional = <const TSchema extends AnySchema>(
   inner: TSchema
-): OptionalSchema<InferOutput<TSchema>> =>
-  makeSchema(
+): OptionalSchema<
+  StandardSchemaInput<TSchema>,
+  StandardSchemaOutput<TSchema>
+> =>
+  // The child's result is returned as is, so it may be a promise.
+  makeSchema<StandardSchemaInput<TSchema> | undefined, unknown>(
     { kind: "optional", optional: true },
     (value) =>
-      value === undefined
-        ? success()
-        : (inner["~standard"].validate(value) as Validation<
-            InferOutput<TSchema>
-          >),
+      value === undefined ? success() : inner["~standard"].validate(value),
     (side, options) => childJsonSchema(inner, side, options)
-  ) as OptionalSchema<InferOutput<TSchema>>;
+  ) as OptionalSchema<
+    StandardSchemaInput<TSchema>,
+    StandardSchemaOutput<TSchema>
+  >;
 
 const isOptionalSchema = (schema: StandardSchemaV1): boolean =>
   (schema as { "~voke"?: VokeSchemaMetadata })["~voke"]?.optional === true;
@@ -380,85 +437,96 @@ const objectJsonSchema = (
   };
 };
 
-const object = <const TShape extends Record<string, StandardSchemaV1>>(
+const object = <const TShape extends Record<string, AnySchema>>(
   shape: TShape
-): VokeSchema<unknown, InferObjectOutput<TShape>> =>
-  makeSchema(
+): VokeSchema<ObjectInput<TShape>, ObjectOutput<TShape>> =>
+  makeSchema<ObjectInput<TShape>, ObjectOutput<TShape>>(
     { keys: Object.keys(shape), kind: "object" },
-    (value): Validation<InferObjectOutput<TShape>> => {
+    (value) => {
       if (typeof value !== "object" || value === null || Array.isArray(value)) {
         return failure("Expected object");
       }
 
       const input = value as Record<string, unknown>;
-      const issues: StandardSchemaIssue[] = [];
-      const output: Record<string, unknown> = {};
+      const unexpected: StandardSchemaIssue[] = [];
       const expectedKeys = new Set(Object.keys(shape));
 
       for (const key of Object.keys(input)) {
         if (!expectedKeys.has(key)) {
-          issues.push({ message: "Unexpected property", path: [key] });
+          unexpected.push({ message: "Unexpected property", path: [key] });
         }
       }
 
-      for (const [key, child] of Object.entries(shape)) {
+      const entries = Object.entries(shape);
+      // One result per shape key, in shape order, so issues keep their order.
+      const results = entries.map(([key, child]): ChildResult => {
         if (!(key in input) && !isOptionalSchema(child)) {
-          issues.push({ message: "Required", path: [key] });
-          continue;
+          return failure("Required");
         }
 
-        const result = child["~standard"].validate(
-          input[key]
-        ) as Validation<unknown>;
+        return child["~standard"].validate(input[key]);
+      });
 
-        if (result.issues === undefined) {
-          if (result.value !== undefined || key in input) {
-            output[key] = result.value;
+      return settle(results, (settled) => {
+        const issues = [...unexpected];
+        const output: Record<string, unknown> = {};
+
+        for (const [index, result] of settled.entries()) {
+          const [key] = entries[index] ?? [""];
+
+          if (result.issues === undefined) {
+            if (result.value !== undefined || key in input) {
+              output[key] = result.value;
+            }
+            continue;
           }
-          continue;
+
+          issues.push(...result.issues.map((issue) => withPath(key, issue)));
         }
 
-        issues.push(...result.issues.map((issue) => withPath(key, issue)));
-      }
-
-      return issues.length === 0
-        ? success(output as InferObjectOutput<TShape>)
-        : { issues };
+        return issues.length === 0
+          ? success(output as ObjectOutput<TShape>)
+          : { issues };
+      });
     },
     (side, options) => objectJsonSchema(shape, side, options)
   );
 
-const array = <const TItem extends StandardSchemaV1>(
+const array = <const TItem extends AnySchema>(
   item: TItem
-): VokeSchema<unknown, InferOutput<TItem>[]> =>
-  makeSchema(
+): VokeSchema<StandardSchemaInput<TItem>[], StandardSchemaOutput<TItem>[]> =>
+  makeSchema<StandardSchemaInput<TItem>[], StandardSchemaOutput<TItem>[]>(
     { kind: "array" },
     (value) => {
       if (!Array.isArray(value)) {
         return failure("Expected array");
       }
 
-      const output: InferOutput<TItem>[] = [];
-      const issues: StandardSchemaIssue[] = [];
+      const results = value.map(
+        (entry): ChildResult => item["~standard"].validate(entry)
+      );
 
-      for (const [index, entry] of value.entries()) {
-        const result = item["~standard"].validate(entry) as Validation<
-          InferOutput<TItem>
-        >;
+      return settle(results, (settled) => {
+        const output: unknown[] = [];
+        const issues: StandardSchemaIssue[] = [];
 
-        if (result.issues === undefined) {
-          output.push(result.value);
-        } else {
-          issues.push(
-            ...result.issues.map((issue) => ({
-              ...issue,
-              path: [index, ...(issue.path ?? [])],
-            }))
-          );
+        for (const [index, result] of settled.entries()) {
+          if (result.issues === undefined) {
+            output.push(result.value);
+          } else {
+            issues.push(
+              ...result.issues.map((issue) => ({
+                ...issue,
+                path: [index, ...(issue.path ?? [])],
+              }))
+            );
+          }
         }
-      }
 
-      return issues.length === 0 ? success(output) : { issues };
+        return issues.length === 0
+          ? success(output as StandardSchemaOutput<TItem>[])
+          : { issues };
+      });
     },
     (side, options) => ({
       items: childJsonSchema(item, side, options),
@@ -466,7 +534,7 @@ const array = <const TItem extends StandardSchemaV1>(
     })
   );
 
-const undefinedSchema = (): VokeSchema<unknown, undefined> =>
+const undefinedSchema = (): VokeSchema<undefined> =>
   makeSchema(
     { kind: "undefined" },
     (value) =>
@@ -476,7 +544,7 @@ const undefinedSchema = (): VokeSchema<unknown, undefined> =>
     }
   );
 
-const nullSchema = (): VokeSchema<unknown, null> =>
+const nullSchema = (): VokeSchema<null> =>
   makeSchema(
     { kind: "null" },
     (value) => (value === null ? success(null) : failure("Expected null")),
@@ -487,7 +555,7 @@ export const schema = {
   array,
   boolean,
   coerce: {
-    number: () => numberWithRules({ coerce: true }),
+    number: () => numberWithRules<number | string>({ coerce: true }),
   },
   enum: stringEnum,
   literal,

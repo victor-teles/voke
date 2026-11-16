@@ -223,6 +223,10 @@ test("documents a body and wraps the output in the { data } envelope", () => {
     ...errorRef,
     description: "Invalid request",
   });
+  expect(operation?.responses["415"]).toEqual({
+    ...errorRef,
+    description: "Unsupported content type",
+  });
 });
 
 test("a route without output documents data as any value", () => {
@@ -431,7 +435,7 @@ test("removes $schema from embedded schemas", () => {
           routes: [
             route.post("/users", {
               body: z.object({ name: z.string() }),
-              handler: ok,
+              handler: () => ({ id: "usr_1" }),
               output: z.object({ id: z.string() }),
               query: z.object({ dryRun: z.string().optional() }),
             }),
@@ -570,6 +574,7 @@ test("builds the whole document for a three-route registry", () => {
           responses: {
             "200": envelope(userSchema),
             "400": badRequest,
+            "415": { ...errorRef, description: "Unsupported content type" },
             "500": serverError,
           },
           security: [],

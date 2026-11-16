@@ -221,6 +221,7 @@ test("builds a small serializable model from normalized config", () => {
             properties: {
               bindingValue: "ref",
               cloudFormationType: "AWS::DynamoDB::Table",
+              dataBearing: true,
               outputName: "Name",
               policyResource: "getAttArn",
             },

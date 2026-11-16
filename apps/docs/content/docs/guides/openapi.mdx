@@ -94,7 +94,7 @@ export const functions = createFunctions({
 | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | Path `/orders/:id`, trailing `*`            | `/orders/{id}`, `{proxy}`; each is a required `path` parameter, a string unless `params` says more                |
 | `params`, `query`, `headers`                | One parameter per property of the object schema; `required` comes from the schema                                 |
-| `body`                                      | A required `application/json` request body                                                                        |
+| `body`                                      | A required `application/json` request body, and a `415` response with the `Error` schema                          |
 | `output`                                    | The `200` response: `{ "data": <output> }`, the envelope the Gateway sends. Without `output`, `data` is any value |
 | Any of `body`, `params`, `query`, `headers` | A `400` response with the `Error` schema                                                                          |
 | Every route                                 | A `500` response with the `Error` schema                                                                          |

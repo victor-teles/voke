@@ -18,6 +18,8 @@ import type {
   CloudFormationTemplate,
   CloudFormationValue,
 } from "./cloudformation-template";
+import { isRetained } from "./data-retention";
+import type { AwsRetainData } from "./data-retention";
 import {
   durableConfig,
   durableExecutionRoleStatements,
@@ -64,6 +66,8 @@ export interface StackResourceDefinition {
       properties: {
         bindingValue: "ref" | "getAttArn" | "getAttId";
         cloudFormationType: string;
+        /** Holds state that a redeploy cannot recreate; synthesis retains it by default. */
+        dataBearing?: true;
         outputName: string;
         policyResource:
           | "ref"
@@ -83,23 +87,29 @@ const awsCloudFormationResource = (definition: {
   bindingAttribute: string;
   bindingValue: AwsResourceBindingValue;
   cloudFormationType: string;
+  dataBearing?: true;
   outputName: string;
   policyResource: AwsResourcePolicyResource;
   properties: Record<string, CloudFormationValue>;
-}): StackResourceDefinition => ({
-  ...definition,
-  provider: {
-    aws: {
-      properties: {
-        bindingValue: definition.bindingValue,
-        cloudFormationType: definition.cloudFormationType,
-        outputName: definition.outputName,
-        policyResource: definition.policyResource,
+}): StackResourceDefinition => {
+  const { dataBearing, ...resource } = definition;
+
+  return {
+    ...resource,
+    provider: {
+      aws: {
+        properties: {
+          bindingValue: definition.bindingValue,
+          cloudFormationType: definition.cloudFormationType,
+          ...(dataBearing === true ? { dataBearing } : {}),
+          outputName: definition.outputName,
+          policyResource: definition.policyResource,
+        },
+        type: "cloudformation.resource",
       },
-      type: "cloudformation.resource",
     },
-  },
-});
+  };
+};
 
 export type SynthesizeCloudFormationOptions = VokeConfigInput & {
   /** The Function Registry discovered from the project entrypoint. */
@@ -144,6 +154,7 @@ export const dynamodbTable = (
     bindingAttribute: "name",
     bindingValue: "ref",
     cloudFormationType: "AWS::DynamoDB::Table",
+    dataBearing: true,
     outputName: "Name",
     policyResource: "getAttArn",
     properties: {
@@ -283,6 +294,7 @@ export const s3Bucket = (): StackResourceDefinition =>
     bindingAttribute: "name",
     bindingValue: "ref",
     cloudFormationType: "AWS::S3::Bucket",
+    dataBearing: true,
     outputName: "Name",
     policyResource: "s3ArnWithObjects",
     properties: {},
@@ -294,6 +306,7 @@ export const secret = (): StackResourceDefinition =>
     bindingAttribute: "id",
     bindingValue: "getAttId",
     cloudFormationType: "AWS::SecretsManager::Secret",
+    dataBearing: true,
     outputName: "Id",
     policyResource: "getAttArn",
     properties: {
@@ -941,12 +954,52 @@ export interface SynthesisOptions {
   /** `aws({ lambda })` settings. Defaults to `defaultAwsLambdaSettings`. */
   lambda?: AwsLambdaSettings;
   /**
+   * `aws({ retainData })`: whether tables, buckets and secrets get `DeletionPolicy` and
+   * `UpdateReplacePolicy` `Retain`. Defaults to `true`; Local AWS Providers pass `false`.
+   */
+  retainData?: AwsRetainData;
+  /**
    * `"resources"` keeps only the declared resources and their outputs: no roles, Functions, APIs,
    * permissions, log groups or event source mappings. Local AWS Providers whose Lambda cannot run
    * a Voke bundle provision this, while Function code runs in the local Gateway. Default `"all"`.
    */
   scope?: "all" | "resources";
 }
+
+/**
+ * The retention a resource gets: both policies and the `VokeRetain` metadata entry for a retained
+ * data-bearing resource, nothing otherwise. The metadata entry makes a policy change a template
+ * change, because CloudFormation does not apply a policy change on its own.
+ */
+const dataRetention = (
+  retainData: AwsRetainData | undefined,
+  model: VokeModel,
+  key: string,
+  provider: AwsCloudFormationResourceProvider
+): {
+  metadata: Record<string, CloudFormationValue>;
+  policies: Pick<
+    CloudFormationResource,
+    "DeletionPolicy" | "UpdateReplacePolicy"
+  >;
+} => {
+  const retained =
+    provider.dataBearing === true &&
+    isRetained(retainData, {
+      key,
+      stage: model.service.stage,
+      type: provider.cloudFormationType,
+    });
+
+  if (!retained) {
+    return { metadata: {}, policies: {} };
+  }
+
+  return {
+    metadata: { VokeRetain: true },
+    policies: { DeletionPolicy: "Retain", UpdateReplacePolicy: "Retain" },
+  };
+};
 
 /** The model without its Functions and APIs, keeping the resource outputs. */
 const resourcesOnly = (model: VokeModel): VokeModel => ({
@@ -993,13 +1046,16 @@ export const synthesizeCloudFormationFromModel = (
   for (const [name, resource] of Object.entries(model.resources)) {
     const logicalId = toLogicalId(name);
     const provider = resourceProvider(resource);
+    const retention = dataRetention(options.retainData, model, name, provider);
 
     templateResources[logicalId] = {
+      ...retention.policies,
       Metadata: {
         VokeBinding: {
           Attribute: resource.binding.attribute,
           Resource: name,
         },
+        ...retention.metadata,
       },
       Properties: withDerivedVisibilityTimeout(model, name, resource),
       Type: provider.cloudFormationType,

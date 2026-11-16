@@ -93,6 +93,8 @@ export interface ProviderDeployInput {
   region?: string;
   /** Plan the deployment and report the changes without applying them. */
   dryRun: boolean;
+  /** The user accepted changes that remove or replace resources holding data. */
+  acceptDataLoss: boolean;
   output: (line: string) => void;
 }
 

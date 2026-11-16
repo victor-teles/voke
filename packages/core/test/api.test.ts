@@ -519,20 +519,6 @@ export const functions = createFunctions({
   );
 };
 
-const withPwd = async <TResult>(
-  directory: string,
-  run: () => Promise<TResult>
-): Promise<TResult> => {
-  const previous = process.env.PWD;
-  process.env.PWD = directory;
-
-  try {
-    return await run();
-  } finally {
-    process.env.PWD = previous;
-  }
-};
-
 test("synth CLI reads voke.config.ts and writes the configured template path", async () => {
   const directory = tempPath(`voke-synth-config-${crypto.randomUUID()}`);
   const out = `${directory}/build/template.json`;
@@ -565,7 +551,7 @@ export default defineConfig({
   );
 
   await writeHttpEntrypoint(`${directory}/src/service.ts`);
-  await withPwd(directory, () => runCli(["synth", "--config", configPath]));
+  await runCli(["synth", "--config", configPath], { cwd: directory });
 
   const template = await Bun.file(out).json();
 
@@ -604,6 +590,12 @@ export default defineConfig({ name: "cli-api", provider: aws() });
 `
   );
 
+  // The generated entry is written under the working directory, as in a real project, and
+  // imports @voke/aws. That import resolves from a workspace package, not from the repository
+  // root, so the build runs from packages/core whatever directory the test run started in.
+  const previousDirectory = process.cwd();
+  process.chdir(`${import.meta.dir}/..`);
+
   try {
     await runCli(["build", "--config", configPath, entrypoint, buildDirectory]);
 
@@ -615,8 +607,8 @@ export default defineConfig({ name: "cli-api", provider: aws() });
       await Bun.file(`${buildDirectory}/voke-manifest.json`).json()
     ).toMatchObject({ functions: { http: { handler: "index.http" } } });
   } finally {
-    // The generated entry lives under the working directory, as in a real project.
     await rm(".voke", { force: true, recursive: true });
+    process.chdir(previousDirectory);
   }
 });
 

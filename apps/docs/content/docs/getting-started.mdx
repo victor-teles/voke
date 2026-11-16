@@ -85,7 +85,7 @@ bun run deploy
 bun run remove
 ```
 
-`bun run remove` runs `voke remove --stage dev`. It asks you to type `my-api-dev` to confirm, then deletes the stack and its resources.
+`bun run remove` runs `voke remove --stage dev`. It asks you to type `my-api-dev` to confirm, then deletes the stack and its resources. Tables, buckets and secrets are kept with their data; Voke lists each one with the command that deletes it.
 
 </Step>
 </Steps>

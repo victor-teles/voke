@@ -13,7 +13,7 @@
     "dev": "turbo run dev",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
-    "release:check": "bun run typecheck && bun test",
+    "release:check": "bun run check && bun run typecheck && bun run test",
     "clean": "turbo run clean",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",

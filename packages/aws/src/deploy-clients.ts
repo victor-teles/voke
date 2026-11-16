@@ -22,6 +22,13 @@ export interface ChangeSetInput {
 export interface ChangeSetChange {
   action: string;
   logicalId: string;
+  /** The existing resource's physical id; absent for an Add. */
+  physicalId?: string;
+  /**
+   * What the resource's policies make CloudFormation do: "Delete", "Retain", "Snapshot",
+   * "ReplaceAndDelete", "ReplaceAndRetain" or "ReplaceAndSnapshot".
+   */
+  policyAction?: string;
   /** CloudFormation's `Replacement` for a Modify: "True", "False" or "Conditional". */
   replacement?: string;
   resourceType: string;
@@ -37,6 +44,7 @@ export interface ChangeSetDescription {
 export interface StackEvent {
   id: string;
   logicalId: string;
+  physicalId?: string;
   reason?: string;
   resourceType: string;
   status: string;
@@ -54,8 +62,15 @@ export interface DeployAwsClients {
   describeChangeSet(id: string): Promise<ChangeSetDescription>;
   describeStack(name: string): Promise<StackDescription | undefined>;
   /** Newest first, as CloudFormation returns them. */
-  describeStackEvents(name: string): Promise<StackEvent[]>;
-  executeChangeSet(id: string): Promise<void>;
+  describeStackEvents(nameOrId: string): Promise<StackEvent[]>;
+  /**
+   * `retainExceptOnCreate` makes a rollback delete resources the operation created, even those
+   * with `DeletionPolicy: Retain`.
+   */
+  executeChangeSet(
+    id: string,
+    options: { retainExceptOnCreate: boolean }
+  ): Promise<void>;
   objectExists(bucket: string, key: string): Promise<boolean>;
   /** The HTTPS URL CloudFormation reads an uploaded template from. */
   objectUrl(bucket: string, key: string): string;
@@ -180,6 +195,12 @@ export const createDeployAwsClients = async (
           changes: (result.Changes ?? []).map((change) => ({
             action: change.ResourceChange?.Action ?? "",
             logicalId: change.ResourceChange?.LogicalResourceId ?? "",
+            ...(change.ResourceChange?.PhysicalResourceId === undefined
+              ? {}
+              : { physicalId: change.ResourceChange.PhysicalResourceId }),
+            ...(change.ResourceChange?.PolicyAction === undefined
+              ? {}
+              : { policyAction: change.ResourceChange.PolicyAction }),
             ...(change.ResourceChange?.Replacement === undefined
               ? {}
               : { replacement: change.ResourceChange.Replacement }),
@@ -230,16 +251,23 @@ export const createDeployAwsClients = async (
         return (result.StackEvents ?? []).map((event) => ({
           id: event.EventId ?? "",
           logicalId: event.LogicalResourceId ?? "",
+          ...(event.PhysicalResourceId === undefined ||
+          event.PhysicalResourceId === ""
+            ? {}
+            : { physicalId: event.PhysicalResourceId }),
           reason: event.ResourceStatusReason,
           resourceType: event.ResourceType ?? "",
           status: event.ResourceStatus ?? "",
           timestamp: event.Timestamp?.getTime() ?? 0,
         }));
       }),
-    executeChangeSet: async (id) => {
+    executeChangeSet: async (id, execution) => {
       await guard(() =>
         cfn.send(
-          new cloudFormation.ExecuteChangeSetCommand({ ChangeSetName: id })
+          new cloudFormation.ExecuteChangeSetCommand({
+            ChangeSetName: id,
+            RetainExceptOnCreate: execution.retainExceptOnCreate,
+          })
         )
       );
     },

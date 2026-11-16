@@ -65,14 +65,30 @@ const completedRecord: IdempotencyRecord = {
   validation: "v1",
 };
 
-const savedEnv = { ...process.env };
+const tableNameVariable = "VOKE_RESOURCE_IDEMPOTENCY_TABLE_NAME";
+// Every variable a test below sets. Each is restored on its own: replacing process.env as a
+// whole would detach it from Bun.env for every later test file in the same process.
+const touchedVariables = [
+  tableNameVariable,
+  "AWS_REGION",
+  "VOKE_AWS_ENDPOINT_URL",
+] as const;
+const savedValues = new Map(
+  touchedVariables.map((name) => [name, process.env[name]])
+);
 
 beforeEach(() => {
-  delete process.env.VOKE_RESOURCE_IDEMPOTENCY_TABLE_NAME;
+  Reflect.deleteProperty(process.env, tableNameVariable);
 });
 
 afterEach(() => {
-  process.env = { ...savedEnv };
+  for (const [name, value] of savedValues) {
+    if (value === undefined) {
+      Reflect.deleteProperty(process.env, name);
+    } else {
+      process.env[name] = value;
+    }
+  }
 });
 
 test("acquire is one conditional PutItem that returns the old item on failure", async () => {

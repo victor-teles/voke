@@ -23,7 +23,7 @@ export default defineConfig({
 });
 ```
 
-The Plugin contributes a DynamoDB table under the resource key `idempotencyTable`, with time to live on its `expiration` attribute. `voke synth` and `voke deploy` add it to the stack, and `voke local bootstrap` creates it locally. Like every resource, every Function can read and write it, and every Function gets its binding, `VOKE_RESOURCE_IDEMPOTENCY_TABLE_NAME`.
+The Plugin contributes a DynamoDB table under the resource key `idempotencyTable`, with time to live on its `expiration` attribute. `voke synth` and `voke deploy` add it to the stack, and `voke local bootstrap` creates it locally. Like every resource, every Function can read and write it, and every Function gets its binding, `VOKE_RESOURCE_IDEMPOTENCY_TABLE_NAME`. Like every table, it is kept with its data when it leaves the stack or the stage is removed; to delete it instead, exclude its key with `aws({ retainData })`. See [Data retention](/docs/guides/resources#data-retention).
 
 | Option                | Default              | What it does                                                                    |
 | --------------------- | -------------------- | ------------------------------------------------------------------------------- |
@@ -76,7 +76,7 @@ import { createFunctions, http, route } from "voke";
 
 interface CreateOrderRequest {
   readonly body: { item: string };
-  readonly headers: Headers;
+  readonly headers: Record<string, string | undefined>;
 }
 
 const createOrder = idempotent(
@@ -84,7 +84,7 @@ const createOrder = idempotent(
     orderId: `ord_${request.body.item}`,
   }),
   {
-    key: (request) => request.headers.get("idempotency-key") ?? undefined,
+    key: (request) => request.headers["idempotency-key"],
     validate: (request) => request.body,
   }
 );

@@ -1,6 +1,11 @@
 import packageJson from "../package.json";
 import { VokeError } from "./errors";
-import type { CliFlagSpec, PluginCommand, VokePlugin } from "./plugin";
+import type {
+  CliFlagSpec,
+  CliPositionalSpec,
+  PluginCommand,
+  VokePlugin,
+} from "./plugin";
 
 export class CliUsageError extends VokeError {
   constructor(message: string) {
@@ -16,18 +21,29 @@ export const missingProviderMessage = (name: string): string =>
   import { aws } from "@voke/aws";
   export default defineConfig({ name: ${JSON.stringify(name)}, provider: aws() });`;
 
-export type { CliFlagSpec } from "./plugin";
+export type { CliFlagSpec, CliPositionalSpec } from "./plugin";
 
 export interface CliCommandSpec {
   usage: string;
   description: string;
   flags: Readonly<Record<string, CliFlagSpec>>;
+  /** The arguments the command takes, in order. Omitted: none. */
+  positionals?: readonly CliPositionalSpec[];
+  /** The flag an extra argument most likely meant, named in the usage error. */
+  strayArgumentFlag?: string;
 }
 
 export interface ParsedFlags {
   values: Record<string, string>;
   positional: string[];
 }
+
+export const localSubcommands = [
+  "start",
+  "stop",
+  "reset",
+  "bootstrap",
+] as const;
 
 const configFlag: CliFlagSpec = {
   description: "Config file. Default: voke.config.ts",
@@ -63,6 +79,10 @@ export const commandSpecs: Readonly<Record<string, CliCommandSpec>> = {
       ...projectFlags,
       outdir: { description: "Output directory. Default: ./dist" },
     },
+    positionals: [
+      { flag: "entrypoint", name: "entrypoint" },
+      { flag: "outdir", name: "outdir" },
+    ],
     usage: "voke build [entrypoint] [outdir]",
   },
   create: {
@@ -75,19 +95,26 @@ export const commandSpecs: Readonly<Record<string, CliCommandSpec>> = {
       },
       "no-install": { boolean: true, description: "Skip bun install" },
     },
+    positionals: [{ name: "name", required: true }, { name: "directory" }],
     usage: "voke create <name> [directory]",
   },
   deploy: {
     description: "Build and deploy a stage through the Provider.",
     flags: {
       ...projectFlags,
+      "accept-data-loss": {
+        boolean: true,
+        description:
+          "Apply changes that remove or replace a resource that holds data",
+      },
       "dry-run": {
         boolean: true,
         description: "Preview the changes without applying them",
       },
     },
+    strayArgumentFlag: "stage",
     usage:
-      "voke deploy [--stage dev] [--region us-east-1] [--config voke.config.ts] [--dry-run]",
+      "voke deploy [--stage dev] [--region us-east-1] [--config voke.config.ts] [--dry-run] [--accept-data-loss]",
   },
   dev: {
     description: "Run the API locally with hot reload.",
@@ -97,6 +124,7 @@ export const commandSpecs: Readonly<Record<string, CliCommandSpec>> = {
       hostname: { description: "Hostname. Default: localhost" },
       port: { description: "Port. Default: 3000" },
     },
+    positionals: [{ flag: "entrypoint", name: "entrypoint" }],
     usage: "voke dev [entrypoint] [--hostname localhost] [--port 3000]",
   },
   doctor: {
@@ -108,6 +136,9 @@ export const commandSpecs: Readonly<Record<string, CliCommandSpec>> = {
     description:
       "Run the Provider's local environment. The Provider may accept more flags.",
     flags: projectFlags,
+    positionals: [
+      { choices: localSubcommands, name: "subcommand", required: true },
+    ],
     usage: "voke local <start|stop|reset|bootstrap>",
   },
   migrate: {
@@ -116,11 +147,20 @@ export const commandSpecs: Readonly<Record<string, CliCommandSpec>> = {
     flags: {
       out: { description: "Output directory. Default: ./voke-migration" },
     },
+    positionals: [
+      { choices: ["serverless"], name: "source", required: true },
+      { name: "serverless.yml" },
+    ],
+    strayArgumentFlag: "out",
     usage: "voke migrate serverless [serverless.yml] [--out ./voke-migration]",
   },
   remote: {
     description: "Generate Remote Function Registry modules from remotes.",
     flags: projectFlags,
+    positionals: [
+      { choices: ["generate"], name: "action", required: true },
+      { name: "name" },
+    ],
     usage: "voke remote generate [name]",
   },
   remove: {
@@ -129,6 +169,7 @@ export const commandSpecs: Readonly<Record<string, CliCommandSpec>> = {
       ...projectFlags,
       yes: { boolean: true, description: "Skip the confirmation prompt" },
     },
+    strayArgumentFlag: "stage",
     usage:
       "voke remove [--stage dev] [--region us-east-1] [--config voke.config.ts] [--yes]",
   },
@@ -138,6 +179,10 @@ export const commandSpecs: Readonly<Record<string, CliCommandSpec>> = {
       ...projectFlags,
       out: { description: "Output file. Default: cloudFormation.out" },
     },
+    positionals: [
+      { flag: "entrypoint", name: "entrypoint" },
+      { flag: "out", name: "out" },
+    ],
     usage:
       "voke synth [entrypoint] [out] [--config voke.config.ts] [--name api] [--stage local] [--region us-east-1]",
   },
@@ -223,6 +268,9 @@ export const pluginCommandSpecs = (
   [`${plugin.name} ${command}`]: {
     description: spec.description,
     flags: { ...spec.flags, config: configFlag },
+    ...(spec.positionals === undefined
+      ? {}
+      : { positionals: spec.positionals }),
     usage: spec.usage,
   },
 });
@@ -271,63 +319,6 @@ export const cliUsageMessage = (
     : `Invalid CLI usage: ${message}\nUsage: ${spec.usage}`;
 };
 
-export const parseFlags = (
-  command: string,
-  args: string[],
-  specs: CommandSpecs = commandSpecs
-): ParsedFlags => {
-  const values: Record<string, string> = {};
-  const positional: string[] = [];
-
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-
-    if (arg === undefined) {
-      continue;
-    }
-
-    if (!arg.startsWith("--")) {
-      positional.push(arg);
-      continue;
-    }
-
-    const [rawKey, inlineValue] = arg.slice(2).split(/[=](.*)/su, 2);
-    const key = rawKey ?? "";
-
-    if (key === "") {
-      throw new CliUsageError(`Invalid flag: ${arg}`);
-    }
-
-    if (inlineValue !== undefined) {
-      values[key] = inlineValue;
-      continue;
-    }
-
-    if (specs[command]?.flags[key]?.boolean === true) {
-      values[key] = "true";
-      continue;
-    }
-
-    const value = args[index + 1];
-    const isKnown = specs[command]?.flags[key] !== undefined;
-
-    if (value === undefined || value.startsWith("--")) {
-      if (!isKnown) {
-        // Left for assertKnownFlags, which names the flag and suggests a close one.
-        values[key] = "true";
-        continue;
-      }
-
-      throw new CliUsageError(`Missing value for --${key}`);
-    }
-
-    values[key] = value;
-    index += 1;
-  }
-
-  return { positional, values };
-};
-
 const editDistance = (left: string, right: string): number => {
   let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
 
@@ -372,6 +363,91 @@ const closestFlag = (
   return best?.name;
 };
 
+/** `-s` is not a flag: names the long flag it most likely meant. -h and -v are handled earlier. */
+const shortFlagError = (
+  arg: string,
+  known: readonly string[]
+): CliUsageError => {
+  const name = arg.slice(1);
+  const suggestion =
+    (name.length > 1 ? closestFlag(name, known) : undefined) ??
+    known.find((flag) => flag.startsWith(name.charAt(0)));
+
+  return new CliUsageError(
+    `Short flags are not supported: ${arg}.${suggestion === undefined ? "" : ` Did you mean --${suggestion}?`}`
+  );
+};
+
+// `--stage=$UNSET` must not select a stage named "".
+const nonEmptyValue = (key: string, value: string): string => {
+  if (value === "") {
+    throw new CliUsageError(`Missing value for --${key}`);
+  }
+
+  return value;
+};
+
+export const parseFlags = (
+  command: string,
+  args: string[],
+  specs: CommandSpecs = commandSpecs
+): ParsedFlags => {
+  const values: Record<string, string> = {};
+  const positional: string[] = [];
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+
+    if (arg === undefined) {
+      continue;
+    }
+
+    if (!arg.startsWith("--")) {
+      if (arg.startsWith("-") && arg !== "-") {
+        throw shortFlagError(arg, Object.keys(specs[command]?.flags ?? {}));
+      }
+
+      positional.push(arg);
+      continue;
+    }
+
+    const [rawKey, inlineValue] = arg.slice(2).split(/[=](.*)/su, 2);
+    const key = rawKey ?? "";
+
+    if (key === "") {
+      throw new CliUsageError(`Invalid flag: ${arg}`);
+    }
+
+    if (inlineValue !== undefined) {
+      values[key] = nonEmptyValue(key, inlineValue);
+      continue;
+    }
+
+    if (specs[command]?.flags[key]?.boolean === true) {
+      values[key] = "true";
+      continue;
+    }
+
+    const value = args[index + 1];
+    const isKnown = specs[command]?.flags[key] !== undefined;
+
+    if (value === undefined || value.startsWith("--")) {
+      if (!isKnown) {
+        // Left for assertKnownFlags, which names the flag and suggests a close one.
+        values[key] = "true";
+        continue;
+      }
+
+      throw new CliUsageError(`Missing value for --${key}`);
+    }
+
+    values[key] = nonEmptyValue(key, value);
+    index += 1;
+  }
+
+  return { positional, values };
+};
+
 /** Throws for a flag the command does not read; `extra` adds Provider-declared flags. */
 export const assertKnownFlags = (
   command: string,
@@ -392,4 +468,67 @@ export const assertKnownFlags = (
       `Unknown flag --${flag} for "${command}".${suggestion === undefined ? "" : ` Did you mean --${suggestion}?`}`
     );
   }
+};
+
+const positionalLabel = (positional: CliPositionalSpec): string =>
+  positional.choices === undefined
+    ? `<${positional.name}>`
+    : `<${positional.choices.join("|")}>`;
+
+/** Throws for a missing, unknown, duplicated or extra argument of the command. */
+export const assertPositionals = (
+  command: string,
+  flags: ParsedFlags,
+  specs: CommandSpecs = commandSpecs
+): void => {
+  const spec = specs[command];
+  const declared = spec?.positionals ?? [];
+
+  for (const [index, positional] of declared.entries()) {
+    const value = flags.positional[index];
+
+    if (value === undefined) {
+      if (positional.required === true) {
+        throw new CliUsageError(
+          `Missing argument: ${positionalLabel(positional)}`
+        );
+      }
+
+      continue;
+    }
+
+    if (
+      positional.choices !== undefined &&
+      !positional.choices.includes(value)
+    ) {
+      throw new CliUsageError(
+        `Unknown argument "${value}" for "${command}". Expected one of: ${positional.choices.join(", ")}.`
+      );
+    }
+
+    if (
+      positional.flag !== undefined &&
+      flags.values[positional.flag] !== undefined
+    ) {
+      throw new CliUsageError(
+        `Got both the argument "${value}" and --${positional.flag}. Pass the ${positional.name} once.`
+      );
+    }
+  }
+
+  const extra = flags.positional[declared.length];
+
+  if (extra === undefined) {
+    return;
+  }
+
+  const strayFlag = spec?.strayArgumentFlag;
+  const hint =
+    strayFlag === undefined || flags.values[strayFlag] !== undefined
+      ? ""
+      : ` Did you mean --${strayFlag} ${extra}?`;
+
+  throw new CliUsageError(
+    `Unexpected argument "${extra}" for "${command}".${hint}`
+  );
 };

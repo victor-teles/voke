@@ -91,8 +91,7 @@ test("a route called twice with the same idempotency-key header runs once", asyn
               return { orderId: `ord_${created.length}` };
             },
             {
-              key: (request) =>
-                request.headers.get("idempotency-key") ?? undefined,
+              key: (request) => request.headers["idempotency-key"],
               validate: (request) => request.body,
             }
           ),
@@ -131,8 +130,8 @@ test("a route can answer 409 while the same request is still running", async () 
       return { ok: true };
     },
     {
-      key: (request: { headers: Headers }) =>
-        request.headers.get("idempotency-key") ?? undefined,
+      key: (request: { headers: Record<string, string | undefined> }) =>
+        request.headers["idempotency-key"],
     }
   );
   const functions = createFunctions({

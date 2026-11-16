@@ -1,0 +1,90 @@
+service: http-api-authorizers
+
+provider:
+  name: aws
+  runtime: nodejs22.x
+  stage: prod
+  region: us-east-1
+  httpApi:
+    payload: "2.0"
+    authorizers:
+      cognitoJwt:
+        type: jwt
+        identitySource: $request.header.Authorization
+        issuerUrl: https://cognito-idp.us-east-1.amazonaws.com/us-east-1_example
+        audience:
+          - example-client-id
+      customLambda:
+        type: request
+        functionName: authorizerFn
+        identitySource:
+          - $request.header.X-Api-Token
+        resultTtlInSeconds: 300
+        enableSimpleResponses: true
+      externalSimple:
+        type: request
+        functionArn: arn:aws:lambda:us-east-1:123456789012:function:external-authorizer
+        enableSimpleResponses: true
+      externalPolicy:
+        type: request
+        functionArn: arn:aws:lambda:us-east-1:123456789012:function:policy-authorizer
+
+functions:
+  authorizerFn:
+    handler: src/auth.handler
+
+  listOrders:
+    handler: src/orders.list
+    events:
+      - httpApi:
+          method: get
+          path: /orders
+          authorizer: cognitoJwt
+      - httpApi:
+          method: delete
+          path: /orders/{id}
+          authorizer:
+            name: cognitoJwt
+            scopes:
+              - orders/admin
+      - httpApi:
+          method: get
+          path: /health
+
+  sessions:
+    handler: src/sessions.handler
+    events:
+      - httpApi:
+          method: get
+          path: /sessions
+          authorizer:
+            name: customLambda
+      - httpApi:
+          method: get
+          path: /partners
+          authorizer:
+            name: externalSimple
+      - httpApi:
+          method: get
+          path: /legacy
+          authorizer:
+            name: externalPolicy
+
+  admin:
+    handler: src/admin.handler
+    events:
+      - httpApi:
+          method: post
+          path: /admin/jobs
+          authorizer:
+            type: aws_iam
+      - httpApi:
+          method: get
+          path: /admin/report
+          authorizer:
+            name: missingAuthorizer
+      - http:
+          method: post
+          path: /admin/keys
+          private: true
+          authorizer: aws_iam

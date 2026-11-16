@@ -369,7 +369,7 @@ export const loadVokeConfig = async (
   } = {}
 ): Promise<VokeConfig> => {
   const path = options.path ?? "voke.config.ts";
-  const cwd = options.cwd ?? readEnv("PWD") ?? ".";
+  const cwd = options.cwd ?? process.cwd();
   const absolutePath = isAbsolute(path) ? path : resolve(cwd, path);
   const configFile = Bun.file(absolutePath);
 

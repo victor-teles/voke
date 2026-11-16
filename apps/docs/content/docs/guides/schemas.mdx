@@ -76,6 +76,14 @@ await functions.invoke("createOrder", {
 | `schema.null()`            | `null`.                                                                                                           |
 | `schema.undefined()`       | `undefined`.                                                                                                      |
 
+Each builder declares both sides of the schema: what a caller passes and what the handler receives.
+`functions.invoke(...)`, `functions.route(...)` and `functions.sendEvent(...)` reject a wrong argument
+at compile time, and a handler that returns the wrong shape for its `output` schema does not compile.
+`schema.coerce.number()` accepts `number | string` and returns `number`.
+
+A child schema from another library may validate asynchronously, for example a Zod schema with an
+async refinement. `schema.object` and `schema.array` wait for it.
+
 ### Modifiers
 
 Modifiers return a new schema, so you can chain them.
@@ -221,7 +229,7 @@ The message starts with `Invalid payload for` and the Function's deployed name, 
 
 ### Over HTTP
 
-When a route's `params` or `body` fails its schema, the client gets status `400`. The message names the request part, and each issue path starts with that part:
+When a route's `body`, `params`, `query` or `headers` fails its schema, the client gets status `400` with the code `INVALID_REQUEST`. The message names the request part, and each issue path starts with that part. `query` and `headers` reach their schemas as plain objects of strings:
 
 ```txt
 HTTP/1.1 400 Bad Request
@@ -229,13 +237,14 @@ content-type: application/json
 
 {
   "error": {
+    "code": "INVALID_REQUEST",
     "message": "Invalid body",
     "issues": [{ "message": "Expected string", "path": ["body", "name"] }]
   }
 }
 ```
 
-The handler does not run. When the handler's return value fails the route's `output` schema, the status is `500` and the message is `Invalid result`. See [HTTP routes](/docs/guides/http-routes#errors) for every error response.
+The handler does not run. When the handler's return value fails the route's `output` schema, the client gets the generic `500` with the code `INTERNAL_SERVER_ERROR`, and the issues go to the server log only. See [HTTP routes](/docs/guides/http-routes#errors) for every error response.
 
 ## JSON Schema
 

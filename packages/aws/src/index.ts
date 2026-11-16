@@ -3,6 +3,7 @@ import type { VokeModel, VokeProvider } from "voke";
 
 import { createAwsBuildPlan } from "./build";
 import { synthesizeCloudFormationFromModel } from "./cloudformation-synthesis";
+import type { AwsRetainData } from "./data-retention";
 import { deployAwsStack, removeAwsStack } from "./deploy";
 import { createDeployAwsClients } from "./deploy-clients";
 import { createAwsDiagnostics } from "./diagnostics";
@@ -66,6 +67,7 @@ export {
   type AwsLogRetentionDays,
 } from "./lambda-settings";
 export { parameter, secret } from "./runtime-variables";
+export type { AwsDataResource, AwsRetainData } from "./data-retention";
 export { awsPolicy, type AwsPolicyStatement } from "./plugin-records";
 export type {
   AwsLambdaContext,
@@ -251,11 +253,19 @@ export interface AwsProviderOptions {
    * `awsEmulator()`; pass `floci()` from "@voke/aws/local" for Floci.
    */
   local?: LocalProvider;
+  /**
+   * Whether `voke deploy` keeps tables, buckets and generated secrets when they leave the stack,
+   * are replaced, or the stage is removed. Default `true` on every stage. A predicate decides per
+   * resource with the resolved stage: `({ stage }) => stage === "prod"`. Local AWS Providers
+   * never retain.
+   */
+  retainData?: AwsRetainData;
 }
 
 export const aws = (options: AwsProviderOptions = {}): VokeProvider => {
   const localProvider = options.local ?? awsEmulator();
   const lambda = defineAwsLambdaSettings(options.lambda);
+  const { retainData } = options;
 
   return {
     build: {
@@ -268,6 +278,7 @@ export const aws = (options: AwsProviderOptions = {}): VokeProvider => {
             region: input.region ?? input.config.region,
           }),
           lambda,
+          ...(retainData === undefined ? {} : { retainData }),
         }),
       remove: async (input) =>
         await removeAwsStack(input, {
@@ -317,7 +328,10 @@ export const aws = (options: AwsProviderOptions = {}): VokeProvider => {
     },
     synthesis: {
       synthesize: ({ model }) =>
-        synthesizeCloudFormationFromModel(model, { lambda }),
+        synthesizeCloudFormationFromModel(model, {
+          lambda,
+          ...(retainData === undefined ? {} : { retainData }),
+        }),
     },
     validate: validateAwsModel,
   };

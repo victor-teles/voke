@@ -34,3 +34,6 @@ jobs:
 
       - name: Test
         run: bun run test
+
+      - name: Test in one process
+        run: bun test

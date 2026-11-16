@@ -192,6 +192,8 @@ export const routes = (): VokePlugin => ({
 
 `voke routes`, `voke routes --help` and `voke routes list --help` print help, and `voke --help` lists Plugin commands under "Plugin commands:". `loadFunctions()` imports the project entrypoint and returns every Function, Plugin Functions included. Every command also accepts `--config`.
 
+A command that takes arguments declares them in `positionals`, for example `positionals: [{ name: "file" }]`. Voke rejects any other argument and passes the declared ones to `run` as `positional`. A command without `positionals` takes no arguments.
+
 Built-in commands win: a Plugin with `cli` cannot be named like a built-in command (`build`, `deploy`, `dev`, ...) or `help`.
 
 <Callout type="warn" title="Command dependencies end up in the Lambda bundle">

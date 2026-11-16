@@ -64,6 +64,57 @@ them from bindings.
   [Runtime Variable](/docs/guides/runtime-variables) with `.fromResource(key)`.
 </Callout>
 
+## Data retention
+
+A table, a bucket and a generated secret hold data that exists nowhere else, and a redeploy cannot
+recreate it. Voke calls them **data-bearing resources** and keeps them by default, on every stage:
+`dynamodbTable()`, `s3Bucket()` and `secret()` get `DeletionPolicy: Retain`,
+`UpdateReplacePolicy: Retain` and the metadata entry `VokeRetain: true` in the template. When such a
+resource leaves the stack, is replaced, or the stage is removed, CloudFormation leaves it in the
+account instead of deleting it.
+
+The other builders are not data-bearing. A queue and a stream carry records in transit for a bounded
+time, and a retained one would have no consumer but still cost money. A topic and an event bus store
+nothing, and a parameter's value is in your config.
+
+To delete data-bearing resources with their stack, set `retainData` on the AWS Provider. It is
+`true`, `false`, or a predicate that decides per resource with the resolved stage, including
+`--stage`:
+
+```ts title="voke.config.ts" twoslash
+import { aws } from "@voke/aws";
+import { dynamodbTable, s3Bucket } from "@voke/aws/cloudformation";
+import { defineConfig } from "voke";
+
+export default defineConfig({
+  name: "users",
+  // Keep data on prod only; every other stage deletes it with the stack.
+  provider: aws({ retainData: ({ stage }) => stage === "prod" }),
+  resources: {
+    usersTable: dynamodbTable({ partitionKey: "id" }),
+    cacheBucket: s3Bucket(),
+  },
+});
+```
+
+The predicate receives `{ key, stage, type }`: the resource key, the stage and the CloudFormation
+type, so `({ key }) => key !== "cacheBucket"` keeps every data-bearing resource except one. Decide
+retention here, not from `process.env.VOKE_STAGE` in the config: the config file does not see the
+`--stage` flag.
+
+The resource key, and a table's `partitionKey` and `sortKey`, identify the resource. Renaming the
+key or changing a table's keys means a new, empty resource. `voke deploy` refuses such a change
+until you pass `--accept-data-loss`. See
+[Changes that remove or replace data](/docs/guides/deploy#changes-that-remove-or-replace-data).
+
+Raw resource definitions in `resources` (objects with `cloudFormationType` instead of a builder)
+pass through untouched: Voke adds no policy to them, whatever their type. `voke deploy` still
+refuses to remove or replace one whose type is a table, a bucket or a secret.
+
+CloudFormation applies the policy of the template that is already deployed. A stack deployed with an
+earlier Voke version has no policy yet, so a resource you remove in the first deploy after the
+upgrade is still deleted. Deploy once without removing anything to protect it.
+
 ## Read a resource from a Function
 
 Every Function gets one environment variable per declared resource:

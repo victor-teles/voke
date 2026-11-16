@@ -132,14 +132,15 @@ See [Remote Functions](/docs/guides/remote-functions) for the full workflow.
 
 ## AWS Provider options
 
-`aws()` from `@voke/aws` takes two options, `lambda` and `local`:
+`aws()` from `@voke/aws` takes three options, `lambda`, `local` and `retainData`:
 
-| Option                    | Type                           | Default         | Description                                                                                                  |
-| ------------------------- | ------------------------------ | --------------- | ------------------------------------------------------------------------------------------------------------ |
-| `lambda.runtime`          | `"nodejs22.x" \| "nodejs24.x"` | `"nodejs22.x"`  | Lambda Node.js runtime for every Function.                                                                   |
-| `lambda.architecture`     | `"arm64" \| "x86_64"`          | `"arm64"`       | Lambda architecture for every Function.                                                                      |
-| `lambda.logRetentionDays` | `number`                       | `14`            | How long each Function's log group keeps logs. One of the CloudWatch Logs values listed below.               |
-| `local`                   | `LocalProvider`                | `awsEmulator()` | The Local AWS Provider for `voke local` and `voke dev`: `awsEmulator()` or `floci()` from `@voke/aws/local`. |
+| Option                    | Type                                                                             | Default         | Description                                                                                                                                                                                                                          |
+| ------------------------- | -------------------------------------------------------------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `lambda.runtime`          | `"nodejs22.x" \| "nodejs24.x"`                                                   | `"nodejs22.x"`  | Lambda Node.js runtime for every Function.                                                                                                                                                                                           |
+| `lambda.architecture`     | `"arm64" \| "x86_64"`                                                            | `"arm64"`       | Lambda architecture for every Function.                                                                                                                                                                                              |
+| `lambda.logRetentionDays` | `number`                                                                         | `14`            | How long each Function's log group keeps logs. One of the CloudWatch Logs values listed below.                                                                                                                                       |
+| `local`                   | `LocalProvider`                                                                  | `awsEmulator()` | The Local AWS Provider for `voke local` and `voke dev`: `awsEmulator()` or `floci()` from `@voke/aws/local`.                                                                                                                         |
+| `retainData`              | `boolean \| (resource: { key: string; stage: string; type: string }) => boolean` | `true`          | Whether `voke deploy` and `voke remove` keep tables, buckets and secrets with their data. A predicate decides per resource and stage. Local AWS Providers never retain. See [Data retention](/docs/guides/resources#data-retention). |
 
 `logRetentionDays` accepts only these values: 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653. Another value is a `VokeConfigError` that suggests the nearest allowed values.
 
@@ -205,15 +206,16 @@ export const report = fn({
 
 A freshly deployed stack needs no tuning. These defaults apply unless you set the value:
 
-| Setting                | Default                                   | Where to change it                                              |
-| ---------------------- | ----------------------------------------- | --------------------------------------------------------------- |
-| Function timeout       | 15 seconds                                | `runtime.timeout`; per Function `synthesis.timeout`             |
-| Function memory        | 1024 MB                                   | `runtime.memory`; per Function `synthesis.memory`               |
-| HTTP CORS              | off                                       | `api.cors`                                                      |
-| Lambda Node.js runtime | `nodejs22.x`                              | `aws({ lambda: { runtime } })`; per Function `awsLambda()`      |
-| Lambda architecture    | `arm64`                                   | `aws({ lambda: { architecture } })`; per Function `awsLambda()` |
-| Log retention          | 14 days                                   | `aws({ lambda: { logRetentionDays } })`                         |
-| SQS visibility timeout | 6 × the consumer's timeout + batch window | `sqsQueue({ visibilityTimeoutSeconds })`                        |
+| Setting                | Default                                         | Where to change it                                              |
+| ---------------------- | ----------------------------------------------- | --------------------------------------------------------------- |
+| Function timeout       | 15 seconds                                      | `runtime.timeout`; per Function `synthesis.timeout`             |
+| Function memory        | 1024 MB                                         | `runtime.memory`; per Function `synthesis.memory`               |
+| HTTP CORS              | off                                             | `api.cors`                                                      |
+| Lambda Node.js runtime | `nodejs22.x`                                    | `aws({ lambda: { runtime } })`; per Function `awsLambda()`      |
+| Lambda architecture    | `arm64`                                         | `aws({ lambda: { architecture } })`; per Function `awsLambda()` |
+| Log retention          | 14 days                                         | `aws({ lambda: { logRetentionDays } })`                         |
+| Data retention         | tables, buckets and secrets kept on every stage | `aws({ retainData })`                                           |
+| SQS visibility timeout | 6 × the consumer's timeout + batch window       | `sqsQueue({ visibilityTimeoutSeconds })`                        |
 
 An explicit queue visibility timeout lower than a consumer's timeout is an error.
 

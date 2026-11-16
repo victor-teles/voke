@@ -135,6 +135,7 @@ export { toContractJsonSchema } from "./remote";
 export { route } from "./route-builder";
 export {
   projectFunctionEntries,
+  type CliPositionalSpec,
   type FunctionExecution,
   type FunctionExecutionKind,
   type FunctionWrap,

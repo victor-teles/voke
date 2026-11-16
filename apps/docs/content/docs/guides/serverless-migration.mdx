@@ -9,16 +9,28 @@ After this page you can turn a Serverless Framework service into a Voke project 
 voke migrate serverless ./serverless.yml --out ./voke-migration
 ```
 
-Both arguments are optional. The defaults are `./serverless.yml` and `./voke-migration`. The command prints `Wrote migration skeleton to ./voke-migration`.
+Both arguments are optional. The defaults are `./serverless.yml` and `./voke-migration`. The command prints `Wrote migration skeleton to ./voke-migration`. When the report has [blocking tasks](#blocking-tasks), it also prints their count and one line per task:
+
+```txt
+Wrote migration skeleton to ./voke-migration
+2 blocking task(s) in ./voke-migration/MIGRATION_REPORT.md:
+- HTTP API route POST /admin/jobs on admin is generated behind migrationBlocked and denies every request.
+- Port the logic of Request Authorizer Function authorizerFn (src/auth.handler) into its generated skeleton.
+```
 
 ## What the migrator reads
 
 The migrator reads the service name, provider settings (stage, region, runtime, environment, IAM statements), functions and their events, native CloudFormation resources under `resources.Resources`, package patterns, and plugins.
 
-<Callout type="warn" title="Limits of the YAML parser">
-  Its YAML parser is small and has no dependencies. It covers the common
-  Serverless Framework shapes: nested maps, lists, and scalars. Treat YAML
-  anchors, custom tags, and plugin-specific `custom` settings as manual work.
+The file is read with Bun's YAML parser, so anchors, aliases, merge keys (`<<: *common`) and block scalars (`|` and `>`) resolve to their real values. CloudFormation short-form tags such as `!Ref X`, `!GetAtt Table.Arn` and `!Join ['-', [a, b]]` are read as their long form (`{ Ref: X }`, `{ "Fn::GetAtt": [Table, Arn] }`).
+
+<Callout type="warn" title="Files the migrator does not read">
+  The command stops, and writes no file, when it cannot read the file
+  faithfully: a YAML syntax error, an empty file, a list or several documents at
+  the root, an alias that refers to itself, or a tag followed by a block value
+  (`Value: !Join` with the list on the next lines, or `!Sub |`). For a
+  block-form tag, the error lists every such line; write the value in the long
+  form, for example `Fn::Join:` in place of `!Join`.
 </Callout>
 
 ## What it generates
@@ -32,6 +44,7 @@ The migrator reads the service name, provider settings (stage, region, runtime, 
     <File name="SERVERLESS_COMPATIBILITY.md" />
     <Folder name="src" defaultOpen>
       <File name="index.ts" />
+      <File name="authorizers.ts" />
       <Folder name="routes" defaultOpen>
         <File name="get-user.ts" />
       </Folder>
@@ -46,8 +59,9 @@ The migrator reads the service name, provider settings (stage, region, runtime, 
 - `voke.config.ts`: the project name, the `aws()` Provider, stage, region, top-level `environment`, and top-level `resources`. It does not list Functions.
 - `src/index.ts`: the project entrypoint. It builds the Function Registry with `createFunctions(...)`, mounts the routes, and exports the Gateway with `voke(functions, { config })`.
 - `src/routes/*.ts`: Route Builder skeletons for `httpApi` and `http` (REST API) events. Path parameters such as `{id}` become `:id`.
+- `src/authorizers.ts`: the Authorizer Registry and Request Authorizer Function skeletons, only when a route had an authorizer. See [Authorizers](#authorizers).
 - `src/functions/*.ts`: SQS Event Source Functions and EventBridge worker skeletons, with `src/functions/index.ts` as their Function Registry.
-- `package.json` with the `build`, `clean`, `dev`, `synth`, `test`, and `typecheck` scripts, and `tsconfig.json`.
+- `package.json` and `tsconfig.json`: the same files `voke create` writes. The package name is the service name in kebab case, without a scope. The scripts are `build`, `clean`, `deploy`, `dev`, `local`, `remove`, `synth`, `test`, and `typecheck`, and the `tsconfig.json` stands alone (it extends nothing).
 - `MIGRATION_REPORT.md` and `SERVERLESS_COMPATIBILITY.md`, described below.
 
 `voke build` generates the Lambda handler of every Function from the entrypoint, so the Serverless `handler` paths are not carried over. Each skeleton keeps the original handler path in a comment or in its placeholder response.
@@ -104,8 +118,24 @@ A `provider.runtime` of `nodejs22.x` or `nodejs24.x` becomes `aws({ lambda: { ru
 
 <Callout type="warn" title="Other runtimes are dropped">
   Other runtimes, such as `nodejs20.x`, are dropped, and the Functions use the
-  default runtime, `nodejs22.x`.
+  default runtime, `nodejs22.x`. The report has a task for each dropped runtime.
 </Callout>
+
+### Values the migrator does not copy
+
+Only literal values reach `voke.config.ts`: a string, number or boolean without `${`. The migrator resolves no Serverless variable and no CloudFormation reference. Each value it leaves out gets a task that quotes the original expression:
+
+| Value that is not a literal | Generated                            | Task                                                                                 |
+| --------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------ |
+| `provider.stage`            | No `stage`                           | Medium risk. Voke takes the stage from `voke deploy --stage <name>` or `VOKE_STAGE`. |
+| `provider.region`           | No `region`                          | High risk. Without it Voke uses `AWS_REGION`, then `us-east-1`.                      |
+| An `environment` value      | The key is left out of `environment` | High risk, one per key.                                                              |
+
+A stage must also be letters, digits and `-` only. For `${ssm:...}` and other secrets, read the value at runtime with [Runtime Variables](/docs/guides/runtime-variables). For a `Ref` or `Fn::GetAtt` of a resource, declare the resource and read it through a [resource binding](/docs/guides/resources). A value you can compute, write in `voke.config.ts`, which is TypeScript.
+
+### Settings it reports but does not generate
+
+All migrated routes share one `http(...)` Function, so per-function settings have no single target. One medium-risk task per function lists its `timeout`, `memorySize`, `layers` and dropped `runtime`, and the function `environment` keys that were renamed (`TABLE_NAME` of `listOrders` becomes `LIST_ORDERS_TABLE_NAME` in the one top-level `environment`). `provider.deploymentBucket` and `package.individually` get a low-risk task each.
 
 ### A generated Function
 
@@ -165,16 +195,61 @@ Native CloudFormation resources become top-level `resources` in `voke.config.ts`
 | `AWS::Events::EventBus`       | `eventBus()`             |
 | `AWS::SecretsManager::Secret` | `secret()`               |
 
-The helpers come from `@voke/aws/cloudformation`. A queue, topic, bucket, event bus, or secret with any `Properties`, and every other resource type, is left out and reported as manual work with its type. See [Resources](/docs/guides/resources).
+The helpers come from `@voke/aws/cloudformation`. A queue, topic, bucket, event bus, or secret with any `Properties`, and every other resource type, is left out and reported as manual work with its type. A DynamoDB table is generated only when nothing is lost: its `Properties` hold only `KeySchema`, `BillingMode` and `AttributeDefinitions`, and every attribute has type `S`. A `TableName`, an index, a stream or a number key sends the table to manual work. An SSM parameter whose `Value` is not a literal is manual work too. See [Resources](/docs/guides/resources).
+
+### Authorizers
+
+The migrator reads `provider.httpApi.authorizers` and the `authorizer` of each route. A route that had an authorizer is never generated public: it gets the equivalent [HTTP Authorizer](/docs/guides/authorizers), or it is generated closed behind `migrationBlocked` with a blocking task.
+
+| Serverless Framework setting                                                                               | Generated                                                                                 | Report                                                                   |
+| ---------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `httpApi` event without `authorizer`                                                                       | A public route                                                                            | Supported                                                                |
+| A JWT authorizer (`type: jwt` or no `type`) with a literal `issuerUrl` and `audience`                      | `jwtAuthorizer({ issuer, audience, identitySource })`                                     | Supported                                                                |
+| The same, with `scopes` on the route                                                                       | The JWT Authorizer                                                                        | Blocking: Voke does not enforce scopes. Check the `scope` claim yourself |
+| `type: request` with `functionName` of a function in the file that has no events                           | `lambdaAuthorizer({ function })` and a Request Authorizer Function that denies everything | Blocking: port the authorizer logic                                      |
+| `type: request` with a literal `functionArn`, `enableSimpleResponses: true` and payload `2.0`              | `lambdaAuthorizer({ function: { arn } })`                                                 | High: allow the new API to invoke the function                           |
+| Any other `type: request`, a JWT with values that are not literals, `type: aws_iam`, `id`, an unknown name | The route uses `migrationBlocked`                                                         | Blocking                                                                 |
+| `http` (REST API) event with an `authorizer` or `private: true`                                            | The route uses `migrationBlocked`                                                         | Blocking: REST API authorizers and API keys are not converted            |
+
+`resultTtlInSeconds` becomes `cacheTtlSeconds` when it is a number; otherwise the Lambda Authorizer Cache TTL stays `0`. Every protected route names its authorizer, and `http(...)` sets no default. Authorizers that no route uses are not generated; one low-risk task lists them.
+
+`migrationBlocked` is a Lambda Request Authorizer whose generated Request Authorizer Function returns `{ authorized: false }`, so its routes deny every request under `voke dev`, in tests, and once deployed:
+
+```txt title="src/authorizers.ts"
+export const authorizers = createAuthorizers({
+  "cognitoJwt": jwtAuthorizer({
+    issuer: "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_example",
+    audience: ["example-client-id"],
+  }),
+  "migrationBlocked": lambdaAuthorizer({ function: "migrationBlocked" }),
+});
+
+// Routes whose authorizer could not be migrated use this. See MIGRATION_REPORT.md.
+export const migrationBlocked = requestAuthorizer({
+  handler: () => ({ authorized: false }),
+});
+```
+
+To open a blocked route, register an equivalent authorizer, name it in the route's `authorizer`, and finish the blocking task. When no route uses `migrationBlocked`, delete it from `src/authorizers.ts` and from `createFunctions(...)` in `src/index.ts`.
+
+<Callout type="info" title="JWT Authorizers under voke dev">
+  `voke dev` and tests do not verify JWTs yet; API Gateway enforces a JWT
+  Authorizer once deployed. Request Authorizer Functions, `migrationBlocked`
+  among them, run everywhere.
+</Callout>
+
+### CORS
+
+`provider.httpApi.cors: true` becomes `api: { cors: true }` in `voke.config.ts`: any origin, method and header, without credentials. A `cors` object, and `cors` on an `http` event, get a medium-risk task instead; set `api.cors` yourself. Until then browsers block cross-origin calls.
 
 ## Read the reports
 
 `MIGRATION_REPORT.md` has these sections:
 
-- **Summary**: counts of generated files, converted behavior, manual tasks, and unknown fields.
+- **Summary**: counts of generated files, converted behavior, manual tasks, blocking tasks, and unknown fields.
 - **Generated files**: each path, its purpose, and a confidence level.
 - **Converted behavior**: what the migrator mapped, by area, with the file it wrote.
-- **Manual work by risk**: tasks grouped as high, medium, and low risk, each with an area, a reason, and a confidence level.
+- **Manual work by risk**: tasks grouped as blocking, high, medium, and low risk, each with an area, a reason, and a confidence level.
 - **Plugin notes**, **Unknown fields**, **Compatibility projections** (supported features, unsupported features, manual steps), and the **Function inventory** and **Event inventory** of the service.
 
 Confidence is `high`, `medium`, or `low`. `high` marks safe config conversions, and `medium` marks starter skeletons that need review. Areas are `routing`, `events`, `resources`, `iam`, `build`, `plugins`, and `unknown-fields`. When Voke knows why it cannot generate something, the task gives the reason, for example:
@@ -182,6 +257,12 @@ Confidence is `high`, `medium`, or `low`. `high` marks safe config conversions, 
 ```txt
 CloudFormation resource AuditLog (AWS::Logs::LogGroup) requires manual migration because Voke cannot safely generate an equivalent config helper.
 ```
+
+### Blocking tasks
+
+A blocking task means the generated project differs from the Serverless service in who can call a route. Do not move traffic until it is done. The `### Blocking` section comes first in the report, and `voke migrate serverless` prints each blocking task. The affected routes are generated closed, so the skeleton is safe to deploy, but those routes deny every request.
+
+A feature is listed under supported features only when it reached the generated code: a route only when it is public in both systems or its authorizer converted with no task.
 
 Known plugins get a status and a note. For example, `serverless-offline` is reported as covered by `voke dev` and `voke local start`, and bundler plugins such as `serverless-esbuild` map to `voke build`, which bundles with Bun.
 
@@ -192,12 +273,13 @@ Known plugins get a status and a note. For example, `serverless-offline` is repo
 | Serverless Framework pattern             | Status when present                                                              | Voke output                                 |
 | ---------------------------------------- | -------------------------------------------------------------------------------- | ------------------------------------------- |
 | `service`                                | Supported                                                                        | Project name in `voke.config.ts`            |
-| `provider.stage`, `provider.region`      | Supported                                                                        | `stage` and `region` in `voke.config.ts`    |
-| `provider.environment`                   | Supported                                                                        | Top-level `environment` in `voke.config.ts` |
+| `provider.stage`, `provider.region`      | Supported when literal, otherwise manual work                                    | `stage` and `region` in `voke.config.ts`    |
+| `provider.environment`                   | Supported when every value is literal, otherwise manual work                     | Top-level `environment` in `voke.config.ts` |
 | `provider.iamRoleStatements`             | Reported                                                                         | Manual IAM review task                      |
 | `package.patterns`                       | Reported                                                                         | Manual build review task                    |
-| `functions.*.events[].httpApi`           | Supported                                                                        | Route Builder skeleton                      |
-| `functions.*.events[].http`              | Supported                                                                        | Route Builder skeleton                      |
+| `functions.*.events[].httpApi`           | Supported, or manual work when a route is behind `migrationBlocked`              | Route Builder skeleton                      |
+| `functions.*.events[].http`              | Supported, or manual work when a route is behind `migrationBlocked`              | Route Builder skeleton                      |
+| `provider.httpApi.authorizers`           | Supported, or manual work when an authorizer has a task                          | `src/authorizers.ts`                        |
 | `functions.*.events[].sqs`               | Supported when the queue maps to a generated `sqsQueue()`, otherwise manual work | SQS Event Source Function                   |
 | `functions.*.events[].eventBridge`       | Supported skeleton                                                               | Function skeleton                           |
 | Native CloudFormation resources          | Supported skeleton                                                               | Top-level `resources` in `voke.config.ts`   |
@@ -223,7 +305,7 @@ Run `voke migrate serverless` into a new directory, then run `bun install` there
 
 ### Read the report
 
-Start with the high-risk tasks in `MIGRATION_REPORT.md`, then the unsupported features.
+Start with the blocking tasks in `MIGRATION_REPORT.md`, then the high-risk tasks and the unsupported features.
 
 </Step>
 <Step>

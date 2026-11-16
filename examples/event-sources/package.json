@@ -6,8 +6,8 @@
   "type": "module",
   "scripts": {
     "build": "voke build",
-    "deploy": "voke deploy",
-    "remove": "voke remove",
+    "deploy": "voke deploy --stage dev",
+    "remove": "voke remove --stage dev",
     "synth": "voke synth",
     "test": "bun test",
     "typecheck": "bunx tsgo --project tsconfig.json --noEmit",

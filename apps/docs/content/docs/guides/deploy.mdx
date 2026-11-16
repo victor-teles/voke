@@ -109,6 +109,42 @@ After each deploy Voke writes `.voke/outputs/<stage>.json` with the stack id, re
 
 See [Testing](/docs/guides/testing#smoke-test-a-deployed-stage) for a smoke test that uses it.
 
+## Changes that remove or replace data
+
+Tables, buckets and secrets hold data, and Voke keeps them when they leave the stack. See
+[Data retention](/docs/guides/resources#data-retention). Before it applies a change set, `voke deploy`
+checks whether the change set would remove or replace one of them. That happens when you rename its
+resource key, delete it from `resources`, or change a table's `partitionKey` or `sortKey`. If so, the
+deploy stops, deletes the change set and changes nothing:
+
+```txt
+Deploying hello-api-dev would remove or replace 1 resource(s) that hold data:
+  UsersTable (AWS::DynamoDB::Table, hello-api-dev-UsersTable-1ABC) would leave the stack. It is kept with its data, but no Function is bound to it afterwards.
+Nothing was changed. A resource key, and a table's partitionKey and sortKey, identify the resource: undo the rename or key change to keep using it.
+To go ahead anyway, run voke deploy again with --accept-data-loss.
+```
+
+Each line says what happens to the resource. A kept resource stays in the account, outside the stack.
+A resource that `retainData` does not keep `would be DELETED with its data`. A replacement creates a
+new, empty resource and keeps or deletes the old one. In every case your Functions lose the data:
+they are bound to a new, empty resource or to none.
+
+`voke deploy --accept-data-loss` applies the change set anyway. Afterwards it lists each resource it
+kept, with the command that deletes it:
+
+```txt
+Kept 1 resource(s) that hold data. No stack manages them and AWS still bills them:
+  AWS::DynamoDB::Table  hello-api-dev-UsersTable-1ABC
+    delete with: aws dynamodb delete-table --table-name hello-api-dev-UsersTable-1ABC --region us-east-1
+```
+
+`--accept-data-loss` applies to one run. Do not put it in a CI script: there it would accept every
+future data loss without anyone reading the message. A dry run never stops; it prints the same lines
+as `Warning:`.
+
+Every change set runs with CloudFormation's `RetainExceptOnCreate`, so a failed deploy that rolls
+back deletes the resources it created, even retained ones. No empty table is left behind.
+
 ## Remove a stage
 
 ```bash
@@ -116,6 +152,34 @@ voke remove --stage dev
 ```
 
 In a terminal, Voke asks you to type `<name>-<stage>` to confirm. Pass `--yes` to skip the prompt. Outside a terminal, for example in CI, `--yes` is required. A stage that is not deployed reports `Nothing to remove`. If a resource cannot be deleted, for example a bucket that still holds objects, Voke names it and the reason.
+
+`voke remove` deletes the stack but keeps its tables, buckets and secrets with their data. It lists
+each one it kept:
+
+```txt
+Removing stack hello-api-dev
+Kept 2 resource(s) that hold data. No stack manages them and AWS still bills them:
+  AWS::DynamoDB::Table  hello-api-dev-UsersTable-1ABC
+    delete with: aws dynamodb delete-table --table-name hello-api-dev-UsersTable-1ABC --region us-east-1
+  AWS::S3::Bucket  hello-api-dev-uploadsbucket-9xyz
+    delete with: aws s3 rb s3://hello-api-dev-uploadsbucket-9xyz --force --region us-east-1
+Removed hello-api-dev
+```
+
+A kept resource is billed until you delete it. Three ways to handle one, after a remove or after
+`--accept-data-loss`:
+
+- **Delete it** with the printed command, once you no longer need the data.
+- **Move the data**: copy it into the new resource that the stack now manages, then delete the old
+  one.
+- **Bring it back under a stack** with CloudFormation resource import. See AWS's
+  [Import AWS resources into a CloudFormation stack](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/import-resources.html).
+  An import change set can only import: run one that adds the resource to the stack's template under
+  the same logical id, with nothing else changed, then run `voke deploy`. Voke has no import command.
+
+To delete a stage's data together with its stack, set `retainData` to `false` for that stage (see
+[Data retention](/docs/guides/resources#data-retention)), run `voke deploy`, then run `voke remove`.
+The deploy writes the new policy into the stack first, and the remove then deletes the resources.
 
 ## Permissions for the deploying identity
 

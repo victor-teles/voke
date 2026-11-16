@@ -300,7 +300,9 @@ export default {
     },
     deploy: {
       deploy: async (input) => {
-        calls.push("deploy:" + input.stage + ":" + input.dryRun);
+        calls.push(
+          "deploy:" + input.stage + ":" + input.dryRun + ":" + input.acceptDataLoss
+        );
         return { id: "routed-" + input.stage, outputs: {}, status: "dry-run" };
       },
       remove: async (input) => {
@@ -320,11 +322,22 @@ export default {
       run: () => {},
     }
   );
+  await runCli(
+    ["deploy", "--config", configPath, "--stage", "dev", "--accept-data-loss"],
+    {
+      output: ignoreOutput,
+      run: () => {},
+    }
+  );
   await runCli(["remove", "--config", configPath, "--stage", "dev", "--yes"], {
     output: ignoreOutput,
   });
 
-  expect(calls).toEqual(["deploy:dev:true", "remove:dev"]);
+  expect(calls).toEqual([
+    "deploy:dev:true:false",
+    "deploy:dev:false:true",
+    "remove:dev",
+  ]);
 });
 
 test("voke experimental is no longer a command", async () => {

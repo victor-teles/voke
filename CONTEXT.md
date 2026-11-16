@@ -88,6 +88,14 @@ _Avoid_: CloudFormation only, Lambda handler helper
 A local development implementation that emulates AWS services for a **Voke Project**.
 _Avoid_: Provider, Gateway provider, local runtime
 
+**Data-Bearing Resource**:
+A resource whose stored state exists nowhere else and cannot be recreated by a redeploy: a table, a bucket or a generated secret.
+_Avoid_: stateful resource, persistent resource
+
+**Retained Resource**:
+A **Data-Bearing Resource** that a deploy or a remove left in the account, outside any stack.
+_Avoid_: orphan, leftover
+
 **HTTP API**:
 The AWS API Gateway HTTP API v2 resource synthesized from route-backed **Functions** in a **Gateway**.
 _Avoid_: REST API, generic AWS gateway
@@ -128,6 +136,14 @@ _Avoid_: Session duration, JWT expiration
 The normalized authorizer data available to a route-backed **Function** after an **HTTP Authorizer** allows the request.
 _Avoid_: Raw API Gateway request context, parsed auth header
 
+**Route Request**:
+The object a route handler receives: the validated `params`, `query`, `headers` and `body`, the **Route Auth Context**, and the original `Request` as `raw`. `query` and `headers` are plain objects.
+_Avoid_: Hono context, event, req object
+
+**Error Envelope**:
+The JSON body `{ error: { code, message, issues?, details? } }` the **Gateway** writes for a failed HTTP request.
+_Avoid_: error payload, problem details
+
 **Authorizer Context Schema**:
 An optional schema for the context returned by a **Request Authorizer Function**.
 _Avoid_: JWT claims schema, route body schema
@@ -139,6 +155,10 @@ _Avoid_: Production identity provider emulation, handler-only auth test
 **Authorizer Registry**:
 The named catalog of **HTTP Authorizers** available to an **HTTP API**.
 _Avoid_: Inline authorizer list, auth middleware stack
+
+**Blocking Migration Task**:
+A manual task in a Serverless migration report that must be done before traffic moves, because the generated project differs from the Serverless service in who can call a route.
+_Avoid_: warning, unsupported feature
 
 **Default HTTP Authorizer**:
 The **HTTP Authorizer** applied to route-backed **Functions** unless a route chooses a different authorizer behavior.
@@ -359,6 +379,10 @@ _Avoid_: idempotency cache, persistence layer
 - A **Function** can load **Runtime Variables** without making those values part of its **Function Contract**.
 - A **Runtime Variable** is declared on the **Function** that loads it.
 - A **Function** declares **Runtime Variables** through one per-Function variable catalog.
+- A **Data-Bearing Resource** declared with an **AWS Provider** builder is retained by default on every stage; `voke deploy` refuses to remove or replace one unless the run passes `--accept-data-loss`.
+- `aws({ retainData })` is the one opt-out from retention, decided per resource with the resolved stage; a **Local AWS Provider** never retains.
+- Raw resource definitions in `voke.config.ts` are never retained by Voke, whatever their type.
+- `voke remove` lists each **Retained Resource** it left behind with the command that deletes it.
 - A **Runtime Variable** can reference either an external AWS name or a Voke-managed resource key.
 - External AWS names and Voke-managed resource keys use visually distinct authoring forms for **Runtime Variables**.
 - A **Runtime Variable Key** is independent from the **Runtime Variable** source name.

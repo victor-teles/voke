@@ -35,21 +35,27 @@
   },
   "Resources": {
     "ArchiveBucket": {
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
       "Metadata": {
         "VokeBinding": {
           "Attribute": "name",
           "Resource": "archiveBucket"
-        }
+        },
+        "VokeRetain": true
       },
       "Properties": {},
       "Type": "AWS::S3::Bucket"
     },
     "UploadsBucket": {
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
       "Metadata": {
         "VokeBinding": {
           "Attribute": "name",
           "Resource": "uploadsBucket"
-        }
+        },
+        "VokeRetain": true
       },
       "Properties": {
         "NotificationConfiguration": {

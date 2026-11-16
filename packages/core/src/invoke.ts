@@ -20,6 +20,7 @@ import type {
   ProviderInvokeTarget,
   VokeProvider,
 } from "./provider";
+import { error as responseError } from "./response";
 import { Voke } from "./route-builder";
 import { readEnv, sleep } from "./runtime-env";
 import { formatValidationIssue, readStandardResult } from "./standard-schema";
@@ -163,11 +164,14 @@ export type RouteReturn<TResult> =
   | Response
   | Promise<Response>;
 
+/** Query string values or headers without a schema: plain strings, header names lower-case. */
+type RouteRecord = Record<string, string | undefined>;
+
 export interface RouteRequest<
   TBody = undefined,
   TParams = Record<string, string>,
-  TQuery = URLSearchParams,
-  THeaders = Headers,
+  TQuery = RouteRecord,
+  THeaders = RouteRecord,
 > {
   readonly auth: RouteAuthContext;
   readonly body: TBody;
@@ -190,17 +194,34 @@ export type RouteHandler<
   context: InvokeContext<TVariables>
 ) => RouteReturn<TResult>;
 
+// A slot without a schema infers to the wide `StandardSchemaV1<unknown, unknown>`, so a schema
+// whose two sides are both `unknown` cannot be told apart from "no schema" and keeps the fallback.
+// A schema that types either side is read as declared, even when the other side is `unknown`.
+type IsUntypedSchema<TSchema> =
+  unknown extends StandardSchemaInput<TSchema>
+    ? unknown extends StandardSchemaOutput<TSchema>
+      ? true
+      : false
+    : false;
+
 type RouteSchemaOutput<TSchema, TFallback> = TSchema extends AnyStandardSchema
-  ? unknown extends StandardSchemaOutput<TSchema>
+  ? IsUntypedSchema<TSchema> extends true
     ? TFallback
     : StandardSchemaOutput<TSchema>
   : TFallback;
 
 type RouteSchemaInput<TSchema, TFallback> = TSchema extends AnyStandardSchema
-  ? unknown extends StandardSchemaInput<TSchema>
+  ? IsUntypedSchema<TSchema> extends true
     ? TFallback
     : StandardSchemaInput<TSchema>
   : TFallback;
+
+// With an `output` schema the handler returns what that schema accepts; without one, anything.
+// A `Response` is always allowed (`RouteReturn`) and is not validated.
+type RouteHandlerResult<TOutputSchema, TResult> =
+  TOutputSchema extends AnyStandardSchema
+    ? StandardSchemaInput<TOutputSchema>
+    : TResult;
 
 /** Documentation for a route. The Gateway ignores it at run time. */
 export interface RouteMeta {
@@ -229,9 +250,9 @@ export interface RouteDefinitionInput<
   readonly handler: RouteHandler<
     RouteSchemaOutput<TBodySchema, undefined>,
     RouteSchemaOutput<TParamsSchema, Record<string, string>>,
-    RouteSchemaOutput<TQuerySchema, Record<string, string>>,
-    RouteSchemaOutput<THeadersSchema, Headers>,
-    TResult,
+    RouteSchemaOutput<TQuerySchema, RouteRecord>,
+    RouteSchemaOutput<THeadersSchema, RouteRecord>,
+    RouteHandlerResult<TOutputSchema, TResult>,
     TVariables
   >;
   readonly headers?: THeadersSchema;
@@ -301,14 +322,14 @@ export interface RouteInvocationInput<TRoute> {
     ? RouteSchemaInput<TSchema, undefined>
     : undefined;
   readonly headers?: TRoute extends { readonly headers?: infer TSchema }
-    ? RouteSchemaInput<TSchema, Headers | Record<string, string>>
-    : Headers | Record<string, string>;
+    ? RouteSchemaInput<TSchema, Record<string, string>>
+    : Record<string, string>;
   readonly params?: TRoute extends { readonly params?: infer TSchema }
     ? RouteSchemaInput<TSchema, Record<string, string>>
     : Record<string, string>;
   readonly query?: TRoute extends { readonly query?: infer TSchema }
-    ? RouteSchemaInput<TSchema, URLSearchParams | Record<string, string>>
-    : Record<string, string> | URLSearchParams;
+    ? RouteSchemaInput<TSchema, Record<string, string>>
+    : Record<string, string>;
   readonly request?: Request;
 }
 
@@ -1093,71 +1114,190 @@ const parseResult = async <TOutputSchema extends AnyStandardSchema>(
   )) as StandardSchemaOutput<TOutputSchema>;
 };
 
+// The keys a `@voke/schema` object exposes, for checks other validators cannot support.
+const schemaObjectKeys = (schema: unknown): readonly string[] | undefined => {
+  if (typeof schema !== "object" || schema === null || !("~voke" in schema)) {
+    return undefined;
+  }
+
+  const metadata = (schema as { "~voke"?: { keys?: readonly string[] } })[
+    "~voke"
+  ];
+
+  return metadata?.keys;
+};
+
+type RouteRequestPart = "body" | "headers" | "params" | "query";
+
+interface RouteRequestErrorOptions extends InvokeErrorOptions {
+  readonly part: RouteRequestPart;
+  readonly status: 400 | 415;
+}
+
+/** The request does not fit the route: the client's mistake. Callers outside the Gateway see an InvokeError. */
+// oxlint-disable-next-line eslint/max-classes-per-file -- an internal InvokeError subclass, kept beside the class it extends.
+class RouteRequestError extends InvokeError {
+  readonly part: RouteRequestPart;
+  readonly status: 400 | 415;
+
+  // oxlint-disable-next-line unicorn/custom-error-definition -- keeps the InvokeError name: functions.route callers see an InvokeError.
+  constructor(message: string, options: RouteRequestErrorOptions) {
+    super(message, options);
+    this.part = options.part;
+    this.status = options.status;
+  }
+}
+
+const routeName = (route: AnyRouteDefinition): string =>
+  `${route.method} ${route.path}`;
+
 const parseRoutePart = async <TSchema extends AnyStandardSchema | undefined>(
   schema: TSchema,
   value: RouteSchemaInput<TSchema, unknown>,
-  part: string,
-  route: AnyRouteDefinition,
-  code: Extract<
-    InvokeErrorCode,
-    "INVALID_PAYLOAD" | "INVALID_RESULT"
-  > = "INVALID_PAYLOAD"
+  part: RouteRequestPart | "result",
+  route: AnyRouteDefinition
 ): Promise<RouteSchemaOutput<TSchema, typeof value>> => {
   if (schema === undefined) {
     return value as RouteSchemaOutput<TSchema, typeof value>;
   }
 
   return (await parseWithSchema(schema, value, (message, cause, issues) => {
+    const functionName = routeName(route);
+    const errorMessage = `Invalid ${part} for ${functionName}: ${message}`;
     const prefixedIssues = issues?.map((issue) => ({
       ...issue,
       path: [part, ...(issue.path ?? [])],
     }));
 
-    return new InvokeError(
-      `Invalid ${part} for ${route.method} ${route.path}: ${message}`,
-      {
+    if (part === "result") {
+      return new InvokeError(errorMessage, {
         cause,
-        code,
-        functionName: `${route.method} ${route.path}`,
+        code: "INVALID_RESULT",
+        functionName,
         issues: prefixedIssues,
-      }
-    );
+      });
+    }
+
+    return new RouteRequestError(errorMessage, {
+      cause,
+      code: "INVALID_PAYLOAD",
+      functionName,
+      issues: prefixedIssues,
+      part,
+      status: 400,
+    });
   })) as RouteSchemaOutput<TSchema, typeof value>;
 };
 
-const headersFromInput = (
-  headers: Headers | Record<string, string> | undefined
-): Headers => {
+// A repeated key is one value, joined with "," in order of appearance. Built from a Map so a key
+// named "__proto__" becomes an ordinary own property.
+const queryRecord = (url: string): Record<string, string> => {
+  const values = new Map<string, string>();
+
+  for (const [key, value] of new URL(url).searchParams) {
+    const previous = values.get(key);
+    values.set(key, previous === undefined ? value : `${previous},${value}`);
+  }
+
+  return Object.fromEntries(values);
+};
+
+// `Headers` already lower-cases names and combines repeated values.
+const headerRecord = (
+  headers: Headers | Record<string, unknown>
+): Record<string, string> => {
   if (headers instanceof Headers) {
+    return Object.fromEntries(headers);
+  }
+
+  const values = new Map<string, string>();
+
+  for (const [name, value] of Object.entries(headers)) {
+    if (value !== undefined) {
+      values.set(name.toLowerCase(), String(value));
+    }
+  }
+
+  return Object.fromEntries(values);
+};
+
+// A headers schema that names its keys receives only those: clients, proxies and API Gateway add
+// headers the route never declared.
+const headersForSchema = (
+  schema: AnyStandardSchema | undefined,
+  headers: Record<string, string>
+): Record<string, string> => {
+  const keys = schemaObjectKeys(schema);
+
+  if (keys === undefined) {
     return headers;
   }
 
-  return new Headers(headers);
+  const declared = new Set(keys);
+
+  return Object.fromEntries(
+    Object.entries(headers).filter(([name]) => declared.has(name))
+  );
 };
 
-const searchParamsFromUrl = (url: string): URLSearchParams =>
-  new URL(url).searchParams;
+const jsonMediaType = /^application\/(?:[\w.-]+\+)?json$/u;
 
-const bodyFromRequest = async (request: Request): Promise<unknown> => {
+// A `body` schema means a JSON body. No body or an empty one is `undefined`.
+const readJsonBody = async (
+  route: AnyRouteDefinition,
+  request: Request,
+  readText: () => Promise<string>
+): Promise<unknown> => {
   if (request.body === null) {
     return undefined;
   }
 
-  const contentType = request.headers.get("content-type") ?? "";
+  const text = await readText();
 
-  if (contentType.includes("application/json")) {
-    return await request.clone().json();
+  if (text === "") {
+    return undefined;
   }
 
-  return await request.clone().text();
+  const functionName = routeName(route);
+  const mediaType = (request.headers.get("content-type") ?? "")
+    .split(";")[0]
+    ?.trim()
+    .toLowerCase();
+
+  if (mediaType === undefined || !jsonMediaType.test(mediaType)) {
+    throw new RouteRequestError(
+      `Unsupported content type for ${functionName}: send application/json`,
+      { code: "INVALID_PAYLOAD", functionName, part: "body", status: 415 }
+    );
+  }
+
+  try {
+    return JSON.parse(text) as unknown;
+  } catch (error) {
+    // The parser's message differs between runtimes, so it never reaches the client.
+    throw new RouteRequestError(
+      `Invalid body for ${functionName}: Malformed JSON`,
+      {
+        cause: error,
+        code: "INVALID_PAYLOAD",
+        functionName,
+        issues: [{ message: "Malformed JSON", path: ["body"] }],
+        part: "body",
+        status: 400,
+      }
+    );
+  }
 };
 
 const createRouteRequest = async (
   route: AnyRouteDefinition,
-  input: RouteInvocationInput<AnyRouteDefinition>
+  input: RouteInvocationInput<AnyRouteDefinition>,
+  readText?: () => Promise<string>
 ): Promise<RouteRequest<unknown, unknown, unknown, unknown>> => {
-  const headers = headersFromInput(
-    input.headers as Headers | Record<string, string> | undefined
+  const headers = headerRecord(
+    (input.headers as Record<string, unknown> | undefined) ??
+      input.request?.headers ??
+      {}
   );
   const request =
     input.request ??
@@ -1168,16 +1308,22 @@ const createRouteRequest = async (
         route.method === "HEAD"
           ? undefined
           : JSON.stringify(input.body),
-      headers,
+      headers: new Headers(headers),
       method: route.method,
     });
   const rawBody =
     input.body ??
-    (route.body === undefined ? undefined : await bodyFromRequest(request));
+    (route.body === undefined
+      ? undefined
+      : await readJsonBody(
+          route,
+          request,
+          readText ?? (() => request.clone().text())
+        ));
   const parsedBody = await parseRoutePart(route.body, rawBody, "body", route);
   const parsedHeaders = await parseRoutePart(
     route.headers,
-    headers,
+    headersForSchema(route.headers, headers),
     "headers",
     route
   );
@@ -1189,7 +1335,7 @@ const createRouteRequest = async (
   );
   const parsedQuery = await parseRoutePart(
     route.query,
-    input.query ?? searchParamsFromUrl(request.url),
+    input.query ?? queryRecord(request.url),
     "query",
     route
   );
@@ -1213,28 +1359,21 @@ const parseRouteOutput = async (
     return value;
   }
 
-  return await parseRoutePart(
-    route.output,
-    value,
-    "result",
-    route,
-    "INVALID_RESULT"
-  );
+  return await parseRoutePart(route.output, value, "result", route);
 };
 
-const runRoute = async (
+const runRouteHandler = async (
   route: AnyRouteDefinition,
-  input: RouteInvocationInput<AnyRouteDefinition>,
+  request: RouteRequest<unknown, unknown, unknown, unknown>,
   definition?: AnyFunctionDefinition
 ): Promise<unknown> => {
-  const request = await createRouteRequest(route, input);
   const context =
     definition === undefined
       ? {
-          functionName: `${route.method} ${route.path}`,
+          functionName: routeName(route),
           trace: currentTrace(),
           variables: createRuntimeVariables({
-            functionKey: `${route.method} ${route.path}`,
+            functionKey: routeName(route),
             providers: [],
             variables: {},
           }),
@@ -1264,7 +1403,7 @@ const runRoute = async (
             functionKey: definition.key,
             input: request,
             kind: "route",
-            route: `${route.method} ${route.path}`,
+            route: routeName(route),
           },
           () =>
             handler(
@@ -1276,12 +1415,54 @@ const runRoute = async (
   return await parseRouteOutput(route, result);
 };
 
-const routeResponse = async (
+// `functions.route(...)`: every failure propagates as an InvokeError with its full issues.
+const runRoute = async (
   route: AnyRouteDefinition,
   input: RouteInvocationInput<AnyRouteDefinition>,
   definition?: AnyFunctionDefinition
+): Promise<unknown> =>
+  await runRouteHandler(
+    route,
+    await createRouteRequest(route, input),
+    definition
+  );
+
+const routeRequestErrorResponse = (error: RouteRequestError): Response => {
+  if (error.status === 415) {
+    return responseError("Unsupported content type: send application/json", {
+      code: "UNSUPPORTED_MEDIA_TYPE",
+      status: 415,
+    });
+  }
+
+  return responseError(`Invalid ${error.part}`, {
+    code: "INVALID_REQUEST",
+    issues: error.issues,
+    status: 400,
+  });
+};
+
+// Only a failure while building the Route Request is the client's mistake. Anything the handler
+// throws, an InvokeError from a nested call included, is a server failure for `app.onError`.
+const routeResponse = async (
+  route: AnyRouteDefinition,
+  input: RouteInvocationInput<AnyRouteDefinition>,
+  definition: AnyFunctionDefinition,
+  readText: () => Promise<string>
 ): Promise<Response> => {
-  const result = await runRoute(route, input, definition);
+  let request: RouteRequest<unknown, unknown, unknown, unknown>;
+
+  try {
+    request = await createRouteRequest(route, input, readText);
+  } catch (error) {
+    if (error instanceof RouteRequestError) {
+      return routeRequestErrorResponse(error);
+    }
+
+    throw error;
+  }
+
+  const result = await runRouteHandler(route, request, definition);
 
   if (result instanceof Response) {
     return result;
@@ -1505,12 +1686,17 @@ const mountRoute = (
       route,
       {
         auth,
-        headers: contextHeaders(context),
+        headers: headerRecord(context.req.raw.headers),
         params: context.req.param(),
-        query: searchParamsFromUrl(context.req.url),
+        query: queryRecord(context.req.url),
         request: context.req.raw,
       },
-      definition
+      definition,
+      // Hono caches a body that route middleware already read through `c.req`.
+      async () =>
+        context.req.raw.bodyUsed
+          ? await context.req.text()
+          : await context.req.raw.clone().text()
     );
   });
 };
@@ -2071,18 +2257,6 @@ const routeParamKeys = (path: string): string[] =>
     .map((match) => match[1])
     .filter((key): key is string => key !== undefined);
 
-const schemaObjectKeys = (schema: unknown): readonly string[] | undefined => {
-  if (typeof schema !== "object" || schema === null || !("~voke" in schema)) {
-    return undefined;
-  }
-
-  const metadata = (schema as { "~voke"?: { keys?: readonly string[] } })[
-    "~voke"
-  ];
-
-  return metadata?.keys;
-};
-
 export const assertRouteParamSchemas = (
   registry: FunctionRegistry | FunctionRegistryInput
 ): void => {
@@ -2105,6 +2279,25 @@ export const assertRouteParamSchemas = (
       if (expected.join("\0") !== actual.join("\0")) {
         throw new VokeConfigError(
           `Route ${route.method} ${route.path} params schema expects ${actual.map((key) => JSON.stringify(key)).join(", ")}, but path defines ${expected.map((key) => JSON.stringify(key)).join(", ")}`
+        );
+      }
+    }
+  }
+};
+
+// Header names arrive lower-case, so a schema that names a header in another case never matches.
+export const assertRouteHeaderSchemas = (
+  registry: FunctionRegistry | FunctionRegistryInput
+): void => {
+  for (const [, definition] of functionRegistryEntries(registry)) {
+    for (const route of definition.routes ?? []) {
+      const invalid = (schemaObjectKeys(route.headers) ?? []).filter(
+        (key) => key !== key.toLowerCase()
+      );
+
+      if (invalid.length > 0) {
+        throw new VokeConfigError(
+          `Route ${route.method} ${route.path} headers schema names ${invalid.map((key) => JSON.stringify(key)).join(", ")}; header names are lower-case, so write ${invalid.map((key) => JSON.stringify(key.toLowerCase())).join(", ")}`
         );
       }
     }

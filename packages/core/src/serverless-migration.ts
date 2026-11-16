@@ -1,4 +1,6 @@
+import { CliUsageError } from "./cli-spec";
 import { toEnvKey } from "./env-key";
+import { projectPackageJson, tsconfig } from "./scaffold";
 
 type YamlValue =
   | string
@@ -27,7 +29,11 @@ export type ServerlessMigrationArea =
 
 export type ServerlessMigrationConfidence = "high" | "low" | "medium";
 
-export type ServerlessMigrationRisk = "high" | "low" | "medium";
+/**
+ * `blocking`: the generated project differs from the Serverless service in who can call a route;
+ * traffic must not move until the task is done.
+ */
+export type ServerlessMigrationRisk = "blocking" | "high" | "low" | "medium";
 
 export interface ServerlessMigrationReportItem {
   area: ServerlessMigrationArea;
@@ -88,6 +94,7 @@ export type ServerlessFunctionEvent =
       path: string;
       cors?: YamlValue;
       authorizer?: YamlValue;
+      private?: YamlValue;
     } & ServerlessEventMetadata)
   | ({
       type: "sqs";
@@ -127,11 +134,17 @@ export interface ServerlessFunction {
   runtime?: string;
   timeout?: number;
   memorySize?: number;
-  environment: Record<string, string>;
+  environment: Record<string, YamlValue>;
   events: ServerlessFunctionEvent[];
   layers: YamlValue[];
   package?: ServerlessPackageConfig;
   unknownFields: ServerlessUnknownField[];
+}
+
+export interface ServerlessHttpApiConfig {
+  /** `provider.httpApi.authorizers`, one raw definition per authorizer name. */
+  authorizers: RawObject;
+  cors?: YamlValue;
 }
 
 export interface ServerlessService {
@@ -139,10 +152,11 @@ export interface ServerlessService {
   provider: {
     name?: string;
     runtime?: string;
-    stage?: string;
-    region?: string;
+    stage?: YamlValue;
+    region?: YamlValue;
     deploymentBucket?: YamlValue;
-    environment: Record<string, string>;
+    environment: Record<string, YamlValue>;
+    httpApi?: ServerlessHttpApiConfig;
     iamRoleStatements: YamlValue[];
     unknownFields: ServerlessUnknownField[];
   };
@@ -176,11 +190,6 @@ export interface ServerlessMigration {
 export interface ServerlessMigrationOptions {
   source: string;
   outDirectory?: string;
-}
-
-interface ParsedLine {
-  indent: number;
-  text: string;
 }
 
 const trimTrailingSlash = (value: string): string =>
@@ -332,17 +341,17 @@ const asObject = (value: YamlValue | undefined): RawObject => {
   return {};
 };
 
-const stringRecord = (value: YamlValue | undefined): Record<string, string> =>
-  Object.fromEntries(
-    Object.entries(asObject(value)).map(([key, entry]) => [key, String(entry)])
-  );
-
+// Only scalars become text; a mapping or a list is never stringified into "[object Object]".
 const asOptionalString = (value: YamlValue | undefined): string | undefined => {
-  if (value === undefined || value === null) {
-    return undefined;
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return `${value}`;
   }
 
-  return String(value);
+  return undefined;
 };
 
 const asArray = (value: YamlValue | undefined): YamlValue[] =>
@@ -354,312 +363,400 @@ const asNumber = (value: YamlValue | undefined): number | undefined =>
 const asBoolean = (value: YamlValue | undefined): boolean | undefined =>
   typeof value === "boolean" ? value : undefined;
 
-const splitInlineItems = (value: string): string[] => {
-  const items: string[] = [];
-  let current = "";
-  let quote: string | undefined;
-  let depth = 0;
+// Bun.YAML resolves anchors, merge keys and block scalars, but drops custom tags without an
+// error, so `!Ref X` would read as the string "X". Each CloudFormation short-form tag is first
+// replaced by a marker the parser keeps; reviveYaml then turns markers into the long form.
+const tagMarker = "";
+const tagPattern = /^!([A-Za-z][A-Za-z0-9:]*)/u;
+const valueIndicators = new Set([":", "-", "[", ",", "{"]);
+const tagSeparators = new Set([" ", "\t", "[", ",", "{"]);
+const blockScalarHeader = /(?:^|\s)[|>](?:[1-9][+-]?|[+-][1-9]?)?$/u;
+const leadingSpaces = /^ */u;
+const documentSeparator = /^---(?:\s|$)/mu;
+const whitespace = /\s/u;
 
-  for (let index = 0; index < value.length; index += 1) {
-    const char = value[index];
+interface TagScanState {
+  blockIndent?: number;
+  flowDepth: number;
+  quote?: string;
+}
 
-    if ((char === '"' || char === "'") && value[index - 1] !== "\\") {
-      quote = quote === char ? undefined : (quote ?? char);
-    }
+interface MarkedLine {
+  code: string;
+  comment: string;
+  unreadable: boolean;
+}
 
-    if (quote === undefined) {
-      if (char === "[" || char === "{") {
-        depth += 1;
-      }
-      if (char === "]" || char === "}") {
-        depth -= 1;
-      }
-      if (char === "," && depth === 0) {
-        items.push(current.trim());
-        current = "";
-        continue;
-      }
-    }
+const indentOf = (line: string): number =>
+  leadingSpaces.exec(line)?.[0].length ?? 0;
 
-    current += char;
+const isTagPosition = (
+  line: string,
+  index: number,
+  lastSignificant: string | undefined
+): boolean =>
+  line[index + 1] !== "!" &&
+  (index === 0 || tagSeparators.has(line[index - 1] ?? "")) &&
+  (lastSignificant === undefined || valueIndicators.has(lastSignificant));
+
+const nextNonSpace = (line: string, from: number): number => {
+  let index = from;
+
+  while (line[index] === " " || line[index] === "\t") {
+    index += 1;
   }
 
-  if (current.trim() !== "") {
-    items.push(current.trim());
-  }
-
-  return items;
+  return index;
 };
 
-const isKeyValue = (value: string): boolean =>
-  /(?<!:):(?!:)(\s|$)/u.test(value);
+// Returns the source text consumed inside a quoted scalar: one character, or an escape pair.
+const scanQuoted = (
+  line: string,
+  index: number,
+  state: TagScanState
+): string => {
+  const char = line[index] ?? "";
+  const next = line[index + 1];
 
-const splitKeyValue = (text: string): [string, string] => {
-  const separator = text.search(/(?<!:):(?!:)(\s|$)/u);
-
-  if (separator === -1) {
-    return [text, ""];
+  if (state.quote === '"' && char === "\\") {
+    return `${char}${next ?? ""}`;
   }
 
-  return [text.slice(0, separator).trim(), text.slice(separator + 1).trim()];
+  if (state.quote === "'" && char === "'" && next === "'") {
+    return "''";
+  }
+
+  if (char === state.quote) {
+    state.quote = undefined;
+  }
+
+  return char;
 };
 
-let parseScalar = (_value: string): YamlValue => {
-  throw new Error("YAML scalar parser is not initialized");
-};
+const blockValueStarts = new Set(["#", "|", ">", "*", "&"]);
 
-const parseInlineArray = (value: string): YamlValue[] =>
-  splitInlineItems(value.slice(1, -1)).map(parseScalar);
+interface TagReplacement {
+  code: string;
+  /** Index of the last source character the replacement consumed. */
+  end: number;
+  lastSignificant: string;
+}
 
-const parseInlineObject = (value: string): RawObject =>
-  Object.fromEntries(
-    splitInlineItems(value.slice(1, -1)).map((item) => {
-      const [key, entry] = splitKeyValue(item);
+// Replaces the tag at `index` with a marker, or returns "unreadable" for a block-form tag.
+const replaceTag = (
+  line: string,
+  index: number,
+  name: string,
+  state: TagScanState
+): TagReplacement | "unreadable" => {
+  const afterName = index + name.length + 1;
+  const valueIndex = nextNonSpace(line, afterName);
+  const next = line[valueIndex];
+  const glued = valueIndex === afterName && !tagSeparators.has(next ?? "");
 
-      return [key, parseScalar(entry)];
-    })
-  );
-
-parseScalar = (value: string): YamlValue => {
-  if (value === "null" || value === "~") {
-    return null;
-  }
-  if (value === "true") {
-    return true;
-  }
-  if (value === "false") {
-    return false;
-  }
-  if (
-    (value.startsWith('"') && value.endsWith('"')) ||
-    (value.startsWith("'") && value.endsWith("'"))
-  ) {
-    return value.slice(1, -1);
-  }
-  if (value.startsWith("[") && value.endsWith("]")) {
-    return parseInlineArray(value);
-  }
-  if (value.startsWith("{") && value.endsWith("}")) {
-    return parseInlineObject(value);
-  }
-  if (/^-?\d+(\.\d+)?$/u.test(value)) {
-    return Number(value);
+  if (next === undefined || glued || blockValueStarts.has(next)) {
+    return "unreadable";
   }
 
-  return value;
-};
+  if (next === '"' || next === "'") {
+    state.quote = next;
 
-const stripComment = (line: string): string => {
-  let quote: string | undefined;
-
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index];
-
-    if ((char === '"' || char === "'") && line[index - 1] !== "\\") {
-      quote = quote === char ? undefined : (quote ?? char);
-    }
-
-    if (char === "#" && quote === undefined) {
-      return line.slice(0, index);
-    }
+    return {
+      code: `${next}${tagMarker}${name}${tagMarker}`,
+      end: valueIndex,
+      lastSignificant: next,
+    };
   }
 
-  return line;
-};
+  if (next === "[" || next === "{") {
+    state.flowDepth += 1;
 
-const parseLine = (line: string): ParsedLine | undefined => {
-  const withoutComment = stripComment(line);
-
-  if (withoutComment.trim() === "") {
-    return undefined;
+    return {
+      code:
+        next === "["
+          ? `[ "${tagMarker}${name}", `
+          : `{ "${tagMarker}${name}": true, `,
+      end: valueIndex,
+      lastSignificant: ",",
+    };
   }
 
+  // A plain scalar follows: the marker becomes part of its text.
   return {
-    indent: withoutComment.search(/\S/u),
-    text: withoutComment.trim(),
+    code: `${tagMarker}${name}${tagMarker}`,
+    end: valueIndex - 1,
+    lastSignificant: tagMarker,
   };
 };
 
-let parseBlock = (
-  _lines: ParsedLine[],
-  _index: number,
-  _indent: number
-): [YamlValue, number] => {
-  throw new Error("YAML parser is not initialized");
+const trackStructure = (
+  char: string,
+  atValueStart: boolean,
+  state: TagScanState
+): void => {
+  if ((char === '"' || char === "'") && atValueStart) {
+    state.quote = char;
+  } else if ((char === "[" || char === "{") && atValueStart) {
+    state.flowDepth += 1;
+  } else if ((char === "]" || char === "}") && state.flowDepth > 0) {
+    state.flowDepth -= 1;
+  }
 };
 
-let parseObject = (
-  _lines: ParsedLine[],
-  _index: number,
-  _indent: number
-): [RawObject, number] => {
-  throw new Error("YAML parser is not initialized");
-};
+const startsComment = (line: string, index: number): boolean =>
+  line[index] === "#" &&
+  (index === 0 || whitespace.test(line[index - 1] ?? ""));
 
-const parseArray = (
-  lines: ParsedLine[],
-  index: number,
-  indent: number
-): [YamlValue[], number] => {
-  const array: YamlValue[] = [];
-  let cursor = index;
+// Scans one line outside a block scalar; quote and flow state carry across lines.
+const markLine = (line: string, state: TagScanState): MarkedLine => {
+  let code = "";
+  let lastSignificant: string | undefined;
 
-  while (cursor < lines.length) {
-    const line = lines[cursor];
+  for (let index = 0; index < line.length; index += 1) {
+    if (state.quote !== undefined) {
+      const text = scanQuoted(line, index, state);
 
-    if (line === undefined || line.indent < indent) {
-      break;
-    }
-    if (line.indent > indent) {
-      cursor += 1;
+      code += text;
+      index += text.length - 1;
+      lastSignificant = text.at(-1);
       continue;
     }
-    if (!line.text.startsWith("- ")) {
-      break;
+
+    if (startsComment(line, index)) {
+      return { code, comment: line.slice(index), unreadable: false };
     }
 
-    const item = line.text.slice(2).trim();
+    const char = line[index] ?? "";
+    const tagName =
+      char === "!" && isTagPosition(line, index, lastSignificant)
+        ? tagPattern.exec(line.slice(index))?.[1]
+        : undefined;
 
-    if (item === "") {
-      const next = lines[cursor + 1];
+    if (tagName !== undefined) {
+      const replacement = replaceTag(line, index, tagName, state);
 
-      if (next === undefined) {
-        array.push(null);
-        cursor += 1;
-        continue;
+      if (replacement === "unreadable") {
+        return { code: line, comment: "", unreadable: true };
       }
 
-      const [value, nextIndex] = parseBlock(lines, cursor + 1, next.indent);
-
-      array.push(value);
-      cursor = nextIndex;
+      code += replacement.code;
+      index = replacement.end;
+      ({ lastSignificant } = replacement);
       continue;
+    }
+
+    trackStructure(
+      char,
+      lastSignificant === undefined || valueIndicators.has(lastSignificant),
+      state
+    );
+    code += char;
+
+    if (char !== " " && char !== "\t") {
+      lastSignificant = char;
+    }
+  }
+
+  return { code, comment: "", unreadable: false };
+};
+
+const insideBlockScalar = (line: string, state: TagScanState): boolean => {
+  if (state.blockIndent === undefined) {
+    return false;
+  }
+
+  if (line.trim() === "" || indentOf(line) > state.blockIndent) {
+    return true;
+  }
+
+  state.blockIndent = undefined;
+
+  return false;
+};
+
+const markYamlTags = (source: string): string => {
+  if (source.includes(tagMarker)) {
+    throw new CliUsageError(
+      "Cannot read serverless.yml: it contains the private-use character U+E000, which the migrator reserves."
+    );
+  }
+
+  const state: TagScanState = { flowDepth: 0 };
+  const unreadableLines: number[] = [];
+  const lines = source.split("\n").map((line, index) => {
+    if (insideBlockScalar(line, state)) {
+      return line;
+    }
+
+    const marked = markLine(line, state);
+
+    if (marked.unreadable) {
+      unreadableLines.push(index + 1);
     }
 
     if (
-      (item.startsWith("[") && item.endsWith("]")) ||
-      (item.startsWith("{") && item.endsWith("}"))
+      state.quote === undefined &&
+      state.flowDepth === 0 &&
+      blockScalarHeader.test(marked.code.trimEnd())
     ) {
-      array.push(parseScalar(item));
-      cursor += 1;
-      continue;
+      state.blockIndent = indentOf(line);
     }
 
-    if (isKeyValue(item)) {
-      const [key, rawValue] = splitKeyValue(item);
-      const object: RawObject = {};
+    return `${marked.code}${marked.comment}`;
+  });
 
-      if (rawValue === "") {
-        const next = lines[cursor + 1];
-
-        if (next !== undefined && next.indent > indent) {
-          const [value, nextIndex] = parseBlock(lines, cursor + 1, next.indent);
-
-          object[key] = value;
-          cursor = nextIndex;
-          array.push(object);
-          continue;
-        }
-
-        object[key] = {};
-        cursor += 1;
-        array.push(object);
-        continue;
-      }
-
-      object[key] = parseScalar(rawValue);
-
-      const next = lines[cursor + 1];
-
-      if (next !== undefined && next.indent > indent) {
-        const [rest, nextIndex] = parseObject(lines, cursor + 1, next.indent);
-
-        array.push({ ...object, ...rest });
-        cursor = nextIndex;
-        continue;
-      }
-
-      array.push(object);
-      cursor += 1;
-      continue;
-    }
-
-    array.push(parseScalar(item));
-    cursor += 1;
+  if (unreadableLines.length > 0) {
+    throw new CliUsageError(
+      `Cannot read serverless.yml: the migrator cannot read the tag on line ${unreadableLines.join(", line ")}, because a block value follows it or no space separates it from its value. Write the value in the long form instead, for example "Fn::Join:" in place of "!Join".`
+    );
   }
 
-  return [array, cursor];
+  return lines.join("\n");
 };
 
-parseObject = (
-  lines: ParsedLine[],
-  index: number,
-  indent: number
-): [RawObject, number] => {
-  const object: RawObject = {};
-  let cursor = index;
+const longTagName = (name: string): string =>
+  name === "Ref" || name === "Condition" ? name : `Fn::${name}`;
 
-  while (cursor < lines.length) {
-    const line = lines[cursor];
+const markedTagName = (value: string): string | undefined => {
+  if (!value.startsWith(tagMarker)) {
+    return undefined;
+  }
 
-    if (line === undefined || line.indent < indent) {
-      break;
+  const end = value.indexOf(tagMarker, 1);
+
+  return end === -1 ? value.slice(1) : value.slice(1, end);
+};
+
+const assertNoMarker = (value: string): void => {
+  if (value.includes(tagMarker)) {
+    throw new CliUsageError(
+      `Cannot read serverless.yml: the CloudFormation tag in ${JSON.stringify(value.replaceAll(tagMarker, "!"))} is in a position the migrator cannot read. Write it in the long form.`
+    );
+  }
+};
+
+const reviveTaggedScalar = (value: string): YamlValue => {
+  const end = value.indexOf(tagMarker, 1);
+
+  if (end === -1) {
+    assertNoMarker(value);
+  }
+
+  const name = value.slice(1, end);
+  const rest = value.slice(end + 1);
+
+  assertNoMarker(rest);
+
+  if (name === "GetAtt") {
+    const dot = rest.indexOf(".");
+
+    return {
+      "Fn::GetAtt":
+        dot === -1 ? [rest] : [rest.slice(0, dot), rest.slice(dot + 1)],
+    };
+  }
+
+  return { [longTagName(name)]: rest };
+};
+
+// Returns a fresh tree: aliases share objects in Bun.YAML's output, and a self-referencing alias
+// is a cycle that no Serverless value can mean.
+const reviveYaml = (
+  value: unknown,
+  ancestors = new Set<object>()
+): YamlValue => {
+  if (typeof value === "string") {
+    if (value.startsWith(tagMarker)) {
+      return reviveTaggedScalar(value);
     }
-    if (line.indent > indent) {
-      cursor += 1;
-      continue;
-    }
-    if (line.text.startsWith("- ")) {
-      break;
-    }
 
-    const [key, rawValue] = splitKeyValue(line.text);
+    assertNoMarker(value);
 
-    if (rawValue === "") {
-      const next = lines[cursor + 1];
+    return value;
+  }
 
-      if (next === undefined || next.indent <= indent) {
-        object[key] = {};
-        cursor += 1;
-        continue;
+  if (value === null || typeof value !== "object") {
+    return value as YamlValue;
+  }
+
+  if (ancestors.has(value)) {
+    throw new CliUsageError(
+      "Cannot read serverless.yml: an alias refers to itself, so the value has no end."
+    );
+  }
+
+  ancestors.add(value);
+
+  try {
+    if (Array.isArray(value)) {
+      const [first, ...rest] = value;
+      const tag = typeof first === "string" ? markedTagName(first) : undefined;
+
+      if (tag !== undefined && first === `${tagMarker}${tag}`) {
+        return {
+          [longTagName(tag)]: rest.map((item) => reviveYaml(item, ancestors)),
+        };
       }
 
-      const [value, nextIndex] = parseBlock(lines, cursor + 1, next.indent);
-
-      object[key] = value;
-      cursor = nextIndex;
-      continue;
+      return value.map((item) => reviveYaml(item, ancestors));
     }
 
-    object[key] = parseScalar(rawValue);
-    cursor += 1;
-  }
+    const entries = Object.entries(value);
+    const tagKey = entries.find(([key]) => key.startsWith(tagMarker))?.[0];
+    const revived: RawObject = {};
 
-  return [object, cursor];
+    for (const [key, entry] of entries) {
+      if (key !== tagKey) {
+        assertNoMarker(key);
+        revived[key] = reviveYaml(entry, ancestors);
+      }
+    }
+
+    if (tagKey === undefined) {
+      return revived;
+    }
+
+    return { [longTagName(tagKey.slice(1))]: revived };
+  } finally {
+    ancestors.delete(value);
+  }
 };
 
-parseBlock = (
-  lines: ParsedLine[],
-  index: number,
-  indent: number
-): [YamlValue, number] => {
-  const line = lines[index];
-
-  if (line?.text.startsWith("- ") === true && line.indent === indent) {
-    return parseArray(lines, index, indent);
+const rootShape = (value: YamlValue, source: string): string => {
+  if (value === null) {
+    return "the file is empty";
   }
 
-  return parseObject(lines, index, indent);
+  if (Array.isArray(value)) {
+    return documentSeparator.test(source)
+      ? "the file holds several YAML documents"
+      : "the root is a list";
+  }
+
+  return `the root is a ${typeof value}`;
 };
 
-const parseYaml = (source: string): YamlValue => {
-  const lines = source
-    .split(/\r?\n/u)
-    .map(parseLine)
-    .filter((line): line is ParsedLine => line !== undefined);
-  const [value] = parseBlock(lines, 0, 0);
+const readServerlessYaml = (source: string): RawObject => {
+  const marked = markYamlTags(source);
+  let parsed: unknown;
 
-  return value;
+  try {
+    parsed = Bun.YAML.parse(marked);
+  } catch (error) {
+    throw new CliUsageError(
+      `Cannot read serverless.yml: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+
+  const root = reviveYaml(parsed);
+
+  if (root === null || typeof root !== "object" || Array.isArray(root)) {
+    throw new CliUsageError(
+      `Cannot read serverless.yml: ${rootShape(root, source)}. It must hold one mapping with a service, a provider and functions.`
+    );
+  }
+
+  return root;
 };
 
 const collectUnknownFields = (
@@ -695,17 +792,26 @@ const parseHttpFunctionEvent = (
   }
 
   const config = asObject(rawValue);
+  const knownKeys =
+    type === "http"
+      ? ["authorizer", "cors", "method", "path", "private"]
+      : ["authorizer", "cors", "method", "path"];
 
   return {
-    authorizer: config.authorizer,
-    cors: config.cors,
+    ...(config.authorizer === undefined
+      ? {}
+      : { authorizer: config.authorizer }),
+    ...(config.cors === undefined ? {} : { cors: config.cors }),
+    ...(type === "http" && config.private !== undefined
+      ? { private: config.private }
+      : {}),
     method: (asOptionalString(config.method) ?? "GET").toUpperCase(),
     path: asOptionalString(config.path) ?? "/",
     raw: rawValue ?? rawEvent,
     type,
     unknownFields: collectUnknownFields(
       config,
-      ["authorizer", "cors", "method", "path"],
+      knownKeys,
       basePath,
       `${type} event field is not converted automatically`
     ),
@@ -993,16 +1099,43 @@ interface SqsEventSourceResolution {
   reason?: string;
 }
 
-const literalString = (value: YamlValue | undefined): string | undefined => {
-  if (
-    typeof value === "string" ||
-    typeof value === "number" ||
-    typeof value === "boolean"
-  ) {
-    return String(value);
+type ValueClass =
+  | { kind: "literal"; text: string }
+  | { kind: "variable" }
+  | { kind: "intrinsic" }
+  | { kind: "structure" };
+
+const intrinsicKeyPattern = /^(?:Ref|Condition|Fn::.+)$/u;
+
+/** The one gate between a parsed value and generated code: only literals are copied. */
+const classifyValue = (value: YamlValue | undefined): ValueClass => {
+  if (typeof value === "string") {
+    return value.includes("${")
+      ? { kind: "variable" }
+      : { kind: "literal", text: value };
   }
 
-  return undefined;
+  if (typeof value === "number" || typeof value === "boolean") {
+    return { kind: "literal", text: `${value}` };
+  }
+
+  const keys = Object.keys(asObject(value));
+
+  if (keys.length === 1 && intrinsicKeyPattern.test(keys[0] ?? "")) {
+    return { kind: "intrinsic" };
+  }
+
+  return { kind: "structure" };
+};
+
+/** The original expression, for a report; the migrator resolves nothing. */
+const describeValue = (value: YamlValue | undefined): string =>
+  typeof value === "string" ? value : JSON.stringify(value ?? null);
+
+const literalString = (value: YamlValue | undefined): string | undefined => {
+  const classified = classifyValue(value);
+
+  return classified.kind === "literal" ? classified.text : undefined;
 };
 
 const literalOption = (
@@ -1011,9 +1144,29 @@ const literalOption = (
 ): string | undefined =>
   value === undefined ? undefined : `${name}: ${tsString(value)}`;
 
+const dynamoDbTableKeys = new Set([
+  "AttributeDefinitions",
+  "BillingMode",
+  "KeySchema",
+]);
+
+// dynamodbTable types every key as a string, and has no table name, index or stream options.
+const isLosslessDynamoDbTable = (properties: RawObject): boolean =>
+  Object.keys(properties).every((key) => dynamoDbTableKeys.has(key)) &&
+  (properties.KeySchema === undefined || Array.isArray(properties.KeySchema)) &&
+  (properties.AttributeDefinitions === undefined ||
+    Array.isArray(properties.AttributeDefinitions)) &&
+  asArray(properties.AttributeDefinitions).every(
+    (definition) => asObject(definition).AttributeType === "S"
+  );
+
 const createDynamoDbResourceExpression = (
   properties: RawObject
 ): { expression: string; helper: string } | undefined => {
+  if (!isLosslessDynamoDbTable(properties)) {
+    return undefined;
+  }
+
   const keySchema = asArray(properties.KeySchema).map(asObject);
   const hasKeySchema = keySchema.length > 0;
   const partitionKey = literalString(
@@ -1201,6 +1354,885 @@ const isResolvedSqsEvent = (
   event.type === "sqs" &&
   resolveSqsEventSource(event, resourceDeclarations).queue !== undefined;
 
+const supportedLambdaRuntime = (
+  runtime: string | undefined
+): string | undefined =>
+  runtime === "nodejs22.x" || runtime === "nodejs24.x" ? runtime : undefined;
+
+interface ProviderValuePlan {
+  /** Literal environment values, provider first, then function values under prefixed keys. */
+  environment: Record<string, string>;
+  providerEnvironmentCopied: boolean;
+  region?: string;
+  /** Function name to `KEY → FUNCTION_KEY` renames of copied function environment values. */
+  renamedKeys: Map<string, string[]>;
+  stage?: string;
+  tasks: PlannedTask[];
+}
+
+const environmentReason = (value: YamlValue): string => {
+  const { kind } = classifyValue(value);
+
+  if (kind === "variable") {
+    return "Serverless variables are not resolved. Read secrets and parameters with Runtime Variables (see the Runtime Variables guide), or compute the value in voke.config.ts.";
+  }
+
+  if (kind === "intrinsic") {
+    return "CloudFormation references are not copied. Declare the resource in voke.config.ts and read it through a resource binding (see the Resources guide).";
+  }
+
+  return "Only strings, numbers and booleans are copied. Compute the value in voke.config.ts.";
+};
+
+/** A manual task before the output directory is known; `file` is relative to it. */
+interface PlannedTask {
+  area: ServerlessMigrationArea;
+  file?: string;
+  message: string;
+  reason: string;
+  risk: ServerlessMigrationRisk;
+}
+
+const toManualTask = (
+  task: PlannedTask,
+  outDirectory: string
+): ServerlessMigrationManualTask => ({
+  area: task.area,
+  confidence: "high",
+  ...(task.file === undefined ? {} : { file: `${outDirectory}/${task.file}` }),
+  message: task.message,
+  reason: task.reason,
+  risk: task.risk,
+});
+
+const configFile = "voke.config.ts";
+const stageNamePattern = /^[A-Za-z0-9-]+$/u;
+
+const createProviderValuePlan = (
+  service: ServerlessService
+): ProviderValuePlan => {
+  const tasks: PlannedTask[] = [];
+  const { region, stage } = service.provider;
+  const stageText = literalString(stage);
+  const acceptedStage =
+    stageText !== undefined && stageNamePattern.test(stageText)
+      ? stageText
+      : undefined;
+  const regionText = literalString(region);
+  const environment: Record<string, string> = {};
+  const renamedKeys = new Map<string, string[]>();
+  let providerEnvironmentCopied = false;
+
+  if (stage !== undefined && acceptedStage === undefined) {
+    tasks.push({
+      area: "routing",
+      file: configFile,
+      message: `Provider stage ${describeValue(stage)} is not copied to voke.config.ts.`,
+      reason:
+        "It is not a literal stage name. Voke takes the stage from `voke deploy --stage <name>` or `VOKE_STAGE`.",
+      risk: "medium",
+    });
+  }
+
+  if (region !== undefined && regionText === undefined) {
+    tasks.push({
+      area: "routing",
+      file: configFile,
+      message: `Provider region ${describeValue(region)} is not copied to voke.config.ts.`,
+      reason:
+        "It is not a literal. Without a region Voke uses `AWS_REGION`, then `us-east-1`; set `region` in voke.config.ts.",
+      risk: "high",
+    });
+  }
+
+  const copy = (path: string, key: string, value: YamlValue): boolean => {
+    const text = literalString(value);
+
+    if (text === undefined) {
+      tasks.push({
+        area: "build",
+        file: configFile,
+        message: `Environment variable ${key} is not copied to voke.config.ts; ${path} is ${describeValue(value)}.`,
+        reason: environmentReason(value),
+        risk: "high",
+      });
+
+      return false;
+    }
+
+    environment[key] = text;
+
+    return true;
+  };
+
+  for (const [key, value] of Object.entries(service.provider.environment)) {
+    providerEnvironmentCopied =
+      copy(`provider.environment.${key}`, key, value) ||
+      providerEnvironmentCopied;
+  }
+
+  for (const fn of Object.values(service.functions)) {
+    for (const [key, value] of Object.entries(fn.environment)) {
+      const target = `${toEnvKey(fn.name)}_${key}`;
+
+      if (copy(`functions.${fn.name}.environment.${key}`, target, value)) {
+        renamedKeys.set(fn.name, [
+          ...(renamedKeys.get(fn.name) ?? []),
+          `${key} → ${target}`,
+        ]);
+      }
+    }
+  }
+
+  return {
+    environment,
+    providerEnvironmentCopied,
+    region: regionText,
+    renamedKeys,
+    stage: acceptedStage,
+    tasks,
+  };
+};
+
+type HttpEvent = Extract<ServerlessFunctionEvent, { type: "http" | "httpApi" }>;
+
+const blockedAuthorizerName = "migrationBlocked";
+const reservedAuthorizerNames = new Set(["none", blockedAuthorizerName]);
+// Request Authorizer Function keys that would collide with generated registry entries.
+const reservedFunctionKeys = new Set([blockedAuthorizerName, "http"]);
+const reservedExportNames = new Set([
+  "authorizers",
+  "createAuthorizers",
+  "jwtAuthorizer",
+  "lambdaAuthorizer",
+  blockedAuthorizerName,
+  "requestAuthorizer",
+]);
+const jwtAuthorizerKeys = new Set([
+  "audience",
+  "identitySource",
+  "issuerUrl",
+  "name",
+  "type",
+]);
+const requestAuthorizerKeys = new Set([
+  "enableSimpleResponses",
+  "functionArn",
+  "functionName",
+  "identitySource",
+  "managedExternally",
+  "name",
+  "payloadVersion",
+  "resultTtlInSeconds",
+  "type",
+]);
+const eventReferenceKeys = new Set(["name", "scopes"]);
+
+type RouteAuthorization =
+  | { kind: "public" }
+  | { kind: "converted"; name: string }
+  | { kind: "blocked"; reason: string };
+
+interface RouteAuthorizerPlan {
+  authorization: RouteAuthorization;
+  event: HttpEvent;
+  fn: ServerlessFunction;
+  /** Every task this route depends on, including those of its authorizer. */
+  tasks: PlannedTask[];
+}
+
+type AuthorizerConversion =
+  | {
+      kind: "converted";
+      expression: string;
+      helper: "jwtAuthorizer" | "lambdaAuthorizer";
+      requestFunction?: string;
+      tasks: PlannedTask[];
+    }
+  | { kind: "blocked"; reason: string };
+
+interface AuthorizerPlan {
+  hasProtectedRoutes: boolean;
+  helpers: Set<string>;
+  needsBlocked: boolean;
+  registry: { expression: string; helper: string; name: string }[];
+  requestFunctions: { exportName: string; fn: ServerlessFunction }[];
+  routes: Map<HttpEvent, RouteAuthorizerPlan>;
+  tasks: PlannedTask[];
+}
+
+const authorizersFile = "src/authorizers.ts";
+
+const literalStrings = (
+  value: YamlValue | undefined
+): string | string[] | undefined => {
+  if (typeof value === "string") {
+    return literalString(value);
+  }
+
+  if (!Array.isArray(value) || value.length === 0) {
+    return undefined;
+  }
+
+  const items = value.map((item) =>
+    typeof item === "string" ? literalString(item) : undefined
+  );
+
+  return items.every((item) => item !== undefined)
+    ? (items as string[])
+    : undefined;
+};
+
+const tsLiteral = (value: string | string[]): string =>
+  typeof value === "string" ? tsString(value) : JSON.stringify(value);
+
+const unknownKeysReason = (
+  name: string,
+  config: RawObject,
+  known: Set<string>
+): string | undefined => {
+  const unknown = Object.keys(config).filter((key) => !known.has(key));
+
+  return unknown.length === 0
+    ? undefined
+    : `Authorizer ${name} sets ${unknown.join(", ")}, which the migrator does not convert.`;
+};
+
+const identitySourceOption = (
+  name: string,
+  config: RawObject
+): { option?: string; reason?: string } => {
+  if (config.identitySource === undefined) {
+    return {};
+  }
+
+  const identitySource = literalStrings(config.identitySource);
+
+  return identitySource === undefined
+    ? {
+        reason: `Authorizer ${name} has identitySource ${describeValue(config.identitySource)}; only literal values are converted.`,
+      }
+    : { option: `identitySource: ${tsLiteral(identitySource)}` };
+};
+
+const authorizerExpression = (helper: string, options: string[]): string =>
+  `${helper}({\n${options.map((option) => `    ${option},`).join("\n")}\n  })`;
+
+const convertJwtAuthorizer = (
+  name: string,
+  config: RawObject
+): AuthorizerConversion => {
+  const unknown = unknownKeysReason(name, config, jwtAuthorizerKeys);
+
+  if (unknown !== undefined) {
+    return { kind: "blocked", reason: unknown };
+  }
+
+  const issuer = literalString(config.issuerUrl);
+  const audience = literalStrings(config.audience);
+
+  if (issuer === undefined || audience === undefined) {
+    return {
+      kind: "blocked",
+      reason: `JWT Authorizer ${name} has issuerUrl ${describeValue(config.issuerUrl)} and audience ${describeValue(config.audience)}; only literal values are converted.`,
+    };
+  }
+
+  const identitySource = identitySourceOption(name, config);
+
+  if (identitySource.reason !== undefined) {
+    return { kind: "blocked", reason: identitySource.reason };
+  }
+
+  return {
+    expression: authorizerExpression("jwtAuthorizer", [
+      `issuer: ${tsString(issuer)}`,
+      `audience: ${tsLiteral(audience)}`,
+      ...(identitySource.option === undefined ? [] : [identitySource.option]),
+    ]),
+    helper: "jwtAuthorizer",
+    kind: "converted",
+    tasks: [],
+  };
+};
+
+const requestAuthorizerTarget = (
+  service: ServerlessService,
+  name: string,
+  config: RawObject
+):
+  | { kind: "blocked"; reason: string }
+  | { kind: "function"; functionName: string }
+  | { kind: "arn"; arn: string } => {
+  if (config.functionName !== undefined && config.functionArn !== undefined) {
+    return {
+      kind: "blocked",
+      reason: `Authorizer ${name} sets both functionName and functionArn.`,
+    };
+  }
+
+  if (config.functionName !== undefined) {
+    const functionName = literalString(config.functionName);
+    const target =
+      functionName === undefined ? undefined : service.functions[functionName];
+
+    if (functionName === undefined || target === undefined) {
+      return {
+        kind: "blocked",
+        reason: `Authorizer ${name} uses functionName ${describeValue(config.functionName)}, which is not a function of this service.`,
+      };
+    }
+
+    if (target.events.length > 0 || reservedFunctionKeys.has(functionName)) {
+      return {
+        kind: "blocked",
+        reason: `Authorizer ${name} uses function ${functionName}, which cannot become a Request Authorizer Function because it also has events or its name is reserved.`,
+      };
+    }
+
+    return { functionName, kind: "function" };
+  }
+
+  const arn = literalString(config.functionArn);
+
+  if (arn === undefined) {
+    return {
+      kind: "blocked",
+      reason: `Authorizer ${name} has functionArn ${describeValue(config.functionArn)}; only a literal ARN is converted.`,
+    };
+  }
+
+  if (config.enableSimpleResponses !== true) {
+    return {
+      kind: "blocked",
+      reason: `Authorizer ${name} returns IAM policy responses (enableSimpleResponses is not true); Voke Lambda Authorizers accept only simple responses.`,
+    };
+  }
+
+  return { arn, kind: "arn" };
+};
+
+const convertRequestAuthorizer = (
+  service: ServerlessService,
+  name: string,
+  config: RawObject
+): AuthorizerConversion => {
+  const unknown = unknownKeysReason(name, config, requestAuthorizerKeys);
+  const { payloadVersion } = config;
+
+  if (unknown !== undefined) {
+    return { kind: "blocked", reason: unknown };
+  }
+
+  if (
+    payloadVersion !== undefined &&
+    payloadVersion !== "2.0" &&
+    payloadVersion !== 2
+  ) {
+    return {
+      kind: "blocked",
+      reason: `Authorizer ${name} uses payloadVersion ${describeValue(payloadVersion)}; Voke Lambda Authorizers use payload format 2.0.`,
+    };
+  }
+
+  const identitySource = identitySourceOption(name, config);
+
+  if (identitySource.reason !== undefined) {
+    return { kind: "blocked", reason: identitySource.reason };
+  }
+
+  const target = requestAuthorizerTarget(service, name, config);
+
+  if (target.kind === "blocked") {
+    return target;
+  }
+
+  const options = [
+    target.kind === "function"
+      ? `function: ${tsString(target.functionName)}`
+      : `function: { arn: ${tsString(target.arn)} }`,
+    ...(identitySource.option === undefined ? [] : [identitySource.option]),
+    ...(typeof config.resultTtlInSeconds === "number"
+      ? [`cacheTtlSeconds: ${config.resultTtlInSeconds}`]
+      : []),
+  ];
+  const expression = authorizerExpression("lambdaAuthorizer", options);
+
+  if (target.kind === "function") {
+    const handler = service.functions[target.functionName]?.handler;
+
+    return {
+      expression,
+      helper: "lambdaAuthorizer",
+      kind: "converted",
+      requestFunction: target.functionName,
+      tasks: [
+        {
+          area: "routing",
+          file: authorizersFile,
+          message: `Port the logic of Request Authorizer Function ${target.functionName} (${handler ?? "no handler"}) into its generated skeleton.`,
+          reason:
+            "The skeleton denies every request until then. It must return a Voke Authorizer Result (`{ authorized, context }`), not an IAM policy.",
+          risk: "blocking",
+        },
+      ],
+    };
+  }
+
+  return {
+    expression,
+    helper: "lambdaAuthorizer",
+    kind: "converted",
+    tasks: [
+      {
+        area: "routing",
+        file: authorizersFile,
+        message: `Allow the new HTTP API to invoke the external authorizer ${target.arn} (Lambda Authorizer ${name}).`,
+        reason:
+          "Voke does not add invoke permissions for a Lambda Authorizer outside the Function Registry; until then API Gateway cannot call it.",
+        risk: "high",
+      },
+    ],
+  };
+};
+
+const convertAuthorizer = (
+  service: ServerlessService,
+  name: string
+): AuthorizerConversion => {
+  const definition = service.provider.httpApi?.authorizers[name];
+
+  if (definition === undefined) {
+    return {
+      kind: "blocked",
+      reason: `Authorizer ${name} is not declared in provider.httpApi.authorizers.`,
+    };
+  }
+
+  const config = asObject(definition);
+  const { type } = config;
+
+  if (type === undefined || type === "jwt") {
+    return convertJwtAuthorizer(name, config);
+  }
+
+  if (type === "request") {
+    return convertRequestAuthorizer(service, name, config);
+  }
+
+  return {
+    kind: "blocked",
+    reason: `Authorizer ${name} has type ${describeValue(type)}, which the migrator does not convert.`,
+  };
+};
+
+const authorizerReference = (
+  value: YamlValue
+): { name: string; scopes?: YamlValue } | { reason: string } => {
+  if (typeof value === "string") {
+    const name = literalString(value);
+
+    return name === undefined
+      ? { reason: `The authorizer ${value} is not a literal name.` }
+      : { name };
+  }
+
+  const config = asObject(value);
+
+  if (
+    typeof config.type === "string" &&
+    config.type.toLowerCase() === "aws_iam"
+  ) {
+    return { reason: "Voke has no IAM authorization for routes." };
+  }
+
+  if (config.id !== undefined) {
+    return {
+      reason:
+        "Authorizers referenced by id belong to an API outside this service and are not converted.",
+    };
+  }
+
+  const name =
+    typeof config.name === "string" ? literalString(config.name) : undefined;
+  const keys = Object.keys(config);
+
+  if (
+    name === undefined ||
+    keys.length === 0 ||
+    keys.some((key) => !eventReferenceKeys.has(key))
+  ) {
+    return {
+      reason: `The authorizer setting ${describeValue(value)} is not a shape the migrator converts.`,
+    };
+  }
+
+  return config.scopes === undefined
+    ? { name }
+    : { name, scopes: config.scopes };
+};
+
+const routeLabel = (event: HttpEvent): string =>
+  event.type === "httpApi" ? "HTTP API" : "REST API";
+
+const routeFile = (fn: ServerlessFunction): string =>
+  `src/routes/${kebabCase(fn.name)}.ts`;
+
+const resolveRouteAuthorizer = (
+  event: HttpEvent,
+  conversionOf: (name: string) => AuthorizerConversion
+): { authorization: RouteAuthorization; tasks: PlannedTask[] } => {
+  if (event.type === "http") {
+    const isProtected =
+      event.authorizer !== undefined ||
+      (event.private !== undefined && event.private !== false);
+
+    return isProtected
+      ? {
+          authorization: {
+            kind: "blocked",
+            reason: "REST API authorizers and API keys are not converted.",
+          },
+          tasks: [],
+        }
+      : { authorization: { kind: "public" }, tasks: [] };
+  }
+
+  if (event.authorizer === undefined) {
+    return { authorization: { kind: "public" }, tasks: [] };
+  }
+
+  const reference = authorizerReference(event.authorizer);
+
+  if ("reason" in reference) {
+    return {
+      authorization: { kind: "blocked", reason: reference.reason },
+      tasks: [],
+    };
+  }
+
+  if (reservedAuthorizerNames.has(reference.name)) {
+    return {
+      authorization: {
+        kind: "blocked",
+        reason: `The authorizer name ${reference.name} is reserved in Voke.`,
+      },
+      tasks: [],
+    };
+  }
+
+  const conversion = conversionOf(reference.name);
+
+  if (conversion.kind === "blocked") {
+    return { authorization: conversion, tasks: [] };
+  }
+
+  if (reference.scopes === undefined) {
+    return {
+      authorization: { kind: "converted", name: reference.name },
+      tasks: conversion.tasks,
+    };
+  }
+
+  if (conversion.helper !== "jwtAuthorizer") {
+    return {
+      authorization: {
+        kind: "blocked",
+        reason: `Authorizer ${reference.name} is not a JWT Authorizer, so its scopes ${describeValue(reference.scopes)} have no equivalent.`,
+      },
+      tasks: [],
+    };
+  }
+
+  return {
+    authorization: { kind: "converted", name: reference.name },
+    tasks: [
+      ...conversion.tasks,
+      {
+        area: "routing",
+        message: `${routeLabel(event)} route ${event.method} ${event.path} requires scopes ${describeValue(reference.scopes)} on JWT Authorizer ${reference.name}.`,
+        reason:
+          "Voke does not enforce JWT scopes; any valid token passes. Check the `scope` claim in the handler.",
+        risk: "blocking",
+      },
+    ],
+  };
+};
+
+const requestFunctionExportName = (functionName: string): string => {
+  const identifier = toIdentifier(functionName, "authorizerFunction");
+
+  return reservedExportNames.has(identifier)
+    ? `${identifier}Function`
+    : identifier;
+};
+
+const httpEventsOf = (fn: ServerlessFunction): HttpEvent[] =>
+  fn.events.filter(
+    (event): event is HttpEvent =>
+      event.type === "http" || event.type === "httpApi"
+  );
+
+const pushUniqueTask = (tasks: PlannedTask[], task: PlannedTask): void => {
+  if (!tasks.some((existing) => existing.message === task.message)) {
+    tasks.push(task);
+  }
+};
+
+const unusedAuthorizersTask = (
+  service: ServerlessService,
+  used: Set<string>
+): PlannedTask | undefined => {
+  const unused = Object.keys(
+    service.provider.httpApi?.authorizers ?? {}
+  ).filter((name) => !used.has(name));
+
+  return unused.length === 0
+    ? undefined
+    : {
+        area: "routing",
+        message: `Authorizers ${unused.join(", ")} are declared in provider.httpApi.authorizers but no route uses them; they are not generated.`,
+        reason: "Voke registers only the HTTP Authorizers that routes name.",
+        risk: "low",
+      };
+};
+
+// The single reader of `event.authorizer`: every generated file and report row derives from it.
+const createAuthorizerPlan = (service: ServerlessService): AuthorizerPlan => {
+  const conversions = new Map<string, AuthorizerConversion>();
+  const conversionOf = (name: string): AuthorizerConversion => {
+    const cached = conversions.get(name) ?? convertAuthorizer(service, name);
+
+    conversions.set(name, cached);
+
+    return cached;
+  };
+  const routes = new Map<HttpEvent, RouteAuthorizerPlan>();
+  const used = new Set<string>();
+  const tasks: PlannedTask[] = [];
+  let needsBlocked = false;
+
+  for (const fn of Object.values(service.functions)) {
+    for (const event of httpEventsOf(fn)) {
+      const resolved = resolveRouteAuthorizer(event, conversionOf);
+      const routeTasks = [...resolved.tasks];
+
+      if (resolved.authorization.kind === "converted") {
+        used.add(resolved.authorization.name);
+      }
+
+      if (resolved.authorization.kind === "blocked") {
+        needsBlocked = true;
+        routeTasks.push({
+          area: "routing",
+          file: routeFile(fn),
+          message: `${routeLabel(event)} route ${event.method} ${event.path} on ${fn.name} is generated behind migrationBlocked and denies every request.`,
+          reason: `${resolved.authorization.reason} Protect the route with an equivalent Voke HTTP Authorizer, then remove migrationBlocked.`,
+          risk: "blocking",
+        });
+      }
+
+      for (const task of routeTasks) {
+        pushUniqueTask(tasks, task);
+      }
+
+      routes.set(event, { ...resolved, event, fn, tasks: routeTasks });
+    }
+  }
+
+  const registry: AuthorizerPlan["registry"] = [];
+  const requestFunctions: AuthorizerPlan["requestFunctions"] = [];
+
+  for (const name of Object.keys(service.provider.httpApi?.authorizers ?? {})) {
+    const conversion = conversions.get(name);
+
+    if (!used.has(name) || conversion?.kind !== "converted") {
+      continue;
+    }
+
+    registry.push({
+      expression: conversion.expression,
+      helper: conversion.helper,
+      name,
+    });
+
+    const target =
+      conversion.requestFunction === undefined
+        ? undefined
+        : service.functions[conversion.requestFunction];
+
+    if (
+      target !== undefined &&
+      !requestFunctions.some((entry) => entry.fn === target)
+    ) {
+      requestFunctions.push({
+        exportName: requestFunctionExportName(target.name),
+        fn: target,
+      });
+    }
+  }
+
+  if (needsBlocked) {
+    registry.push({
+      expression: `lambdaAuthorizer({ function: ${tsString(blockedAuthorizerName)} })`,
+      helper: "lambdaAuthorizer",
+      name: blockedAuthorizerName,
+    });
+  }
+
+  const unusedTask = unusedAuthorizersTask(service, used);
+
+  if (unusedTask !== undefined) {
+    tasks.push(unusedTask);
+  }
+
+  return {
+    hasProtectedRoutes: [...routes.values()].some(
+      (route) => route.authorization.kind !== "public"
+    ),
+    helpers: new Set([
+      ...registry.map((entry) => entry.helper),
+      ...(requestFunctions.length > 0 || needsBlocked
+        ? ["requestAuthorizer"]
+        : []),
+    ]),
+    needsBlocked,
+    registry,
+    requestFunctions,
+    routes,
+    tasks,
+  };
+};
+
+const routeIsEquivalent = (route: RouteAuthorizerPlan): boolean =>
+  route.authorization.kind !== "blocked" && route.tasks.length === 0;
+
+const corsTasks = (service: ServerlessService): PlannedTask[] => {
+  const tasks: PlannedTask[] = [];
+  const cors = service.provider.httpApi?.cors;
+
+  if (cors !== undefined && cors !== true && cors !== false) {
+    tasks.push({
+      area: "routing",
+      file: configFile,
+      message: `provider.httpApi.cors ${describeValue(cors)} is not converted (CORS).`,
+      reason:
+        "Set origins, methods and headers in `api.cors` of voke.config.ts. Until then browsers block cross-origin calls.",
+      risk: "medium",
+    });
+  }
+
+  for (const fn of Object.values(service.functions)) {
+    for (const event of httpEventsOf(fn)) {
+      if (event.cors !== undefined && event.cors !== false) {
+        tasks.push({
+          area: "routing",
+          file: configFile,
+          message: `CORS of ${routeLabel(event)} route ${event.method} ${event.path} on ${fn.name} is not converted.`,
+          reason:
+            "Voke sets CORS once for the API in `api.cors` of voke.config.ts. Until then browsers block cross-origin calls.",
+          risk: "medium",
+        });
+      }
+    }
+  }
+
+  return tasks;
+};
+
+const droppedFunctionSettings = (
+  fn: ServerlessFunction,
+  renamedKeys: string[]
+): PlannedTask | undefined => {
+  const runtimeKept =
+    supportedLambdaRuntime(fn.runtime) !== undefined && hasWorkerEvent(fn);
+  const settings = [
+    fn.timeout === undefined ? undefined : `timeout ${fn.timeout}`,
+    fn.memorySize === undefined ? undefined : `memorySize ${fn.memorySize}`,
+    fn.runtime === undefined || runtimeKept
+      ? undefined
+      : `runtime ${fn.runtime}`,
+    fn.layers.length === 0 ? undefined : `layers (${fn.layers.length})`,
+  ].filter((setting): setting is string => setting !== undefined);
+
+  if (settings.length === 0 && renamedKeys.length === 0) {
+    return undefined;
+  }
+
+  const parts = [
+    settings.length === 0 ? undefined : settings.join(", "),
+    renamedKeys.length === 0
+      ? undefined
+      : `environment ${renamedKeys.join(", ")}`,
+  ].filter((part): part is string => part !== undefined);
+
+  return {
+    area: "build",
+    file: "src/index.ts",
+    message: `Function ${fn.name} settings are not carried to the generated project: ${parts.join("; ")}.`,
+    reason:
+      "All migrated routes share one http(...) Function, so per-function settings have no single target. Set them on the Voke Function that needs them, and update code that reads renamed environment keys.",
+    risk: "medium",
+  };
+};
+
+const droppedSettingsTasks = (
+  service: ServerlessService,
+  values: ProviderValuePlan
+): PlannedTask[] => {
+  const tasks: PlannedTask[] = [];
+  const providerRuntime = service.provider.runtime;
+
+  if (
+    providerRuntime !== undefined &&
+    supportedLambdaRuntime(providerRuntime) === undefined
+  ) {
+    tasks.push({
+      area: "build",
+      file: configFile,
+      message: `Provider runtime ${providerRuntime} is not carried to the generated project.`,
+      reason:
+        "Voke deploys nodejs22.x or nodejs24.x; test the handlers on the runtime of the generated project.",
+      risk: "medium",
+    });
+  }
+
+  if (service.provider.deploymentBucket !== undefined) {
+    tasks.push({
+      area: "build",
+      file: configFile,
+      message: "provider.deploymentBucket is not converted.",
+      reason:
+        "Voke deploys with its own CloudFormation workflow and does not use the Serverless deployment bucket.",
+      risk: "low",
+    });
+  }
+
+  if (service.package?.individually !== undefined) {
+    tasks.push({
+      area: "build",
+      file: "package.json",
+      message: "package.individually is not converted.",
+      reason:
+        "`voke build` bundles every Function from the entrypoint; Serverless packaging flags do not apply.",
+      risk: "low",
+    });
+  }
+
+  for (const fn of Object.values(service.functions)) {
+    const task = droppedFunctionSettings(
+      fn,
+      values.renamedKeys.get(fn.name) ?? []
+    );
+
+    if (task !== undefined) {
+      tasks.push(task);
+    }
+  }
+
+  return tasks;
+};
+
 const areaLabels: Record<ServerlessMigrationArea, string> = {
   build: "Build",
   events: "Events",
@@ -1212,6 +2244,7 @@ const areaLabels: Record<ServerlessMigrationArea, string> = {
 };
 
 const riskLabels: Record<ServerlessMigrationRisk, string> = {
+  blocking: "Blocking",
   high: "High",
   low: "Low",
   medium: "Medium",
@@ -1262,6 +2295,15 @@ const createGeneratedFiles = (
       confidence: "high",
       path: `${outDirectory}/src/functions/index.ts`,
       purpose: "Generated worker Function Registry.",
+    });
+  }
+
+  if (createAuthorizerPlan(service).registry.length > 0) {
+    files.push({
+      confidence: "high",
+      path: `${outDirectory}/${authorizersFile}`,
+      purpose:
+        "HTTP Authorizer Registry and Request Authorizer Function skeletons.",
     });
   }
 
@@ -1368,6 +2410,74 @@ const addInventoryEventManualTask = (
   }
 };
 
+const convertedRouteItem = (
+  route: RouteAuthorizerPlan,
+  outDirectory: string
+): ServerlessMigrationReportItem => {
+  const { authorization, event, fn } = route;
+  const prefix = `${routeLabel(event)} route ${event.method} ${event.path} is generated for ${fn.name}`;
+  const file = `${outDirectory}/${routeFile(fn)}`;
+
+  if (authorization.kind === "blocked") {
+    return {
+      area: "routing",
+      confidence: "low",
+      file,
+      message: `${prefix} behind migrationBlocked, which denies every request.`,
+    };
+  }
+
+  return {
+    area: "routing",
+    confidence: "high",
+    file,
+    message:
+      authorization.kind === "converted"
+        ? `${prefix}, protected by HTTP Authorizer ${authorization.name}.`
+        : `${prefix}.`,
+  };
+};
+
+const providerConvertedItems = (
+  service: ServerlessService,
+  outDirectory: string
+): ServerlessMigrationReportItem[] => {
+  const values = createProviderValuePlan(service);
+  const file = `${outDirectory}/voke.config.ts`;
+  const items: ServerlessMigrationReportItem[] = [];
+
+  if (values.stage !== undefined || values.region !== undefined) {
+    items.push({
+      area: "routing",
+      confidence: "high",
+      file,
+      message: "Provider stage and region are represented in Voke config.",
+    });
+  }
+
+  if (values.providerEnvironmentCopied) {
+    items.push({
+      area: "build",
+      confidence: "medium",
+      file,
+      message:
+        "Provider environment variables are copied into CloudFormation environment settings.",
+    });
+  }
+
+  if (service.provider.httpApi?.cors === true) {
+    items.push({
+      area: "routing",
+      confidence: "medium",
+      file,
+      message:
+        "provider.httpApi.cors: true is generated as api: { cors: true } (CORS for any origin, method and header, without credentials).",
+    });
+  }
+
+  return items;
+};
+
 const createConvertedItems = (
   service: ServerlessService,
   outDirectory: string,
@@ -1383,26 +2493,19 @@ const createConvertedItems = (
     },
   ];
 
-  if (
-    service.provider.stage !== undefined ||
-    service.provider.region !== undefined
-  ) {
-    converted.push({
-      area: "routing",
-      confidence: "high",
-      file: `${outDirectory}/voke.config.ts`,
-      message: "Provider stage and region are represented in Voke config.",
-    });
-  }
+  const authorizerPlan = createAuthorizerPlan(service);
 
-  if (Object.keys(service.provider.environment).length > 0) {
-    converted.push({
-      area: "build",
-      confidence: "medium",
-      file: `${outDirectory}/voke.config.ts`,
-      message:
-        "Provider environment variables are copied into CloudFormation environment settings.",
-    });
+  converted.push(...providerConvertedItems(service, outDirectory));
+
+  for (const entry of authorizerPlan.registry) {
+    if (entry.name !== blockedAuthorizerName) {
+      converted.push({
+        area: "routing",
+        confidence: "high",
+        file: `${outDirectory}/${authorizersFile}`,
+        message: `HTTP Authorizer ${entry.name} is generated with ${entry.helper}.`,
+      });
+    }
   }
 
   for (const resource of resourceDeclarations.generated) {
@@ -1416,13 +2519,13 @@ const createConvertedItems = (
 
   for (const fn of Object.values(service.functions)) {
     for (const event of fn.events) {
-      if (event.type === "httpApi" || event.type === "http") {
-        converted.push({
-          area: "routing",
-          confidence: "high",
-          file: `${outDirectory}/src/routes/${kebabCase(fn.name)}.ts`,
-          message: `${event.type === "httpApi" ? "HTTP API" : "REST API"} route ${event.method} ${event.path} is generated for ${fn.name}.`,
-        });
+      const route =
+        event.type === "httpApi" || event.type === "http"
+          ? authorizerPlan.routes.get(event)
+          : undefined;
+
+      if (route !== undefined) {
+        converted.push(convertedRouteItem(route, outDirectory));
       }
 
       if (event.type === "sqs") {
@@ -1549,6 +2652,18 @@ const createManualTasks = (
     }
   }
 
+  const values = createProviderValuePlan(service);
+  const plannedTasks = [
+    ...createAuthorizerPlan(service).tasks,
+    ...corsTasks(service),
+    ...values.tasks,
+    ...droppedSettingsTasks(service, values),
+  ];
+
+  for (const task of plannedTasks) {
+    tasks.push(toManualTask(task, outDirectory));
+  }
+
   for (const field of unknownFields) {
     tasks.push({
       area: "unknown-fields",
@@ -1599,15 +2714,19 @@ const markdownManualTasksByRisk = (
     return "- No manual work detected.";
   }
 
-  return (["high", "medium", "low"] as const)
+  return (["blocking", "high", "medium", "low"] as const)
     .map((risk) => {
       const rows = tasks.filter((task) => task.risk === risk);
+      const heading =
+        risk === "blocking" ? "### Blocking" : `### ${riskLabels[risk]} risk`;
 
       if (rows.length === 0) {
-        return `### ${riskLabels[risk]} risk\n\n- No ${risk} risk manual work.`;
+        return risk === "blocking"
+          ? `${heading}\n\n- No blocking manual work.`
+          : `${heading}\n\n- No ${risk} risk manual work.`;
       }
 
-      return `### ${riskLabels[risk]} risk\n\n${markdownTable([
+      return `${heading}\n\n${markdownTable([
         ["Area", "Task", "Reason", "Generated output", "Confidence"],
         ["---", "---", "---", "---", "---"],
         ...rows.map((task) => [
@@ -1685,6 +2804,74 @@ const sqsCompatibilityStatus = (
 const sqsCompatibilityOutput = (hasSupportedSqs: boolean): string =>
   hasSupportedSqs ? "Generated Voke SQS Event Source definitions." : "-";
 
+const plannedTaskMessages = (tasks: PlannedTask[], fallback: string): string =>
+  tasks.length === 0 ? fallback : tasks.map((task) => task.message).join(" ");
+
+const providerValueStatus = (
+  tasks: PlannedTask[],
+  present: boolean,
+  absent: string
+): string => {
+  if (tasks.length > 0) {
+    return "Manual work";
+  }
+
+  return present ? "Supported" : absent;
+};
+
+// The package row lists packaging work only: the package.json task and bundler plugin steps.
+const isPackagingTask = (task: ServerlessMigrationManualTask): boolean =>
+  task.file?.endsWith("/package.json") === true ||
+  task.file?.endsWith("/SERVERLESS_COMPATIBILITY.md") === true;
+
+const httpEventRow = (
+  label: string,
+  type: HttpEvent["type"],
+  present: boolean,
+  plan: AuthorizerPlan
+): string[] => {
+  const blocked = [...plan.routes.values()].filter(
+    (route) =>
+      route.event.type === type && route.authorization.kind === "blocked"
+  );
+  let status = "Not present";
+
+  if (blocked.length > 0) {
+    status = "Manual work";
+  } else if (present) {
+    status = "Supported";
+  }
+
+  return [
+    label,
+    status,
+    "high",
+    "Generated Route Builder files.",
+    plannedTaskMessages(
+      blocked.flatMap((route) =>
+        route.tasks.filter((task) => task.risk === "blocking")
+      ),
+      "-"
+    ),
+  ];
+};
+
+const authorizerStatus = (
+  service: ServerlessService,
+  plan: AuthorizerPlan
+): string => {
+  const declared =
+    Object.keys(service.provider.httpApi?.authorizers ?? {}).length > 0;
+
+  if (!(plan.hasProtectedRoutes || declared)) {
+    return "Not present";
+  }
+
+  return plan.tasks.some((task) => task.risk !== "low")
+    ? "Manual work"
+    : "Supported";
+};
+
 const createCompatibilityMarkdown = (
   service: ServerlessService,
   report: ServerlessMigrationReport
@@ -1712,6 +2899,17 @@ const createCompatibilityMarkdown = (
     .filter((item) => item.area === "resources")
     .map((item) => item.message)
     .join(" ");
+  const values = createProviderValuePlan(service);
+  const stageAndRegionTasks = values.tasks.filter(
+    (task) => task.area === "routing"
+  );
+  const environmentTasks = values.tasks.filter((task) => task.area === "build");
+  const hasEnvironment =
+    Object.keys(service.provider.environment).length > 0 ||
+    Object.values(service.functions).some(
+      (fn) => Object.keys(fn.environment).length > 0
+    );
+  const authorizerPlan = createAuthorizerPlan(service);
   const rows = [
     [
       "Service name",
@@ -1722,22 +2920,24 @@ const createCompatibilityMarkdown = (
     ],
     [
       "Provider stage and region",
-      service.provider.stage !== undefined ||
-      service.provider.region !== undefined
-        ? "Supported"
-        : "Defaulted",
+      providerValueStatus(
+        stageAndRegionTasks,
+        values.stage !== undefined || values.region !== undefined,
+        "Defaulted"
+      ),
       "high",
       "`voke.config.ts`",
-      "-",
+      plannedTaskMessages(stageAndRegionTasks, "-"),
     ],
     [
       "Provider environment",
-      Object.keys(service.provider.environment).length > 0
-        ? "Supported"
-        : "Not present",
+      providerValueStatus(environmentTasks, hasEnvironment, "Not present"),
       "medium",
       "`voke.config.ts`",
-      "Review deployment-time secrets and environment sources.",
+      plannedTaskMessages(
+        environmentTasks,
+        "Review deployment-time secrets and environment sources."
+      ),
     ],
     [
       "Provider IAM statements",
@@ -1753,21 +2953,19 @@ const createCompatibilityMarkdown = (
       (service.package?.patterns.length ?? 0) > 0 ? "Reported" : "Not present",
       "medium",
       "`package.json`",
-      compatibilityManualWork(report.manualTasks, "build"),
+      compatibilityManualWork(
+        report.manualTasks.filter(isPackagingTask),
+        "build"
+      ),
     ],
+    httpEventRow("HTTP API event", "httpApi", hasHttpApi, authorizerPlan),
+    httpEventRow("REST API event", "http", hasHttp, authorizerPlan),
     [
-      "HTTP API event",
-      hasHttpApi ? "Supported" : "Not present",
+      "HTTP authorizers",
+      authorizerStatus(service, authorizerPlan),
       "high",
-      "Generated Route Builder files.",
-      "-",
-    ],
-    [
-      "REST API event",
-      hasHttp ? "Supported" : "Not present",
-      "high",
-      "Generated Route Builder files.",
-      "-",
+      authorizerPlan.registry.length > 0 ? "`src/authorizers.ts`" : "-",
+      plannedTaskMessages(authorizerPlan.tasks, "-"),
     ],
     [
       "SQS Event Source",
@@ -1854,6 +3052,12 @@ const reportSummary = (
     ["Generated files", String(report.generatedFiles.length)],
     ["Converted behavior", String(report.converted.length)],
     ["Manual tasks", String(report.manualTasks.length)],
+    [
+      "Blocking tasks",
+      String(
+        report.manualTasks.filter((task) => task.risk === "blocking").length
+      ),
+    ],
     ["Unknown fields", String(report.unknownFields.length)],
   ]);
 
@@ -1931,11 +3135,6 @@ const sqsQueueExpression = (
     ? tsString(queue)
     : `{ queue: ${tsString(queue)}, ${options.join(", ")} }`;
 };
-
-const supportedLambdaRuntime = (
-  runtime: string | undefined
-): string | undefined =>
-  runtime === "nodejs22.x" || runtime === "nodejs24.x" ? runtime : undefined;
 
 // voke build generates the Lambda entry for every Function, so only an explicit runtime carries
 // over from the Serverless service, as an AWS Provider Extension Record.
@@ -2069,15 +3268,35 @@ ${registryEntries.join("\n")}
 `;
 };
 
-const createRouteTemplate = (fn: ServerlessFunction): string => {
-  const exportName = `create${pascalCase(fn.name, "Migrated")}Routes`;
-  const routes = fn.events
-    .filter((event) => event.type === "http" || event.type === "httpApi")
-    .map((event) => {
-      const method = event.method.toLowerCase();
-      const routePath = honoPath(event.path);
+// Every protected Serverless event names an authorizer here; a blocked one names migrationBlocked.
+const routeAuthorizerLine = (
+  authorization: RouteAuthorization | undefined
+): string => {
+  if (authorization === undefined || authorization.kind === "public") {
+    return "";
+  }
 
-      return `route.${method}(${tsString(routePath)}, {
+  const name =
+    authorization.kind === "converted"
+      ? authorization.name
+      : blockedAuthorizerName;
+
+  return `\n    authorizer: ${tsString(name)},`;
+};
+
+const createRouteTemplate = (
+  fn: ServerlessFunction,
+  plan: AuthorizerPlan
+): string => {
+  const exportName = `create${pascalCase(fn.name, "Migrated")}Routes`;
+  const routes = httpEventsOf(fn).map((event) => {
+    const method = event.method.toLowerCase();
+    const routePath = honoPath(event.path);
+    const authorizerLine = routeAuthorizerLine(
+      plan.routes.get(event)?.authorization
+    );
+
+    return `route.${method}(${tsString(routePath)}, {${authorizerLine}
     handler: () => ({
     functionName: ${tsString(fn.name)},
     method: ${tsString(event.method)},
@@ -2086,7 +3305,7 @@ const createRouteTemplate = (fn: ServerlessFunction): string => {
     path: ${tsString(event.path)},
   }),
   })`;
-    });
+  });
 
   return `import { route } from "voke";
 
@@ -2097,17 +3316,20 @@ export const ${exportName} = () => [
 };
 
 const createConfigTemplate = (service: ServerlessService): string => {
-  const environment = {
-    ...service.provider.environment,
-    ...Object.fromEntries(
-      Object.values(service.functions).flatMap((fn) =>
-        Object.entries(fn.environment).map(([key, value]) => [
-          `${toEnvKey(fn.name)}_${key}`,
-          value,
-        ])
-      )
-    ),
-  };
+  const values = createProviderValuePlan(service);
+  const { environment } = values;
+  const providerLines = [
+    values.stage === undefined
+      ? undefined
+      : `  stage: ${tsString(values.stage)},`,
+    values.region === undefined
+      ? undefined
+      : `  region: ${tsString(values.region)},`,
+    '  entrypoint: "./src/index.ts",',
+    service.provider.httpApi?.cors === true
+      ? "  api: { cors: true },"
+      : undefined,
+  ].filter((line): line is string => line !== undefined);
   const resources = createResourceDeclarations(service).generated;
   const resourceImports =
     resources.length === 0
@@ -2131,15 +3353,72 @@ import { defineConfig } from "voke";${resourceImports}
 export default defineConfig({
   name: ${tsString(service.service)},
   provider: ${awsProviderExpression(service)},
-  stage: ${tsString(service.provider.stage ?? "local")},
-  region: ${tsString(service.provider.region ?? "us-east-1")},
-  entrypoint: "./src/index.ts",
+${providerLines.join("\n")}
   environment: ${stringifyObject(environment, 2).replaceAll("\n", "\n  ")},${resourceBlock}
 });
 `;
 };
 
+const createAuthorizersTemplate = (plan: AuthorizerPlan): string => {
+  const helpers = ["createAuthorizers", ...plan.helpers].toSorted();
+  const registry = plan.registry.map(
+    (entry) => `  ${tsString(entry.name)}: ${entry.expression},`
+  );
+  const requestFunctions = plan.requestFunctions.map(
+    ({
+      exportName,
+      fn,
+    }) => `// Original Serverless handler: ${fn.handler ?? "not specified"}
+// Denies every request until the original authorizer logic is ported. See MIGRATION_REPORT.md.
+export const ${exportName} = requestAuthorizer({
+  name: ${tsString(fn.name)},
+  handler: () => ({ authorized: false }),
+});
+`
+  );
+  const blocked = plan.needsBlocked
+    ? [
+        `// Routes whose authorizer could not be migrated use this. See MIGRATION_REPORT.md.
+export const ${blockedAuthorizerName} = requestAuthorizer({
+  handler: () => ({ authorized: false }),
+});
+`,
+      ]
+    : [];
+
+  return `import {
+${helpers.map((helper) => `  ${helper},`).join("\n")}
+} from "@voke/aws";
+
+export const authorizers = createAuthorizers({
+${registry.join("\n")}
+});
+${[...requestFunctions, ...blocked].map((block) => `\n${block}`).join("")}`;
+};
+
 const createIndexTemplate = (service: ServerlessService): string => {
+  const authorizerPlan = createAuthorizerPlan(service);
+  const hasAuthorizers = authorizerPlan.registry.length > 0;
+  const authorizerFunctions = [
+    ...authorizerPlan.requestFunctions.map(({ exportName, fn }) => ({
+      exportName,
+      key: fn.name,
+    })),
+    ...(authorizerPlan.needsBlocked
+      ? [{ exportName: blockedAuthorizerName, key: blockedAuthorizerName }]
+      : []),
+  ];
+  const authorizerImport = hasAuthorizers
+    ? `import { ${[
+        "authorizers",
+        ...authorizerFunctions.map((entry) => entry.exportName),
+      ]
+        .toSorted()
+        .join(", ")} } from "./authorizers";\n`
+    : "";
+  const authorizerEntries = authorizerFunctions.map(
+    (entry) => `  ${tsString(entry.key)}: ${entry.exportName},\n`
+  );
   const routeImports: string[] = [];
   const routeCalls: string[] = [];
   const workerFunctions = Object.values(service.functions).filter(
@@ -2166,7 +3445,7 @@ const createIndexTemplate = (service: ServerlessService): string => {
   const routeFunctionBlock =
     routeCalls.length === 0
       ? ""
-      : `  http: http({
+      : `  http: http({${hasAuthorizers ? "\n    authorizers," : ""}
     routes: [
 ${routeCalls.join("\n")}
     ],
@@ -2174,11 +3453,11 @@ ${routeCalls.join("\n")}
 
   return `import { createFunctions, http, voke } from "voke";
 import config from "../voke.config";
-${functionImport}${routeImports.join("\n")}
+${authorizerImport}${functionImport}${routeImports.join("\n")}
 
 const functions = createFunctions({
   ...${workerFunctions.length === 0 ? "{}" : "workerFunctions"},
-${routeFunctionBlock}});
+${authorizerEntries.join("")}${routeFunctionBlock}});
 
 const service = voke(functions, { config });
 
@@ -2186,34 +3465,9 @@ export default service;
 `;
 };
 
-const createTsconfig = (): Record<string, YamlValue> => ({
-  extends: "../../tsconfig.json",
-  include: ["voke.config.ts", "src/**/*.ts", "test/**/*.ts"],
-});
-
-const createPackageJson = (name: string): Record<string, YamlValue> => ({
-  dependencies: {
-    "@voke/aws": "workspace:*",
-    hono: "^4.0.0",
-    voke: "workspace:*",
-  },
-  devDependencies: {
-    "@types/bun": "latest",
-    "@typescript/native-preview": "^7.0.0-dev.20260516.1",
-  },
-  name: `@voke/${name}`,
-  private: true,
-  scripts: {
-    build: "voke build",
-    clean: "rm -rf dist coverage",
-    dev: "voke dev",
-    synth: "voke synth",
-    test: "bun test",
-    typecheck: "bunx tsgo --project tsconfig.json --noEmit",
-  },
-  type: "module",
-  version: "0.0.0",
-});
+// The scaffold's name rules: lowercase, no scope.
+const migrationPackageName = (service: string): string =>
+  kebabCase(service) || "voke-migration";
 
 const createMigrationFiles = (
   service: ServerlessService,
@@ -2221,9 +3475,10 @@ const createMigrationFiles = (
   outDirectory: string
 ): Record<string, string> => {
   const resourceDeclarations = createResourceDeclarations(service);
+  const authorizerPlan = createAuthorizerPlan(service);
   const files: Record<string, string> = {
-    [`${outDirectory}/package.json`]: `${JSON.stringify(createPackageJson(service.service), null, 2)}\n`,
-    [`${outDirectory}/tsconfig.json`]: `${JSON.stringify(createTsconfig(), null, 2)}\n`,
+    [`${outDirectory}/package.json`]: `${JSON.stringify(projectPackageJson(migrationPackageName(service.service)), null, 2)}\n`,
+    [`${outDirectory}/tsconfig.json`]: `${JSON.stringify(tsconfig, null, 2)}\n`,
     [`${outDirectory}/voke.config.ts`]: createConfigTemplate(service),
     [`${outDirectory}/src/index.ts`]: createIndexTemplate(service),
     [`${outDirectory}/MIGRATION_REPORT.md`]: createReportMarkdown(
@@ -2243,10 +3498,17 @@ const createMigrationFiles = (
       createFunctionsTemplate(workerFunctions);
   }
 
+  if (authorizerPlan.registry.length > 0) {
+    files[`${outDirectory}/${authorizersFile}`] =
+      createAuthorizersTemplate(authorizerPlan);
+  }
+
   for (const fn of Object.values(service.functions)) {
     if (hasHttpEvent(fn)) {
-      files[`${outDirectory}/src/routes/${kebabCase(fn.name)}.ts`] =
-        createRouteTemplate(fn);
+      files[`${outDirectory}/${routeFile(fn)}`] = createRouteTemplate(
+        fn,
+        authorizerPlan
+      );
     }
 
     if (hasWorkerEvent(fn)) {
@@ -2268,43 +3530,17 @@ const addSupportedIf = (
   }
 };
 
+// "Supported" means the setting reached the generated code; reported-only settings are manual tasks.
 const createBaseSupportedFeatures = (service: ServerlessService): string[] => {
   const supported = ["service name"];
+  const values = createProviderValuePlan(service);
 
+  addSupportedIf(supported, values.stage !== undefined, "provider stage");
+  addSupportedIf(supported, values.region !== undefined, "provider region");
   addSupportedIf(
     supported,
-    service.provider.stage !== undefined,
-    "provider stage"
-  );
-  addSupportedIf(
-    supported,
-    service.provider.region !== undefined,
-    "provider region"
-  );
-  addSupportedIf(
-    supported,
-    Object.keys(service.provider.environment).length > 0,
+    values.providerEnvironmentCopied,
     "provider environment"
-  );
-  addSupportedIf(
-    supported,
-    service.provider.iamRoleStatements.length > 0,
-    "provider IAM statements"
-  );
-  addSupportedIf(
-    supported,
-    service.provider.deploymentBucket !== undefined,
-    "provider deployment bucket"
-  );
-  addSupportedIf(
-    supported,
-    (service.package?.patterns.length ?? 0) > 0,
-    "package patterns"
-  );
-  addSupportedIf(
-    supported,
-    service.package?.individually !== undefined,
-    "package individually flag"
   );
   addSupportedIf(supported, service.plugins.length > 0, "plugins inventory");
   addSupportedIf(
@@ -2574,10 +3810,36 @@ const pluginUnsupportedMessage = (
   return `plugin ${plugin.name} requires manual migration: ${plugin.summary}`;
 };
 
+const addRouteReport = (
+  route: RouteAuthorizerPlan | undefined,
+  supported: string[],
+  unsupported: string[]
+): void => {
+  if (route === undefined) {
+    return;
+  }
+
+  const { authorization, event, fn } = route;
+  const label = `${routeLabel(event)} event: ${fn.name} ${event.method} ${event.path}`;
+
+  if (routeIsEquivalent(route)) {
+    supported.push(label);
+  } else if (authorization.kind === "blocked") {
+    unsupported.push(
+      `${label} is generated behind migrationBlocked. ${authorization.reason}`
+    );
+  } else {
+    unsupported.push(
+      `${label} needs manual work before traffic moves: ${route.tasks.map((task) => task.message).join(" ")}`
+    );
+  }
+};
+
 const addEventReport = (
   fn: ServerlessFunction,
   event: ServerlessFunctionEvent,
   resourceDeclarations: ResourceDeclarations,
+  authorizerPlan: AuthorizerPlan,
   supported: string[],
   unsupported: string[]
 ): void => {
@@ -2589,16 +3851,9 @@ const addEventReport = (
   } as const;
 
   switch (event.type) {
-    case "httpApi": {
-      supported.push(
-        `HTTP API event: ${fn.name} ${event.method} ${event.path}`
-      );
-      break;
-    }
+    case "httpApi":
     case "http": {
-      supported.push(
-        `REST API event: ${fn.name} ${event.method} ${event.path}`
-      );
+      addRouteReport(authorizerPlan.routes.get(event), supported, unsupported);
       break;
     }
     case "sqs": {
@@ -2700,9 +3955,18 @@ const createMigrationReport = (
     }
   }
 
+  const authorizerPlan = createAuthorizerPlan(service);
+
   for (const fn of Object.values(service.functions)) {
     for (const event of fn.events) {
-      addEventReport(fn, event, resourceDeclarations, supported, unsupported);
+      addEventReport(
+        fn,
+        event,
+        resourceDeclarations,
+        authorizerPlan,
+        supported,
+        unsupported
+      );
     }
   }
 
@@ -2718,9 +3982,17 @@ const createMigrationReport = (
   };
 };
 
+const parseHttpApiConfig = (value: YamlValue): ServerlessHttpApiConfig => {
+  const config = asObject(value);
+
+  return {
+    authorizers: asObject(config.authorizers),
+    ...(config.cors === undefined ? {} : { cors: config.cors }),
+  };
+};
+
 export const parseServerlessYaml = (source: string): ServerlessService => {
-  const raw = parseYaml(source);
-  const root = asObject(raw);
+  const root = readServerlessYaml(source);
   const provider = asObject(root.provider);
   const providerIam = asObject(provider.iam);
   const providerIamRole = asObject(providerIam.role);
@@ -2739,6 +4011,7 @@ export const parseServerlessYaml = (source: string): ServerlessService => {
   const providerKnownKeys = [
     "deploymentBucket",
     "environment",
+    "httpApi",
     "iam",
     "iamRoleStatements",
     "name",
@@ -2761,7 +4034,7 @@ export const parseServerlessYaml = (source: string): ServerlessService => {
     const rawFunction = asObject(value);
 
     functions[name] = {
-      environment: stringRecord(rawFunction.environment),
+      environment: asObject(rawFunction.environment),
       events: parseFunctionEvents(rawFunction.events, name),
       handler: asOptionalString(rawFunction.handler),
       layers: asArray(rawFunction.layers),
@@ -2790,20 +4063,31 @@ export const parseServerlessYaml = (source: string): ServerlessService => {
     plugins: asArray(root.plugins).map(String),
     provider: {
       deploymentBucket: provider.deploymentBucket,
-      environment: stringRecord(provider.environment),
+      environment: asObject(provider.environment),
+      ...(provider.httpApi === undefined
+        ? {}
+        : { httpApi: parseHttpApiConfig(provider.httpApi) }),
       iamRoleStatements: asArray(
         provider.iamRoleStatements ?? providerIamRole.statements
       ),
       name: asOptionalString(provider.name),
-      region: asOptionalString(provider.region),
+      region: provider.region,
       runtime: asOptionalString(provider.runtime),
-      stage: asOptionalString(provider.stage),
-      unknownFields: collectUnknownFields(
-        provider,
-        providerKnownKeys,
-        "provider",
-        "provider field is not converted automatically"
-      ),
+      stage: provider.stage,
+      unknownFields: [
+        ...collectUnknownFields(
+          provider,
+          providerKnownKeys,
+          "provider",
+          "provider field is not converted automatically"
+        ),
+        ...collectUnknownFields(
+          asObject(provider.httpApi),
+          ["authorizers", "cors"],
+          "provider.httpApi",
+          "provider.httpApi field is not converted automatically"
+        ),
+      ],
     },
     resources: asObject(root.resources),
     service: asOptionalString(root.service) ?? "api",

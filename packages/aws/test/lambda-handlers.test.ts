@@ -174,6 +174,133 @@ test("serves HTTP API events through the Gateway, including the JSON 404", async
   expect(JSON.parse(missing.body).error.code).toBe("NOT_FOUND");
 });
 
+const isRecordWith = (value: unknown, key: string): boolean =>
+  typeof value === "object" &&
+  value !== null &&
+  Object.getPrototypeOf(value) === Object.prototype &&
+  typeof (value as Record<string, unknown>)[key] === "string";
+
+test("a request answers the same through the local Gateway and the Lambda handler", async () => {
+  const functions = createFunctions({
+    http: http({
+      routes: [
+        route.get("/search", {
+          handler: (request) => ({ query: request.query }),
+          query: schema<{ page: string }>((value) =>
+            isRecordWith(value, "page")
+          ),
+        }),
+        route.get("/tenant", {
+          handler: (request) => ({
+            cookie: request.headers.cookie,
+            tenant: request.headers["x-tenant"],
+          }),
+          headers: schema<{ cookie?: string; "x-tenant": string }>((value) =>
+            isRecordWith(value, "x-tenant")
+          ),
+        }),
+        route.post("/items", {
+          body: schema<{ name: string }>((value) =>
+            isRecordWith(value, "name")
+          ),
+          handler: (request) => ({ name: request.body.name }),
+        }),
+      ],
+    }),
+  });
+  const gateway = voke(functions, {
+    config: { name: "lambda-parity", provider: aws() },
+  });
+  const handlers = createLambdaHandlers({ default: gateway });
+  const json = { "content-type": "application/json" };
+  const cases = [
+    {
+      body: { data: { query: { page: "2", tag: "a,b" } } },
+      event: httpEvent("GET", "/search", {
+        rawQueryString: "page=2&tag=a&tag=b",
+      }),
+      local: () => gateway.request("/search?page=2&tag=a&tag=b"),
+      status: 200,
+    },
+    {
+      body: { data: { cookie: "a=1; b=2", tenant: "acme" } },
+      event: httpEvent("GET", "/tenant", {
+        cookies: ["a=1", "b=2"],
+        headers: { "x-tenant": "acme" },
+      }),
+      local: () =>
+        gateway.request("/tenant", {
+          headers: { cookie: "a=1; b=2", "x-tenant": "acme" },
+        }),
+      status: 200,
+    },
+    {
+      body: { data: { name: "Ada" } },
+      event: httpEvent("POST", "/items", {
+        body: Buffer.from('{"name":"Ada"}').toString("base64"),
+        headers: json,
+        isBase64Encoded: true,
+      }),
+      local: () =>
+        gateway.request("/items", {
+          body: '{"name":"Ada"}',
+          headers: json,
+          method: "POST",
+        }),
+      status: 200,
+    },
+    {
+      body: {
+        error: {
+          code: "INVALID_REQUEST",
+          issues: [{ message: "Malformed JSON", path: ["body"] }],
+          message: "Invalid body",
+        },
+      },
+      event: httpEvent("POST", "/items", { body: "{oops", headers: json }),
+      local: () =>
+        gateway.request("/items", {
+          body: "{oops",
+          headers: json,
+          method: "POST",
+        }),
+      status: 400,
+    },
+    {
+      body: {
+        error: {
+          code: "UNSUPPORTED_MEDIA_TYPE",
+          message: "Unsupported content type: send application/json",
+        },
+      },
+      event: httpEvent("POST", "/items", {
+        body: '{"name":"Ada"}',
+        headers: { "content-type": "text/plain" },
+      }),
+      local: () =>
+        gateway.request("/items", {
+          body: '{"name":"Ada"}',
+          headers: { "content-type": "text/plain" },
+          method: "POST",
+        }),
+      status: 415,
+    },
+  ];
+
+  for (const { body, event, local, status } of cases) {
+    const deployed = (await handlers.http?.(event)) as {
+      body: string;
+      statusCode: number;
+    };
+    const response = await local();
+
+    expect(deployed.statusCode).toBe(status);
+    expect(response.status).toBe(status);
+    expect(JSON.parse(deployed.body)).toEqual(body);
+    expect(await response.json()).toEqual(body);
+  }
+});
+
 test("passes SQS batches through sendEvent and reports only failed messages", async () => {
   const { gateway } = createProject();
   const result = await createLambdaHandlers({
