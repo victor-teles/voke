@@ -197,10 +197,41 @@ const response = await gateway.request("/users", {
 
 On a route protected by a Lambda authorizer, `gateway.request(...)` runs the request authorizer Function before the handler. A missing identity value returns `401`, a denied result returns `403`, and an invalid authorizer result returns `500`.
 
-<Callout type="warn" title="JWT authorizers are not checked in process">
-  A JWT authorizer is not checked in process: the route runs without validating
-  the token.
-</Callout>
+On a route protected by a JWT authorizer, `gateway.request(...)` requires a token from the authorizer's identity source and checks its issuer, audience and time claims. It does not verify the signature. Mint a token with `createTestJwt` from `@voke/testing`; a request without one returns `401`. See [Run authorizers locally](/docs/guides/authorizers#run-authorizers-locally).
+
+```ts twoslash
+import { createAuthorizers, jwtAuthorizer } from "@voke/aws";
+import { createTestJwt } from "@voke/testing";
+import { createFunctions, http, route, voke } from "voke";
+
+const authorizers = createAuthorizers({
+  userJwt: jwtAuthorizer({
+    issuer: "https://auth.example.com",
+    audience: "users-api",
+  }),
+});
+const gateway = voke(
+  createFunctions({
+    users: http({
+      authorizers,
+      authorizer: "userJwt",
+      routes: [
+        route.get("/profile", {
+          handler: (req) => ({ subject: req.auth.context.sub }),
+        }),
+      ],
+    }),
+  }),
+  { config: { name: "users-api" } }
+);
+
+// ---cut---
+const response = await gateway.request("/profile", {
+  headers: {
+    authorization: `Bearer ${createTestJwt(authorizers.userJwt, { sub: "usr_1" })}`,
+  },
+});
+```
 
 When the test only needs the route logic, inject the auth context with `functions.route(...)`.
 

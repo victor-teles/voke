@@ -96,21 +96,21 @@ files, so run them one at a time. Recommended order: 014 → 015 → 018 → 019
 
 ### Hardening before a first release (plans 022–034)
 
-| Plan | Title                                                                                                                                   | Priority | Effort | Depends on                | Status             |
-| ---- | --------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------ | ------------------------- | ------------------ |
-| 022  | `bun test` from the repository root passes, and no test depends on the shell it runs in                                                 | P1       | S      | —                         | DONE (663a647)     |
-| 023  | A route's `query` and `headers` are plain objects, and a client's mistake gets a 4xx in the Error Envelope                              | P1       | M      | (022)                     | DONE (663a647)     |
-| 024  | A Function Contract written with `@voke/schema` types callers and handler results as strictly as one written with Zod                   | P1       | M      | (022, 023)                | DONE (663a647)     |
-| 025  | `voke migrate serverless` never reports a lossy conversion as supported                                                                 | P1       | L      | (022–024)                 | DONE (663a647)     |
-| 026  | The CLI rejects arguments it does not use and finds the project from the process working directory                                      | P2       | M      | (022, 023, 025)           | DONE (663a647)     |
-| 027  | Tables, buckets and secrets survive a rename, a replacement, a removal from config and `voke remove`                                    | P1       | M      | (026)                     | DONE (663a647)     |
-| 028  | A failed event lands in a dead-letter queue instead of looping or disappearing                                                          | P1       | L      | (027)                     | DONE (uncommitted) |
-| 029  | Each Function's role and bindings cover only the resources that Function links                                                          | P2       | L      | (023, 024, 027, 028)      | DONE (uncommitted) |
-| 030  | A Lambda bundle holds only run-time code, is minified with function names intact, and a test with a size budget keeps it that way       | P2       | M      | (022–029)                 | DONE (uncommitted) |
-| 031  | Remote Function Registries have one implementation, in `@voke/remote`, and a failed remote call always rejects with an `InvokeError`    | P2       | M      | (022, 023, 024, 026)      | TODO               |
-| 032  | `@voke/idempotency` runs a retried handler once when the handler outlives its expiry or a store write fails, and reports the real error | P2       | M      | (022, 028, 029)           | TODO               |
-| 033  | A route behind a JWT Authorizer answers 401 without a valid-looking token under `voke dev` and in tests                                 | P2       | M      | (022, 023, 024, 031)      | TODO               |
-| 034  | The packages can be versioned, packed and installed into a fresh project, and CI proves it on every pull request                        | P1       | M      | (022, 025, 026, 030, 031) | TODO               |
+| Plan | Title                                                                                                                                   | Priority | Effort | Depends on                | Status                |
+| ---- | --------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------ | ------------------------- | --------------------- |
+| 022  | `bun test` from the repository root passes, and no test depends on the shell it runs in                                                 | P1       | S      | —                         | DONE (663a647)        |
+| 023  | A route's `query` and `headers` are plain objects, and a client's mistake gets a 4xx in the Error Envelope                              | P1       | M      | (022)                     | DONE (663a647)        |
+| 024  | A Function Contract written with `@voke/schema` types callers and handler results as strictly as one written with Zod                   | P1       | M      | (022, 023)                | DONE (663a647)        |
+| 025  | `voke migrate serverless` never reports a lossy conversion as supported                                                                 | P1       | L      | (022–024)                 | DONE (663a647)        |
+| 026  | The CLI rejects arguments it does not use and finds the project from the process working directory                                      | P2       | M      | (022, 023, 025)           | DONE (663a647)        |
+| 027  | Tables, buckets and secrets survive a rename, a replacement, a removal from config and `voke remove`                                    | P1       | M      | (026)                     | DONE (663a647)        |
+| 028  | A failed event lands in a dead-letter queue instead of looping or disappearing                                                          | P1       | L      | (027)                     | DONE (05df4b3)        |
+| 029  | Each Function's role and bindings cover only the resources that Function links                                                          | P2       | L      | (023, 024, 027, 028)      | DONE (05df4b3)        |
+| 030  | A Lambda bundle holds only run-time code, is minified with function names intact, and a test with a size budget keeps it that way       | P2       | M      | (022–029)                 | DONE (05df4b3)        |
+| 031  | Remote Function Registries have one implementation, in `@voke/remote`, and a failed remote call always rejects with an `InvokeError`    | P2       | M      | (022, 023, 024, 026)      | DONE (031–033 commit) |
+| 032  | `@voke/idempotency` runs a retried handler once when the handler outlives its expiry or a store write fails, and reports the real error | P2       | M      | (022, 028, 029)           | DONE (031–033 commit) |
+| 033  | A route behind a JWT Authorizer answers 401 without a valid-looking token under `voke dev` and in tests                                 | P2       | M      | (022, 023, 024, 031)      | DONE (031–033 commit) |
+| 034  | The packages can be versioned, packed and installed into a fresh project, and CI proves it on every pull request                        | P1       | M      | (022, 025, 026, 030, 031) | TODO                  |
 
 No plan in this round has a hard prerequisite; every dependency is ordering only, because the
 plans share files. Recommended order: 022 → 023 → 024 → 025 → 026 → 027 → 028 → 029 → 030 → 031

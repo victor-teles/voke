@@ -4,7 +4,7 @@
 import type { VokeProvider } from "voke";
 
 import type { AwsRetainData } from "./data-retention";
-import { awsRouteAuth } from "./lambda";
+import { awsRouteAuth, isAwsPlatformRequest } from "./lambda";
 import { createAwsInvokeCapability } from "./lambda-invoke-transport";
 import type { AwsLambdaOptions } from "./lambda-settings";
 import type { LocalProvider } from "./local-provider";
@@ -35,6 +35,7 @@ export const awsRuntimeCapabilities = (): Pick<
   invoke: createAwsInvokeCapability(),
   name: "aws",
   runtime: {
+    isPlatformRequest: isAwsPlatformRequest,
     routeAuth: awsRouteAuth,
     variables: () => [createAwsRuntimeVariableProvider()],
   },

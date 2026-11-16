@@ -1,8 +1,10 @@
 export type IdempotencyErrorCode =
+  | "IDEMPOTENCY_COMPLETE_FAILED"
   | "IDEMPOTENCY_IN_PROGRESS"
   | "IDEMPOTENCY_KEY_MISSING"
   | "IDEMPOTENCY_PAYLOAD_MISMATCH"
-  | "IDEMPOTENCY_RESULT_NOT_SERIALIZABLE";
+  | "IDEMPOTENCY_RESULT_NOT_SERIALIZABLE"
+  | "IDEMPOTENCY_RESULT_TOO_LARGE";
 
 /**
  * Thrown by `idempotent(...)` when a call cannot run or be replayed. Messages name the Function

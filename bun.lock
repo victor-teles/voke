@@ -252,8 +252,6 @@
       "name": "@voke/remote",
       "version": "0.0.0",
       "dependencies": {
-        "@voke/http": "workspace:*",
-        "hono": "^4.0.0",
         "voke": "workspace:*",
       },
       "devDependencies": {

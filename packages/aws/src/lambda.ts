@@ -59,3 +59,10 @@ export const awsRouteAuth = ({
 
   return undefined;
 };
+
+/**
+ * True when API Gateway invoked the deployed Function: `env.event` is set only by
+ * `createAwsLambdaHandler`. The Gateway then refuses to evaluate a JWT itself.
+ */
+export const isAwsPlatformRequest = ({ env }: { env: unknown }): boolean =>
+  isRecord(env) && isRecord(env.event);

@@ -57,7 +57,7 @@ The explicit workflow where a consuming **Voke Project** fetches a provider's **
 _Avoid_: Runtime-only contract fetching, implicit boot-time type discovery
 
 **Remote Helper**:
-A specialized utility for generating, constructing, and invoking **Remote Function Registries** from **Function Contract Artifacts**.
+The specialized utility that constructs and invokes a **Remote Function Registry** from a **Function Contract Artifact**.
 _Avoid_: Function Contract, provider package, root Function authoring
 
 **Build Helper**:
@@ -285,7 +285,7 @@ The application value that identifies one logical operation, chosen by the handl
 _Avoid_: request id, message id as a default
 
 **Idempotency Record**:
-What an **Idempotency Store** keeps for one **Function** and **Idempotency Key**: the status (`INPROGRESS` or `COMPLETED`), the expiry, a hash of the validated input and the stored result.
+What an **Idempotency Store** keeps for one **Function** and **Idempotency Key**: the status (`INPROGRESS`, `COMPLETED` or `RESULT_TOO_LARGE`), the expiry, a hash of the validated input and the stored result.
 _Avoid_: lock, cache entry
 
 **Idempotency Store**:
@@ -333,6 +333,8 @@ _Avoid_: idempotency cache, persistence layer
 - A **Remote Function Registry** is created from a **Function Contract Artifact** plus a runtime target for the provider project.
 - A **Remote Function Registry** preserves Function-key invocation without requiring provider source imports.
 - A **Remote Function Registry** sends its expected contract fingerprint during remote invocation when the provider can validate it.
+- The root `voke` package produces the **Function Contract Artifact**, runs **Remote Code Generation** and serves the **Dev Function Invoke Endpoint**.
+- A **Remote Function Registry** rejects a failed call with an `InvokeError`, and rejects invoke options it does not support.
 - A consuming **Voke Project** defines runtime targets for its **Remote Function Registries** in `voke.config.ts`.
 - Remote runtime targets are keyed by provider project name, not repeated at each invocation callsite.
 - Remote runtime targets are selected by stage, with environment overrides available as escape hatches.
@@ -464,7 +466,10 @@ _Avoid_: idempotency cache, persistence layer
 - A route-backed **Function** can read **Route Auth Context** when its route uses an **HTTP Authorizer**.
 - **Local Authorizer Evaluation** runs **Request Authorizer Functions** locally.
 - **Local Authorizer Evaluation** can inject **Route Auth Context** for tests.
-- **Local Authorizer Evaluation** does not fully validate **JWT Authorizers** by default.
+- **Local Authorizer Evaluation** requires a token from the **Authorizer Identity Source** of a **JWT Authorizer** and checks its issuer, audience and time claims.
+- **Local Authorizer Evaluation** never verifies a token signature.
+- **Local Authorizer Evaluation** gives a route-backed **Function** the same **Route Auth Context** shape the **HTTP API** provides.
+- **Local Authorizer Evaluation** of a **JWT Authorizer** does not run for a request the platform delivered to a deployed **Function**.
 - **Local Authorizer Evaluation** returns Unauthorized when an authorizer identity value is missing.
 - **Local Authorizer Evaluation** returns Forbidden when a **Request Authorizer Function** denies a request.
 - **Local Authorizer Evaluation** treats invalid or failed **Request Authorizer Function** execution as an internal route failure.

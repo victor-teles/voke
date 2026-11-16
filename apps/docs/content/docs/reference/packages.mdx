@@ -90,11 +90,12 @@ The core package: Functions, the Gateway, the config, and the error classes. It 
 | `VokeError`, `VokeConfigError`, `VokeModelError`, `VokeDeployError`, `VokeResourceBindingError`, `VokeRuntimeVariableError`, `InvokeError` | Error classes. See [Errors](/docs/reference/errors).                                                                              |
 | `createVariableSource`, `createVariableProvider`                                                                                           | Build provider-neutral Runtime Variable sources and providers.                                                                    |
 | `StandardSchemaV1`, `VokeConfig`, `VokeConfigInput`, `VokeProvider` (types)                                                                | Types for schemas, config and Providers.                                                                                          |
+| `FunctionContractArtifact`, `FunctionContractMetadata`, `ContractJsonSchema` (types)                                                       | The **Function Contract Artifact** that `GET /_voke/contract` serves and `@voke/remote` reads.                                    |
 | `VokePlugin`, `FunctionWrap`, `FunctionExecution`, `PluginContributions`, `PluginCommand` and the other `Plugin*` types                    | Write a [Plugin](/docs/guides/plugins).                                                                                           |
 
 `voke` also exports building blocks for Provider packages, such as `functionRegistryEntries`, `projectFunctionEntries`, `createHandlerExportName`, `runRequestAuthorizer`, `readStandardResult` and `formatValidationIssue`. Application code does not need them.
 
-`readJsonSchema` reads a schema's JSON Schema through Standard JSON Schema, and `toContractJsonSchema` narrows it to the subset of the Function Contract Artifact. `@voke/openapi` and `@voke/remote` use them.
+`readJsonSchema` reads a schema's JSON Schema through Standard JSON Schema. `@voke/openapi` uses it.
 
 Learn it in [Functions](/docs/guides/functions), [HTTP routes](/docs/guides/http-routes) and [Concepts](/docs/concepts).
 
@@ -158,14 +159,14 @@ Learn it in [Testing](/docs/guides/testing).
 
 A [Plugin](/docs/guides/plugins) that makes a retried handler run once. It provisions a DynamoDB table and depends on `@voke/aws`.
 
-| Export                                                                | Use                                                                                                          |
-| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `idempotency`                                                         | The Plugin for `voke.config.ts`: `plugins: [idempotency()]`. It contributes the `idempotencyTable` resource. |
-| `idempotent`                                                          | Wrap a Function or route handler so it runs once per **Idempotency Key**.                                    |
-| `idempotentBatch`                                                     | Build an SQS handler that runs each message once.                                                            |
-| `memoryStore`, `dynamoDbStore`                                        | **Idempotency Stores**: in memory for tests, and the DynamoDB store the Plugin uses.                         |
-| `IdempotencyError`                                                    | Thrown when a call is in progress, its payload differs, its key is missing or its result is not JSON.        |
-| `IdempotencyOptions`, `IdempotencyStore`, `IdempotencyRecord` (types) | Options of `idempotent`, and the store contract.                                                             |
+| Export                                                                | Use                                                                                                                                                                |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `idempotency`                                                         | The Plugin for `voke.config.ts`: `plugins: [idempotency()]`. It contributes the `idempotencyTable` resource.                                                       |
+| `idempotent`                                                          | Wrap a Function or route handler so it runs once per **Idempotency Key**.                                                                                          |
+| `idempotentBatch`                                                     | Build an SQS handler that runs each message once.                                                                                                                  |
+| `memoryStore`, `dynamoDbStore`                                        | **Idempotency Stores**: in memory for tests, and the DynamoDB store the Plugin uses.                                                                               |
+| `IdempotencyError`                                                    | Thrown when a call is in progress, its payload differs, its key is missing, its result is not JSON, its result is too large, or its record could not be completed. |
+| `IdempotencyOptions`, `IdempotencyStore`, `IdempotencyRecord` (types) | Options of `idempotent`, and the store contract.                                                                                                                   |
 
 Learn it in [Idempotency](/docs/guides/idempotency).
 
@@ -199,6 +200,7 @@ Provider-neutral test clients.
 | ------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
 | `createTestClient`       | A plain `fetch` client over `{ fetch }` (such as the Gateway) or `{ baseUrl }`. It does not simulate Lambda or API Gateway. |
 | `createInvokeTestClient` | Call `invoke(...)` on a Function Registry in a test, without creating a Gateway first.                                      |
+| `createTestJwt`          | An unsigned JWT for a route behind a JWT authorizer, accepted by the local Gateway only.                                    |
 
 Learn it in [Testing](/docs/guides/testing).
 
@@ -206,12 +208,12 @@ Learn it in [Testing](/docs/guides/testing).
 
 Typed **Remote Function Registries**, to call the Functions of another Voke Project.
 
-| Export                                                        | Use                                                                                    |
-| ------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `createRemoteFunctions`                                       | Create a Remote Function Registry from a contract artifact. Generated modules call it. |
-| `generateRemoteModules`, `renderRemoteModule`                 | Fetch contract metadata and write the modules. `voke remote generate` does this.       |
-| `createFunctionContractArtifact`, `mountDevFunctionEndpoints` | Publish contract metadata and the invoke endpoints from the remote project.            |
-| `defineRemoteConfig`, `remoteEnvironment`                     | Resolve `remotes` settings and the environment variables they produce.                 |
+| Export                                                  | Use                                                                                    |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `createRemoteFunctions`                                 | Create a Remote Function Registry from a contract artifact. Generated modules call it. |
+| `RemoteFunctionRegistry`, `RemoteInvokeOptions` (types) | The registry and the invoke options it accepts (`trace`, `timeoutMs`, `retries`).      |
+
+`voke remote generate`, the `remotes` setting and the endpoints that `voke dev` serves are part of `voke`, not of this package.
 
 Learn it in [Remote Functions](/docs/guides/remote-functions).
 

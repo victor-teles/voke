@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 
 import { response } from "@voke/http";
 import { schema } from "@voke/schema";
@@ -118,6 +118,59 @@ test("a route called twice with the same idempotency-key header runs once", asyn
   expect(first.status).toBe(200);
   expect(await first.json()).toEqual({ data: { orderId: "ord_1" } });
   expect(await second.json()).toEqual({ data: { orderId: "ord_1" } });
+  expect(created).toEqual(["book"]);
+});
+
+test("a route retry that differs only in a tracing header replays without validate", async () => {
+  const created: string[] = [];
+  const functions = createFunctions({
+    orders: http({
+      routes: [
+        route.post("/orders", {
+          body: schema.object({ item: schema.string() }),
+          handler: idempotent(
+            (request) => {
+              created.push(request.body.item);
+
+              return { orderId: `ord_${created.length}` };
+            },
+            { key: (request) => request.headers["idempotency-key"] }
+          ),
+        }),
+      ],
+    }),
+  });
+  const gateway = voke(functions, {
+    config: config([idempotency({ store: memoryStore() })]),
+  });
+  const post = (traceId: string, item = "book") =>
+    gateway.request("/orders", {
+      body: JSON.stringify({ item }),
+      headers: {
+        "content-type": "application/json",
+        "idempotency-key": "req_1",
+        "x-amzn-trace-id": traceId,
+      },
+      method: "POST",
+    });
+
+  const first = await post("Root=1-a");
+  const retry = await post("Root=1-b");
+  // The Gateway logs the unexpected IdempotencyError of the mismatch below.
+  const errorLog = spyOn(console, "error").mockImplementation(() => {});
+  let otherBody: Response;
+
+  try {
+    otherBody = await post("Root=1-c", "pen");
+  } finally {
+    errorLog.mockRestore();
+  }
+
+  expect(await first.json()).toEqual({ data: { orderId: "ord_1" } });
+  expect(retry.status).toBe(200);
+  expect(await retry.json()).toEqual({ data: { orderId: "ord_1" } });
+  // A different body with the same key is still a mismatch: the Gateway's generic 500.
+  expect(otherBody.status).toBe(500);
   expect(created).toEqual(["book"]);
 });
 

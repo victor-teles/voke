@@ -104,7 +104,11 @@ const fromItem = (item: Item): IdempotencyRecord => {
   const inProgressExpiresAt = readNumber(item, "in_progress_expiration");
   const data = item.data?.S;
 
-  if (status !== "COMPLETED" && status !== "INPROGRESS") {
+  if (
+    status !== "COMPLETED" &&
+    status !== "INPROGRESS" &&
+    status !== "RESULT_TOO_LARGE"
+  ) {
     throw malformedRecord("status");
   }
 
@@ -257,6 +261,27 @@ export const dynamoDbStore = (
           Key: { id: { S: id } },
           TableName: table,
           UpdateExpression: `SET #status = :completed, #expiration = :expiration${setData} REMOVE #in_progress_expiration`,
+        })
+      );
+    },
+    markResultTooLarge: async (id, expiresAt) => {
+      const { dynamodb, sdk, table } = await connect();
+
+      await dynamodb.send(
+        new sdk.UpdateItemCommand({
+          ExpressionAttributeNames: pick(
+            "#expiration",
+            "#in_progress_expiration",
+            "#status"
+          ),
+          ExpressionAttributeValues: {
+            ":expiration": { N: String(expiresAt) },
+            ":status": { S: "RESULT_TOO_LARGE" },
+          },
+          Key: { id: { S: id } },
+          TableName: table,
+          UpdateExpression:
+            "SET #status = :status, #expiration = :expiration REMOVE #in_progress_expiration",
         })
       );
     },

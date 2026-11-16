@@ -12,11 +12,10 @@ import type {
   FunctionRegistry,
   FunctionRegistryInput,
   InvokableFunctionDefinition,
-  InvokeOptions,
   StandardSchemaV1,
 } from "./invoke";
 import { InvokeError, invokeRegistryFunction } from "./invoke";
-import { readEnv, sha256Hex } from "./runtime-env";
+import { sha256Hex } from "./runtime-env";
 import { readJsonSchema } from "./standard-schema";
 
 type JsonPrimitive = boolean | null | number | string;
@@ -74,94 +73,6 @@ export interface VokeRemoteConfigInput {
   contract?: string;
   out?: string;
   targets: Record<string, RemoteTarget>;
-}
-
-type JsonSchemaType<TSchema> = TSchema extends true
-  ? unknown
-  : TSchema extends false
-    ? never
-    : TSchema extends { const: infer TValue }
-      ? TValue
-      : TSchema extends { enum: readonly (infer TValue)[] }
-        ? TValue
-        : TSchema extends { type: "string" }
-          ? string
-          : TSchema extends { type: "number" | "integer" }
-            ? number
-            : TSchema extends { type: "boolean" }
-              ? boolean
-              : TSchema extends { type: "null" }
-                ? null
-                : TSchema extends { type: "array"; items: infer TItems }
-                  ? JsonSchemaType<TItems>[]
-                  : TSchema extends {
-                        properties: infer TProperties;
-                        required?: readonly string[];
-                        type: "object";
-                      }
-                    ? JsonObjectType<TProperties, TSchema["required"]>
-                    : unknown;
-
-type JsonObjectType<TProperties, TRequired> =
-  TProperties extends Record<string, JsonSchema>
-    ? {
-        [TKey in keyof TProperties as TKey extends RequiredKey<TRequired>
-          ? TKey
-          : never]: JsonSchemaType<TProperties[TKey]>;
-      } & {
-        [TKey in keyof TProperties as TKey extends RequiredKey<TRequired>
-          ? never
-          : TKey]?: JsonSchemaType<TProperties[TKey]>;
-      }
-    : Record<string, unknown>;
-
-type RequiredKey<TRequired> = TRequired extends readonly (infer TKey)[]
-  ? TKey & string
-  : never;
-
-type RemoteInput<TFunction> = TFunction extends { input: infer TInput }
-  ? JsonSchemaType<TInput>
-  : undefined;
-
-type RemoteOutput<TFunction> = TFunction extends { output: infer TOutput }
-  ? JsonSchemaType<TOutput>
-  : never;
-
-type RemotePayloadKey<TFunctions> = {
-  [TKey in keyof TFunctions]: TFunctions[TKey] extends { input: JsonSchema }
-    ? TKey
-    : never;
-}[keyof TFunctions];
-
-type RemoteZeroInputKey<TFunctions> = {
-  [TKey in keyof TFunctions]: TFunctions[TKey] extends { input: JsonSchema }
-    ? never
-    : TKey;
-}[keyof TFunctions];
-
-export interface RemoteFunctionRegistry<
-  TFunctions extends Record<string, FunctionContractMetadata> = Record<
-    string,
-    FunctionContractMetadata
-  >,
-> {
-  readonly invoke: {
-    <TKey extends RemotePayloadKey<TFunctions>>(
-      functionName: TKey,
-      payload: RemoteInput<TFunctions[TKey]>,
-      options?: InvokeOptions
-    ): Promise<RemoteOutput<TFunctions[TKey]>>;
-    <TKey extends RemoteZeroInputKey<TFunctions>>(
-      functionName: TKey,
-      payload?: undefined,
-      options?: InvokeOptions
-    ): Promise<RemoteOutput<TFunctions[TKey]>>;
-  };
-}
-
-interface JsonSchemaIssue {
-  message: string;
-  path: string;
 }
 
 interface RemoteInvokeRequest {
@@ -334,227 +245,11 @@ export const createFunctionContractArtifact = (
   };
 };
 
-const pathFor = (path: string, key: string): string =>
-  path === "" ? key : `${path}.${key}`;
-
-type JsonSchemaValidator = (
-  schema: JsonSchema | undefined,
-  value: unknown,
-  path?: string
-) => JsonSchemaIssue[];
-
-const validateArrayJsonSchema = (
-  schema: Exclude<JsonSchema, boolean>,
-  value: unknown,
-  path: string,
-  validate: JsonSchemaValidator
-): JsonSchemaIssue[] => {
-  if (!Array.isArray(value)) {
-    return [{ message: "expected array", path }];
-  }
-
-  return value.flatMap((item, index) =>
-    validate(schema.items, item, `${path}[${index}]`)
-  );
-};
-
-const validateObjectJsonSchema = (
-  schema: Exclude<JsonSchema, boolean>,
-  value: unknown,
-  path: string,
-  validate: JsonSchemaValidator
-): JsonSchemaIssue[] => {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return [{ message: "expected object", path }];
-  }
-
-  const record = value as Record<string, unknown>;
-  const requiredIssues = (schema.required ?? [])
-    .filter((key) => !(key in record))
-    .map((key) => ({
-      message: "is required",
-      path: pathFor(path, key),
-    }));
-  const propertyIssues = Object.entries(schema.properties ?? {}).flatMap(
-    ([key, propertySchema]) =>
-      key in record
-        ? validate(propertySchema, record[key], pathFor(path, key))
-        : []
-  );
-
-  return [...requiredIssues, ...propertyIssues];
-};
-
-const validateTypedJsonSchema = (
-  schema: Exclude<JsonSchema, boolean>,
-  value: unknown,
-  path: string,
-  validate: JsonSchemaValidator
-): JsonSchemaIssue[] => {
-  switch (schema.type) {
-    case "array": {
-      return validateArrayJsonSchema(schema, value, path, validate);
-    }
-    case "integer": {
-      return typeof value === "number" && Number.isInteger(value)
-        ? []
-        : [{ message: "expected integer", path }];
-    }
-    case "null": {
-      return value === null ? [] : [{ message: "expected null", path }];
-    }
-    case "object": {
-      return validateObjectJsonSchema(schema, value, path, validate);
-    }
-    default: {
-      return typeof value === schema.type
-        ? []
-        : [{ message: `expected ${schema.type}`, path }];
-    }
-  }
-};
-
-const validateJsonSchema = (
-  schema: JsonSchema | undefined,
-  value: unknown,
-  path = ""
-): JsonSchemaIssue[] => {
-  if (schema === undefined || schema === true) {
-    return [];
-  }
-
-  if (schema === false) {
-    return [{ message: "value is not allowed", path }];
-  }
-
-  if (schema.const !== undefined && value !== schema.const) {
-    return [{ message: `expected ${JSON.stringify(schema.const)}`, path }];
-  }
-
-  if (schema.enum !== undefined && !schema.enum.includes(value as never)) {
-    return [{ message: "expected one of enum values", path }];
-  }
-
-  return schema.type === undefined
-    ? []
-    : validateTypedJsonSchema(schema, value, path, validateJsonSchema);
-};
-
-const formatJsonSchemaIssues = (issues: JsonSchemaIssue[]): string =>
-  issues
-    .map((issue) =>
-      issue.path === "" ? issue.message : `${issue.path}: ${issue.message}`
-    )
-    .join("; ");
-
 const remoteOriginEnvName = (project: string): string =>
   `VOKE_REMOTE_${toEnvKey(project)}_ORIGIN`;
 
 const remoteContractEnvName = (project: string): string =>
   `VOKE_REMOTE_${toEnvKey(project)}_CONTRACT_URL`;
-
-const resolveRemoteOrigin = (project: string): string => {
-  const origin = readEnv(remoteOriginEnvName(project));
-
-  if (origin === undefined || origin.trim() === "") {
-    throw new VokeConfigError(
-      `Remote Function Registry "${project}" has no runtime target. Configure remotes.${project}.targets for this stage.`
-    );
-  }
-
-  return normalizeOrigin(origin);
-};
-
-const invokeUrl = (project: string, functionName: string): string =>
-  `${resolveRemoteOrigin(project)}/_voke/functions/${encodeURIComponent(functionName)}/invoke`;
-
-export const createRemoteFunctions = <
-  const TFunctions extends Record<string, FunctionContractMetadata>,
->(
-  project: string,
-  artifact: FunctionContractArtifact<TFunctions>
-): RemoteFunctionRegistry<TFunctions> => {
-  if (artifact.project !== project) {
-    throw new VokeConfigError(
-      `Remote Function Registry "${project}" received a contract for "${artifact.project}"`
-    );
-  }
-
-  const registry = {} as RemoteFunctionRegistry<TFunctions>;
-
-  Object.defineProperty(registry, "invoke", {
-    enumerable: false,
-    value: async (
-      functionName: string,
-      payload?: unknown,
-      options: InvokeOptions = {}
-    ): Promise<unknown> => {
-      const contract = artifact.functions[functionName];
-
-      if (contract === undefined) {
-        throw new InvokeError(`Remote Function not found: ${functionName}`, {
-          code: "MISSING_FUNCTION",
-          functionName,
-        });
-      }
-
-      const inputIssues = validateJsonSchema(contract.input, payload);
-      if (inputIssues.length > 0) {
-        throw new InvokeError(
-          `Invalid remote payload for ${functionName}: ${formatJsonSchemaIssues(inputIssues)}`,
-          {
-            code: "INVALID_PAYLOAD",
-            functionName,
-          }
-        );
-      }
-
-      const response = await fetch(invokeUrl(project, functionName), {
-        body: JSON.stringify({
-          contractFingerprint: artifact.fingerprint,
-          payload,
-          trace: options.trace,
-        } satisfies RemoteInvokeRequest),
-        headers: { "content-type": "application/json" },
-        method: "POST",
-      });
-      const body = (await response.json()) as
-        | { data: unknown }
-        | { error: { message: string } };
-
-      if (!response.ok) {
-        const message =
-          "error" in body
-            ? body.error.message
-            : `Remote Function invocation failed with HTTP ${response.status}`;
-
-        throw new InvokeError(message, {
-          code:
-            response.status === 404 ? "MISSING_FUNCTION" : "TRANSPORT_FAILED",
-          functionName,
-          statusCode: response.status,
-        });
-      }
-
-      const result = "data" in body ? body.data : undefined;
-      const outputIssues = validateJsonSchema(contract.output, result);
-
-      if (outputIssues.length > 0) {
-        throw new InvokeError(
-          `Invalid remote result from ${functionName}: ${formatJsonSchemaIssues(outputIssues)}`,
-          {
-            code: "INVALID_RESULT",
-            functionName,
-          }
-        );
-      }
-
-      return result;
-    },
-  });
-
-  return registry;
-};
 
 const selectedTarget = (
   target: RemoteTarget | undefined
@@ -679,6 +374,21 @@ export const generateRemoteModules = async (
   return outputs;
 };
 
+// A body that is not JSON, or JSON that is not an object, answers undefined.
+const readInvokeRequest = async (request: {
+  json: () => Promise<unknown>;
+}): Promise<RemoteInvokeRequest | undefined> => {
+  let body: unknown;
+
+  try {
+    body = await request.json();
+  } catch {
+    return undefined;
+  }
+
+  return isRecord(body) ? (body as RemoteInvokeRequest) : undefined;
+};
+
 export const mountDevFunctionEndpoints = (
   gateway: Hono<VokeEnv>,
   options: {
@@ -690,12 +400,20 @@ export const mountDevFunctionEndpoints = (
     json(createFunctionContractArtifact(options.project, options.functions))
   );
   gateway.post("/_voke/functions/:functionName/invoke", async (c) => {
+    const body = await readInvokeRequest(c.req);
+
+    if (body === undefined) {
+      return jsonError(
+        "The Dev Function Invoke Endpoint expects a JSON object body",
+        { code: "BAD_REQUEST", status: 400 }
+      );
+    }
+
     const artifact = createFunctionContractArtifact(
       options.project,
       options.functions
     );
     const functionName = c.req.param("functionName");
-    const body = (await c.req.json()) as RemoteInvokeRequest;
 
     if (
       body.contractFingerprint !== undefined &&

@@ -248,6 +248,55 @@ test("complete updates status, expiration and data with attribute name placehold
   ]);
 });
 
+test("markResultTooLarge sets the status and the expiry and removes the in-progress expiry", async () => {
+  const { client, sent } = fakeClient();
+  const store = dynamoDbStore({ client, tableName: "dedupe" });
+
+  await store.markResultTooLarge("charge##abc", 1_763_168_500);
+
+  expect(sent).toEqual([
+    {
+      input: {
+        ExpressionAttributeNames: {
+          "#expiration": "expiration",
+          "#in_progress_expiration": "in_progress_expiration",
+          "#status": "status",
+        },
+        ExpressionAttributeValues: {
+          ":expiration": { N: "1763168500" },
+          ":status": { S: "RESULT_TOO_LARGE" },
+        },
+        Key: { id: { S: "charge##abc" } },
+        TableName: "dedupe",
+        UpdateExpression:
+          "SET #status = :status, #expiration = :expiration REMOVE #in_progress_expiration",
+      },
+      name: "UpdateItemCommand",
+    },
+  ]);
+});
+
+test("a blocking item with status RESULT_TOO_LARGE maps to the existing record", async () => {
+  const { data: _data, ...withoutData } = completedItem;
+  const { client } = fakeClient([
+    conditionalCheckFailed({
+      ...withoutData,
+      status: { S: "RESULT_TOO_LARGE" },
+    }),
+  ]);
+  const store = dynamoDbStore({ client, tableName: "dedupe" });
+
+  await expect(store.acquire(record, now)).resolves.toEqual({
+    acquired: false,
+    existing: {
+      expiresAt: 1_763_168_400,
+      id: "charge##abc",
+      status: "RESULT_TOO_LARGE",
+      validation: "v1",
+    },
+  });
+});
+
 test("release deletes the record", async () => {
   const { client, sent } = fakeClient();
   const store = dynamoDbStore({ client, tableName: "dedupe" });

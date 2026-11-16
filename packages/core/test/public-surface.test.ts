@@ -121,8 +121,6 @@ test("keeps the stable root runtime surface intentional", () => {
     "readStandardResult",
     "route",
     "runRequestAuthorizer",
-    // Narrows JSON Schema to the Function Contract Artifact's subset (@voke/remote uses it).
-    "toContractJsonSchema",
     "voke",
   ]);
   // toEnvKey is an AWS binding-name helper: it lives in @voke/aws only.
@@ -198,6 +196,7 @@ test("keeps provider-neutral testing helpers in @voke/testing", async () => {
   expect(Object.keys(testing).toSorted()).toEqual([
     "createInvokeTestClient",
     "createTestClient",
+    "createTestJwt",
   ]);
   expect("createTestClient" in voke).toBe(false);
 });
@@ -218,7 +217,7 @@ test("keeps AWS testing helpers in @voke/aws/testing", async () => {
 test("keeps Remote Function helpers in @voke/remote", async () => {
   const remote = await importPackage("@voke/remote");
 
-  expect(Object.keys(remote).toSorted()).toContain("createRemoteFunctions");
+  expect(Object.keys(remote).toSorted()).toEqual(["createRemoteFunctions"]);
   expect("createRemoteFunctions" in voke).toBe(false);
   expect("defineRemoteFunctions" in voke).toBe(false);
 });
@@ -235,6 +234,13 @@ test("keeps HTTP helpers in @voke/http", async () => {
   ]);
   expect("ok" in voke).toBe(false);
   expect("response" in voke).toBe(false);
+});
+
+test("@voke/http is the same source as core's response helpers", async () => {
+  // Core cannot import @voke/* packages, so the helpers exist in both; they must not drift.
+  expect(await readPackageFile("../../http/src/index.ts")).toBe(
+    await readPackageFile("../src/response.ts")
+  );
 });
 
 test("keeps schema helpers in @voke/schema", async () => {

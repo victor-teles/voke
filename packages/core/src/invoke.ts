@@ -6,12 +6,16 @@ import packageJson from "../package.json";
 import type {
   AuthorizerRegistryInput,
   AuthorizerRequest,
+  JwtAuthorizerDefinition,
+  LambdaAuthorizerDefinition,
   RequestAuthorizerFunctionDefinition,
   RequestAuthorizerHandler,
 } from "./authorizers";
 import type { VokeEnv } from "./context";
 import { VokeConfigError, VokeResourceBindingError } from "./errors";
 import { json, jsonError } from "./http";
+import { evaluateJwt, readIdentityValue } from "./jwt-authorizer";
+import type { JwtRejection } from "./jwt-authorizer";
 import type {
   VokeModelProviderExtensionRecord,
   VokeModelRecord,
@@ -155,7 +159,10 @@ export type RouteAuthorizerReference = "none" | string;
 
 export interface RouteAuthContext {
   readonly context: Record<string, unknown>;
-  /** "lambda" for Request/Lambda authorizer results, "jwt" for verified JWT claims. */
+  /**
+   * "lambda" for Request/Lambda authorizer results, "jwt" for JWT claims: verified by the
+   * platform when deployed, unverified (no signature check) in Local Authorizer Evaluation.
+   */
   readonly source: "jwt" | "lambda";
 }
 
@@ -1599,12 +1606,6 @@ const routeResponse = async (
 const contextHeaders = (context: Context<VokeEnv>): Headers =>
   new Headers(context.req.raw.headers);
 
-const identityHeaderName = (identitySource: string): string | undefined => {
-  const match = /^\$request\.header\.([^.\s]+)$/iu.exec(identitySource);
-
-  return match?.[1];
-};
-
 const routeAuthorizerName = (
   route: AnyRouteDefinition,
   definition: AnyFunctionDefinition
@@ -1684,12 +1685,85 @@ export const runRequestAuthorizer = async (
   return { authorized: true, context };
 };
 
+const unauthorizedJwt = (reason?: JwtRejection): Response =>
+  jsonError("Unauthorized", {
+    code: "UNAUTHORIZED",
+    headers: {
+      "www-authenticate":
+        reason === undefined || reason === "missing token"
+          ? "Bearer"
+          : `Bearer error="invalid_token", error_description="${reason}"`,
+    },
+    status: 401,
+  });
+
+const JWT_TOKEN_SOURCE = /^\$request\.(?:header|querystring)\./iu;
+
+// Local Authorizer Evaluation of a JWT Authorizer checks the token's shape and claims, never its
+// signature, so it does not run for a request the platform delivered to a deployed Function.
+const evaluateLocalJwtAuthorizer = (
+  name: string,
+  authorizer: JwtAuthorizerDefinition,
+  request: Request,
+  headers: Headers,
+  platformRequest: boolean
+): Response | RouteAuthContext => {
+  if (platformRequest) {
+    return unauthorizedJwt();
+  }
+
+  const [source, ...extra] = authorizer.identitySource;
+  const identity =
+    source === undefined || extra.length > 0 || !JWT_TOKEN_SOURCE.test(source)
+      ? undefined
+      : readIdentityValue(source, request, headers);
+
+  if (identity?.kind !== "value") {
+    return jsonError(
+      `JWT Authorizer "${name}" needs exactly one identity source: $request.header.<name> or $request.querystring.<name>`,
+      { code: "INTERNAL_SERVER_ERROR", status: 500 }
+    );
+  }
+
+  const result = evaluateJwt(authorizer, identity.value, Date.now() / 1000);
+
+  return result.ok
+    ? { context: result.claims, source: "jwt" }
+    : unauthorizedJwt(result.reason);
+};
+
+// Every identity source must be present: API Gateway answers 401 without calling the Lambda
+// Request Authorizer otherwise. Returns the first expression local evaluation cannot read.
+const checkLambdaIdentity = (
+  authorizer: LambdaAuthorizerDefinition,
+  request: Request,
+  headers: Headers
+): Response | undefined => {
+  for (const source of authorizer.identitySource) {
+    const identity = readIdentityValue(source, request, headers);
+
+    if (identity.kind === "unsupported") {
+      return jsonError(
+        `Identity source "${source}" is not available in Local Authorizer Evaluation`,
+        { code: "INTERNAL_SERVER_ERROR", status: 500 }
+      );
+    }
+
+    if (identity.kind === "value" && identity.value === undefined) {
+      return jsonError("Unauthorized", { code: "UNAUTHORIZED", status: 401 });
+    }
+  }
+
+  return undefined;
+};
+
 const evaluateLocalAuthorizer = async (
   route: AnyRouteDefinition,
   definition: AnyFunctionDefinition,
   registry: FunctionRegistry | FunctionRegistryInput,
   request: Request,
-  headers: Headers
+  headers: Headers,
+  platformRequest: boolean
 ): Promise<Response | RouteAuthContext | undefined> => {
   const authorizerName = routeAuthorizerName(route, definition);
 
@@ -1699,24 +1773,27 @@ const evaluateLocalAuthorizer = async (
 
   const authorizer = definition.authorizers?.[authorizerName];
 
-  if (authorizer?.kind !== "lambda") {
-    return undefined;
+  if (authorizer === undefined) {
+    return jsonError(
+      `Route ${route.method} ${route.path} references unknown HTTP Authorizer "${authorizerName}"`,
+      { code: "INTERNAL_SERVER_ERROR", status: 500 }
+    );
   }
 
-  const hasIdentity = authorizer.identitySource.every((source) => {
-    const header = identityHeaderName(source);
+  if (authorizer.kind === "jwt") {
+    return evaluateLocalJwtAuthorizer(
+      authorizerName,
+      authorizer,
+      request,
+      headers,
+      platformRequest
+    );
+  }
 
-    if (header === undefined) {
-      return false;
-    }
+  const identityFailure = checkLambdaIdentity(authorizer, request, headers);
 
-    const value = headers.get(header);
-
-    return value !== null && value.trim() !== "";
-  });
-
-  if (!hasIdentity) {
-    return jsonError("Unauthorized", { code: "UNAUTHORIZED", status: 401 });
+  if (identityFailure !== undefined) {
+    return identityFailure;
   }
 
   if (typeof authorizer.function !== "string") {
@@ -1782,7 +1859,8 @@ const resolveRouteAuth = async (
     definition,
     registry,
     context.req.raw,
-    contextHeaders(context)
+    contextHeaders(context),
+    provider?.runtime?.isPlatformRequest?.({ env: context.env }) === true
   );
 };
 

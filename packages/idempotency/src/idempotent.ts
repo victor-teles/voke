@@ -1,5 +1,6 @@
 // Run-time module: imported by deployed Functions through voke.config.ts.
 import { AsyncLocalStorage } from "node:async_hooks";
+import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 
 import { VokeConfigError } from "voke";
@@ -30,6 +31,12 @@ export const defaultExpiresAfterSeconds = 3600;
 const unscopedTimeoutSeconds = 15;
 const millisecondsPerSecond = 1000;
 
+/**
+ * The largest result `idempotent` stores, in UTF-8 bytes of JSON. DynamoDB holds at most 400 KB
+ * per item; the rest is room for the record's other attributes and their names.
+ */
+export const maxResultBytes = 350 * 1024;
+
 export const assertExpiresAfterSeconds = (
   value: number,
   where: string
@@ -52,8 +59,9 @@ export interface IdempotencyOptions<TInput> {
   /** How long a completed record replays its result. Defaults to the Plugin's value (3600). */
   readonly expiresAfterSeconds?: number;
   /**
-   * The part of the input that must be equal on a replay. Defaults to the whole input. A replay
-   * with the same key and a different value fails with `IDEMPOTENCY_PAYLOAD_MISMATCH`.
+   * The part of the input that must be equal on a replay. Defaults to the body for a route
+   * request, the message body in `idempotentBatch`, and the whole input otherwise. A replay with
+   * the same key and a different value fails with `IDEMPOTENCY_PAYLOAD_MISMATCH`.
    */
   readonly validate?: (input: TInput) => unknown;
   /** `"run"` (default) runs the handler without idempotency; `"throw"` rejects with `IDEMPOTENCY_KEY_MISSING`. */
@@ -139,6 +147,22 @@ const serializeResult = (
 const readStoredResult = (data: string | undefined): unknown =>
   data === undefined ? undefined : JSON.parse(data);
 
+const resultTooLarge = (functionKey: string): IdempotencyError =>
+  new IdempotencyError(
+    "IDEMPOTENCY_RESULT_TOO_LARGE",
+    `Function "${functionKey}" returned a result larger than idempotent() can store (${maxResultBytes} bytes of JSON). The operation ran once and is recorded (record status RESULT_TOO_LARGE); return a smaller value, such as an id`
+  );
+
+const completeFailed = (
+  functionKey: string,
+  cause: unknown
+): IdempotencyError =>
+  new IdempotencyError(
+    "IDEMPOTENCY_COMPLETE_FAILED",
+    `Function "${functionKey}" ran, but its Idempotency Record could not be updated (record status INPROGRESS). Calls with the same key are rejected until the Function timeout passes; after that a retry runs the handler again`,
+    { cause }
+  );
+
 const replayExisting = (
   existing: IdempotencyRecord,
   input: RunIdempotentInput
@@ -153,17 +177,40 @@ const replayExisting = (
   if (existing.validation !== input.validation) {
     throw new IdempotencyError(
       "IDEMPOTENCY_PAYLOAD_MISMATCH",
-      `Function "${input.functionKey}" already completed this operation with a different payload (record status COMPLETED)`
+      `Function "${input.functionKey}" already completed this operation with a different payload (record status ${existing.status})`
     );
+  }
+
+  if (existing.status === "RESULT_TOO_LARGE") {
+    throw resultTooLarge(input.functionKey);
   }
 
   return readStoredResult(existing.data);
 };
 
+// Called when the handler threw: the handler's error is the one the caller needs, so a failed
+// release is logged, not thrown. It only delays the retry until the Function timeout passes.
+const releaseAfterFailure = async (
+  input: RunIdempotentInput
+): Promise<void> => {
+  try {
+    await input.store.release(input.id);
+  } catch (releaseError) {
+    console.error(
+      `idempotent() could not release the Idempotency Record of Function "${input.functionKey}". Calls with the same key are rejected with IDEMPOTENCY_IN_PROGRESS until the Function timeout passes`,
+      releaseError
+    );
+  }
+};
+
+const isTooLarge = (data: string | undefined): boolean =>
+  data !== undefined && Buffer.byteLength(data, "utf-8") > maxResultBytes;
+
 /**
  * Runs `run` once per record id: acquire with one conditional write, replay a completed record,
  * reject a live in-progress one, release the record when `run` throws. The first call and every
- * replay resolve to the same JSON value.
+ * replay resolve to the same JSON value. A result over `maxResultBytes` is recorded as
+ * `RESULT_TOO_LARGE`; a failed completion write rejects with `IDEMPOTENCY_COMPLETE_FAILED`.
  */
 export const runIdempotent = async (
   input: RunIdempotentInput,
@@ -171,12 +218,19 @@ export const runIdempotent = async (
 ): Promise<unknown> => {
   const startedAt = input.now();
   const startedAtSeconds = Math.floor(startedAt / millisecondsPerSecond);
+  const inProgressExpiresAt =
+    startedAt + input.timeoutSeconds * millisecondsPerSecond;
+  // `expiresAfterSeconds` may be shorter than the Function timeout, and DynamoDB time to live
+  // deletes on `expiration`: a running record must not expire before its in-progress window.
+  const expiresAt = Math.max(
+    startedAtSeconds + input.expiresAfterSeconds,
+    Math.ceil(inProgressExpiresAt / millisecondsPerSecond)
+  );
   const acquire = await input.store.acquire(
     {
-      expiresAt: startedAtSeconds + input.expiresAfterSeconds,
+      expiresAt,
       id: input.id,
-      inProgressExpiresAt:
-        startedAt + input.timeoutSeconds * millisecondsPerSecond,
+      inProgressExpiresAt,
       status: "INPROGRESS",
       validation: input.validation,
     },
@@ -192,17 +246,25 @@ export const runIdempotent = async (
   try {
     data = serializeResult(await run(), input.functionKey);
   } catch (error) {
-    await input.store.release(input.id);
+    await releaseAfterFailure(input);
     throw error;
   }
 
   const completedAtSeconds = Math.floor(input.now() / millisecondsPerSecond);
+  const completedExpiresAt = completedAtSeconds + input.expiresAfterSeconds;
+  const tooLarge = isTooLarge(data);
 
-  await input.store.complete(
-    input.id,
-    data,
-    completedAtSeconds + input.expiresAfterSeconds
-  );
+  try {
+    await (tooLarge
+      ? input.store.markResultTooLarge(input.id, completedExpiresAt)
+      : input.store.complete(input.id, data, completedExpiresAt));
+  } catch (error) {
+    throw completeFailed(input.functionKey, error);
+  }
+
+  if (tooLarge) {
+    throw resultTooLarge(input.functionKey);
+  }
 
   return readStoredResult(data);
 };
@@ -293,7 +355,16 @@ export const assertIdempotencyOptions = <TInput>(
   }
 };
 
-const wholeInput = <TInput>(input: TInput): unknown => input;
+// A route request carries the incoming `Request` as `raw`; a validated payload cannot.
+const isRouteRequest = (
+  input: unknown
+): input is { readonly body: unknown; readonly raw: Request } =>
+  isRecordObject(input) && "body" in input && input.raw instanceof Request;
+
+// A route retry may differ in per-request headers (a tracing id, a date) and in `auth`, so for a
+// route only the body must be equal; for anything else the whole input.
+const defaultValidation = <TInput>(input: TInput): unknown =>
+  isRouteRequest(input) ? input.body : input;
 
 /**
  * Makes a handler run once per Idempotency Key. A second call with the same key resolves to the
@@ -309,7 +380,7 @@ export const idempotent = <TInput, TContext, TResult>(
     input: TInput,
     context: TContext
   ): Promise<Awaited<TResult>> => {
-    const result = await runWithOptions(input, options, wholeInput, () =>
+    const result = await runWithOptions(input, options, defaultValidation, () =>
       handler(input, context)
     );
 

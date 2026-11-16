@@ -21,10 +21,11 @@ Use the root package for the common Function-first Gateway authoring path:
 - Runtime AWS binding helpers: use `@voke/aws`
 - CloudFormation synthesis entrypoint: use `@voke/aws/cloudformation`
 - Internal model inspection: use root type exports from `voke`
-- Remote helpers: use `@voke/remote`
+- Remote Function Registries: use `@voke/remote` (`createRemoteFunctions`); Remote Code Generation, remote config and the Dev Function Invoke Endpoint are built into `voke`
+- Function Contract Artifact types: `FunctionContractArtifact`, `FunctionContractMetadata` and `ContractJsonSchema`, served by `voke` and read by `@voke/remote`
 - Build helpers: use `@voke/build`
 - OpenAPI documents and the API Reference Page: use `@voke/openapi`
-- JSON Schema building blocks: `readJsonSchema` (Standard JSON Schema, draft 2020-12) and `toContractJsonSchema` (the Function Contract Artifact subset), shared by `@voke/openapi` and `@voke/remote`; the `RouteMeta` type documents a route
+- JSON Schema building blocks: `readJsonSchema` (Standard JSON Schema, draft 2020-12), used by `@voke/openapi`; the `RouteMeta` type documents a route
 - Invoke helpers: `functions.invoke(...)` and `functions.route(...)`
 - Test helpers used by stable examples: use `@voke/testing`
 - AWS-specific test helpers: use `@voke/aws/testing`

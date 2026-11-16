@@ -1,3 +1,4 @@
+import { VokeConfigError } from "voke";
 import type {
   AuthorizerIdentitySource,
   AuthorizerRegistry,
@@ -44,6 +45,28 @@ const toIdentitySources = (
   return Object.freeze([...identitySource]);
 };
 
+// API Gateway reads a JWT from exactly one header or query string parameter.
+const JWT_IDENTITY_SOURCE = /^\$request\.(?:header|querystring)\.[^.\s]+$/iu;
+
+const toJwtIdentitySource = (
+  identitySource: AuthorizerIdentitySource | undefined
+): readonly string[] => {
+  const sources = toIdentitySources(identitySource);
+  const [source] = sources;
+
+  if (
+    sources.length !== 1 ||
+    source === undefined ||
+    !JWT_IDENTITY_SOURCE.test(source)
+  ) {
+    throw new VokeConfigError(
+      "A JWT Authorizer needs exactly one identity source: $request.header.<name> or $request.querystring.<name>"
+    );
+  }
+
+  return sources;
+};
+
 export const jwtAuthorizer = (
   input: JwtAuthorizerInput
 ): JwtAuthorizerDefinition =>
@@ -51,7 +74,7 @@ export const jwtAuthorizer = (
     audience: Object.freeze(
       Array.isArray(input.audience) ? [...input.audience] : [input.audience]
     ),
-    identitySource: toIdentitySources(input.identitySource),
+    identitySource: toJwtIdentitySource(input.identitySource),
     issuer: input.issuer,
     kind: "jwt" as const,
   });

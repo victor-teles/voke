@@ -2,9 +2,11 @@ import { expect, test } from "bun:test";
 
 import {
   createAuthorizers,
+  jwtAuthorizer,
   lambdaAuthorizer,
   requestAuthorizer,
 } from "@voke/aws";
+import { createTestJwt } from "@voke/testing";
 
 import { voke } from "../src/app";
 import { createFunctions, fn, http } from "../src/invoke";
@@ -124,4 +126,53 @@ test("routes evaluate the authorizer locally when the Provider reports nothing",
     data: { auth: { context: { userId: "local-user" }, source: "lambda" } },
   });
   expect(calls.count).toBe(1);
+});
+
+const userJwt = jwtAuthorizer({
+  audience: "users-api",
+  issuer: "https://auth.example.com",
+});
+
+const createJwtGateway = (isPlatformRequest: boolean) =>
+  voke(
+    createFunctions({
+      users: http({
+        authorizer: "userJwt",
+        authorizers: createAuthorizers({ userJwt }),
+        routes: [
+          route.get("/profile", {
+            handler: (request) => ({ auth: request.auth }),
+          }),
+        ],
+      }),
+    }),
+    {
+      config: {
+        name: `platform-jwt-${String(isPlatformRequest)}`,
+        provider: {
+          name: "platform",
+          runtime: {
+            isPlatformRequest: () => isPlatformRequest,
+            routeAuth: () => {},
+          },
+        },
+      },
+    }
+  );
+
+test("a platform-delivered request without the platform's JWT result answers 401", async () => {
+  const response = await createJwtGateway(true).request("/profile", {
+    headers: { authorization: `Bearer ${createTestJwt(userJwt)}` },
+  });
+
+  expect(response.status).toBe(401);
+  expect(response.headers.get("www-authenticate")).toBe("Bearer");
+});
+
+test("a request the platform did not deliver evaluates the JWT Authorizer locally", async () => {
+  const response = await createJwtGateway(false).request("/profile", {
+    headers: { authorization: `Bearer ${createTestJwt(userJwt)}` },
+  });
+
+  expect(response.status).toBe(200);
 });

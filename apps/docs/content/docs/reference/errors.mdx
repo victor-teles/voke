@@ -124,21 +124,21 @@ Unsupported Serverless event kafka on function worker: kafka is not an automatic
 
 - `code`: one of the codes below.
 - `functionName`: the Function, or the route as `METHOD /path`, when known.
-- `issues`: Standard Schema issues (`{ message, path? }`) for `INVALID_PAYLOAD` and `INVALID_RESULT`.
-- `statusCode` and `requestId`: from the transport, for `TRANSPORT_STATUS_ERROR`.
+- `issues`: Standard Schema issues (`{ message, path? }`) for `INVALID_PAYLOAD` and `INVALID_RESULT`. A Remote Function Registry puts its issues in the message instead.
+- `statusCode` and `requestId`: from the transport, for `TRANSPORT_STATUS_ERROR`. A Remote Function Registry sets `statusCode` whenever the other project answered, for example `409` on contract drift.
 - `cause`: the underlying error, when there is one.
 
-| `code`                   | Thrown when                                                                                                       |
-| ------------------------ | ----------------------------------------------------------------------------------------------------------------- |
-| `INVALID_PAYLOAD`        | The input does not match the Function's input schema, or a route's `body`, `params`, `query` or `headers` schema. |
-| `INVALID_RESULT`         | The handler's result does not match the output schema, or an authorizer returns an invalid result or context.     |
-| `TIMEOUT`                | The call takes longer than the `timeoutMs` invoke option.                                                         |
-| `MISSING_FUNCTION`       | The Function does not exist in the registry, or the remote project answers 404.                                   |
-| `MISSING_TRANSPORT`      | A deployed Function invokes another one and no `InvokeTransport` is set.                                          |
-| `TRANSPORT_FAILED`       | The transport (Lambda Invoke or HTTP to a remote) throws or answers with an error status.                         |
-| `TRANSPORT_STATUS_ERROR` | The invoked Lambda returns a function error or a status of 400 or more.                                           |
-| `LOCAL_FUNCTION_FAILED`  | An async local invocation (`mode: "async"`) fails. Voke passes it to `onAsyncError`, or logs it.                  |
-| `INVALID_OPTIONS`        | An invoke option does not apply to the Function, such as `executionName` on a Function that is not durable.       |
+| `code`                   | Thrown when                                                                                                                                                                                     |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `INVALID_PAYLOAD`        | The input does not match the Function's input schema, or a route's `body`, `params`, `query` or `headers` schema.                                                                               |
+| `INVALID_RESULT`         | The handler's result does not match the output schema, or an authorizer returns an invalid result or context.                                                                                   |
+| `TIMEOUT`                | The call takes longer than the `timeoutMs` invoke option. For a Remote Function Registry, one attempt does.                                                                                     |
+| `MISSING_FUNCTION`       | The Function does not exist in the registry, or the remote project answers 404.                                                                                                                 |
+| `MISSING_TRANSPORT`      | A deployed Function invokes another one and no `InvokeTransport` is set.                                                                                                                        |
+| `TRANSPORT_FAILED`       | The transport (Lambda Invoke or HTTP to a remote) throws, or a remote project does not answer, answers with an error status or answers without a data envelope.                                 |
+| `TRANSPORT_STATUS_ERROR` | The invoked Lambda returns a function error or a status of 400 or more.                                                                                                                         |
+| `LOCAL_FUNCTION_FAILED`  | An async local invocation (`mode: "async"`) fails. Voke passes it to `onAsyncError`, or logs it.                                                                                                |
+| `INVALID_OPTIONS`        | An invoke option does not apply to the Function, such as `executionName` on a Function that is not durable, or any option but `trace`, `timeoutMs` and `retries` on a Remote Function Registry. |
 
 The message names the Function and the failure, for example `Invalid payload for getUser: id: Expected string length to be at least 1`.
 
@@ -146,14 +146,18 @@ The message names the Function and the failure, for example `Invalid payload for
 
 `IdempotencyError` is exported by `@voke/idempotency`. `idempotent(...)` throws it when a call cannot run or be replayed. It extends `Error` (not `VokeError`) and has a `code`. The message names the Function and the record status, never the key, the payload or the stored result. In a route, an uncaught `IdempotencyError` becomes the Gateway's generic 500 response; catch it to answer with another status. See [Idempotency](/docs/guides/idempotency).
 
-| `code`                                | Thrown when                                                                                               |
-| ------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `IDEMPOTENCY_IN_PROGRESS`             | Another call with the same key is still running, and its Function timeout has not passed. Retry later.    |
-| `IDEMPOTENCY_PAYLOAD_MISMATCH`        | A call with the same key already completed with a different payload (the part that `validate` selects).   |
-| `IDEMPOTENCY_KEY_MISSING`             | `key` returned `undefined` or `""` and the handler uses `onMissingKey: "throw"`.                          |
-| `IDEMPOTENCY_RESULT_NOT_SERIALIZABLE` | The handler returned a value that cannot be stored as JSON, such as a `Response`. The record is released. |
+| `code`                                | Thrown when                                                                                                                                                                                                                      |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `IDEMPOTENCY_COMPLETE_FAILED`         | The handler ran, but its record could not be marked completed. `cause` is the store's error. Calls with the same key get `IDEMPOTENCY_IN_PROGRESS` until the Function timeout passes; after that a retry runs the handler again. |
+| `IDEMPOTENCY_IN_PROGRESS`             | Another call with the same key is still running, and its Function timeout has not passed. Retry later.                                                                                                                           |
+| `IDEMPOTENCY_PAYLOAD_MISMATCH`        | A call with the same key already completed with a different payload (the part that `validate` selects).                                                                                                                          |
+| `IDEMPOTENCY_KEY_MISSING`             | `key` returned `undefined` or `""` and the handler uses `onMissingKey: "throw"`.                                                                                                                                                 |
+| `IDEMPOTENCY_RESULT_NOT_SERIALIZABLE` | The handler returned a value that cannot be stored as JSON, such as a `Response`. The record is released.                                                                                                                        |
+| `IDEMPOTENCY_RESULT_TOO_LARGE`        | The handler returned more than 350 KB of JSON. The operation ran once and is recorded; every call with the same key gets this code until the record expires, without running the handler.                                        |
 
 `idempotent(...)` throws a `VokeConfigError` when the `idempotency()` Plugin is not in `voke.config.ts` and no `store` is passed, and a `VokeResourceBindingError` when the table binding is missing at run time.
+
+In `idempotentBatch(...)`, only `IDEMPOTENCY_IN_PROGRESS`, `IDEMPOTENCY_PAYLOAD_MISMATCH`, `IDEMPOTENCY_KEY_MISSING` and an error thrown by the message's own function fail a single message. Store and configuration errors, including `IDEMPOTENCY_COMPLETE_FAILED`, fail the whole invocation.
 
 ## HTTP error responses
 
