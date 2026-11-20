@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 
-import { bindResource } from "@voke/aws";
-import type { AwsClientConfig } from "@voke/aws";
+import type { AwsClientConfig } from "@vokejs/aws";
 import { VokeResourceBindingError } from "voke";
 
 import { acquireCondition, dynamoDbStore } from "../src/dynamodb-store";
@@ -65,14 +64,43 @@ const completedRecord: IdempotencyRecord = {
   validation: "v1",
 };
 
-const savedEnv = { ...process.env };
+const tableNameVariable = "VOKE_RESOURCE_IDEMPOTENCY_TABLE_NAME";
+
+// Reads the binding the way a Function's `context.resource` does: a missing value throws.
+const readTableBinding = (): string => {
+  const value = process.env[tableNameVariable];
+
+  if (value === undefined || value === "") {
+    throw new VokeResourceBindingError(
+      `Missing resource binding: ${tableNameVariable}`
+    );
+  }
+
+  return value;
+};
+// Every variable a test below sets. Each is restored on its own: replacing process.env as a
+// whole would detach it from Bun.env for every later test file in the same process.
+const touchedVariables = [
+  tableNameVariable,
+  "AWS_REGION",
+  "VOKE_AWS_ENDPOINT_URL",
+] as const;
+const savedValues = new Map(
+  touchedVariables.map((name) => [name, process.env[name]])
+);
 
 beforeEach(() => {
-  delete process.env.VOKE_RESOURCE_IDEMPOTENCY_TABLE_NAME;
+  Reflect.deleteProperty(process.env, tableNameVariable);
 });
 
 afterEach(() => {
-  process.env = { ...savedEnv };
+  for (const [name, value] of savedValues) {
+    if (value === undefined) {
+      Reflect.deleteProperty(process.env, name);
+    } else {
+      process.env[name] = value;
+    }
+  }
 });
 
 test("acquire is one conditional PutItem that returns the old item on failure", async () => {
@@ -220,6 +248,55 @@ test("complete updates status, expiration and data with attribute name placehold
   ]);
 });
 
+test("markResultTooLarge sets the status and the expiry and removes the in-progress expiry", async () => {
+  const { client, sent } = fakeClient();
+  const store = dynamoDbStore({ client, tableName: "dedupe" });
+
+  await store.markResultTooLarge("charge##abc", 1_763_168_500);
+
+  expect(sent).toEqual([
+    {
+      input: {
+        ExpressionAttributeNames: {
+          "#expiration": "expiration",
+          "#in_progress_expiration": "in_progress_expiration",
+          "#status": "status",
+        },
+        ExpressionAttributeValues: {
+          ":expiration": { N: "1763168500" },
+          ":status": { S: "RESULT_TOO_LARGE" },
+        },
+        Key: { id: { S: "charge##abc" } },
+        TableName: "dedupe",
+        UpdateExpression:
+          "SET #status = :status, #expiration = :expiration REMOVE #in_progress_expiration",
+      },
+      name: "UpdateItemCommand",
+    },
+  ]);
+});
+
+test("a blocking item with status RESULT_TOO_LARGE maps to the existing record", async () => {
+  const { data: _data, ...withoutData } = completedItem;
+  const { client } = fakeClient([
+    conditionalCheckFailed({
+      ...withoutData,
+      status: { S: "RESULT_TOO_LARGE" },
+    }),
+  ]);
+  const store = dynamoDbStore({ client, tableName: "dedupe" });
+
+  await expect(store.acquire(record, now)).resolves.toEqual({
+    acquired: false,
+    existing: {
+      expiresAt: 1_763_168_400,
+      id: "charge##abc",
+      status: "RESULT_TOO_LARGE",
+      validation: "v1",
+    },
+  });
+});
+
 test("release deletes the record", async () => {
   const { client, sent } = fakeClient();
   const store = dynamoDbStore({ client, tableName: "dedupe" });
@@ -265,7 +342,7 @@ test("a missing table binding surfaces on first use, not when the store is creat
   const created: AwsClientConfig[] = [];
   const store = dynamoDbStore(
     {
-      tableName: () => bindResource("idempotencyTable", "name").value(),
+      tableName: () => readTableBinding(),
     },
     {
       createClient: (config) => {

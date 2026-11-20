@@ -1,19 +1,23 @@
+import { resolve } from "node:path";
+
 import { Hono } from "hono";
 import type { MiddlewareHandler } from "hono";
 import { cors } from "hono/cors";
+import { HTTPException } from "hono/http-exception";
 
+import { createResourceBindingName } from "./bindings";
 import { defineConfig } from "./config";
 import type { VokeConfig, VokeConfigInput, VokeCorsConfig } from "./config";
 import type { VokeEnv } from "./context";
 import { VokeConfigError } from "./errors";
-import { jsonError } from "./http";
+import { errorCodeForStatus, errorMessageForStatus, jsonError } from "./http";
 import {
   activateFunctionRegistry,
+  assertRouteHeaderSchemas,
   assertRouteParamSchemas,
   assertUniqueFunctionRoutes,
   formatDevFunctionSummary,
   functionRegistryEntries,
-  InvokeError,
   mountFunctionRoutes,
 } from "./invoke";
 import type {
@@ -62,49 +66,14 @@ const activationKey = (config: VokeConfig): string =>
     stage: config.stage,
   });
 
-const publicRouteErrorMessage = (error: InvokeError): string => {
-  const match = /^Invalid (body|headers|params|query|result) for /u.exec(
-    error.message
-  );
-
-  if (match === null || error.functionName === undefined) {
-    return error.message || "Internal server error";
-  }
-
-  return `Invalid ${match[1]} for ${error.functionName}`;
-};
-
-const publicRouteErrorTitle = (error: InvokeError): string => {
-  if (error.message.startsWith("Invalid body for ")) {
-    return "Invalid body";
-  }
-
-  if (error.message.startsWith("Invalid headers for ")) {
-    return "Invalid headers";
-  }
-
-  if (error.message.startsWith("Invalid params for ")) {
-    return "Invalid params";
-  }
-
-  if (error.message.startsWith("Invalid query for ")) {
-    return "Invalid query";
-  }
-
-  if (error.message.startsWith("Invalid result for ")) {
-    return "Invalid result";
-  }
-
-  return publicRouteErrorMessage(error);
-};
-
 // Logs one JSON line so the error is findable in production logs without reaching the client.
 const logUnhandledRouteError = (error: Error): void => {
-  const { code } = error as { code?: unknown };
+  const { code, issues } = error as { code?: unknown; issues?: unknown };
 
   console.error(
     JSON.stringify({
       ...(typeof code === "string" ? { code } : {}),
+      ...(Array.isArray(issues) && issues.length > 0 ? { issues } : {}),
       level: "error",
       message: error.message,
       name: error.name,
@@ -113,18 +82,19 @@ const logUnhandledRouteError = (error: Error): void => {
   );
 };
 
+const firstServerErrorStatus = 500;
+
+// Client mistakes in the request itself are answered where the Route Request is built; anything
+// that reaches this handler is a server failure, except an HTTPException below 500.
 const handleRouteError = (error: Error): Response => {
-  if (error instanceof InvokeError && error.code === "INVALID_PAYLOAD") {
-    return responseError(publicRouteErrorTitle(error), {
-      issues: error.issues,
-      status: 400,
-    });
+  if (error instanceof HTTPException && error.res !== undefined) {
+    return error.getResponse();
   }
 
-  if (error instanceof InvokeError && error.code === "INVALID_RESULT") {
-    return responseError(publicRouteErrorTitle(error), {
-      issues: error.issues,
-      status: 500,
+  if (error instanceof HTTPException && error.status < firstServerErrorStatus) {
+    return responseError(error.message || errorMessageForStatus(error.status), {
+      code: errorCodeForStatus(error.status),
+      status: error.status,
     });
   }
 
@@ -137,7 +107,8 @@ const handleRouteError = (error: Error): Response => {
   return responseError("Internal server error", {
     code: "INTERNAL_SERVER_ERROR",
     ...(isDev ? { details: { message: error.message } } : {}),
-    status: 500,
+    status:
+      error instanceof HTTPException ? error.status : firstServerErrorStatus,
   });
 };
 
@@ -193,6 +164,16 @@ const pluginWraps = (setups: readonly PluginSetup[]): PluginFunctionWrap[] =>
     hooks.wrap === undefined ? [] : [{ plugin, wrap: hooks.wrap }]
   );
 
+// Resource key → binding variable, Plugin-contributed resources included: `context.resource`
+// reads a linked resource through it.
+const resourceBindings = (config: VokeConfig): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(config.resources).map(([key, resource]) => [
+      key,
+      createResourceBindingName(key, resource.bindingAttribute),
+    ])
+  );
+
 const createGatewayApp = (
   config: VokeConfig,
   functions: FunctionRegistry | FunctionRegistryInput,
@@ -231,8 +212,10 @@ const createGatewayApp = (
 
   assertUniqueFunctionRoutes(gatewayFunctions);
   assertRouteParamSchemas(gatewayFunctions);
+  assertRouteHeaderSchemas(gatewayFunctions);
   const activation = {
     invoke: config.provider?.invoke,
+    resourceBindings: resourceBindings(config),
     variableOverrides: options.variables?.overrides,
     variableProviders: gatewayVariableProviders(config, options.variables),
     wraps: pluginWraps(plugins),
@@ -263,8 +246,7 @@ const createGatewayApp = (
 };
 
 const loadRuntimeConfig = (): VokeConfigInput => {
-  const cwd = readEnv("PWD") ?? ".";
-  const path = `${cwd}/voke.config.ts`;
+  const path = resolve(process.cwd(), "voke.config.ts");
 
   try {
     // oxlint-disable-next-line unicorn/prefer-module, node/global-require -- voke(functions) composes synchronously, so source config loading needs Bun's sync require path.

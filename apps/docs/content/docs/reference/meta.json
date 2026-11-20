@@ -1,0 +1,6 @@
+{
+  "title": "Reference",
+  "description": "Config, CLI, errors and packages",
+  "root": true,
+  "pages": ["config", "cli", "errors", "packages"]
+}

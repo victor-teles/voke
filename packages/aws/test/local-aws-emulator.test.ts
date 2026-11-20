@@ -341,6 +341,8 @@ test("bootstrap deploys resources only and writes the stack outputs for voke dev
     "EventsQueue",
     "UsersTable",
   ]);
+  // Local data is disposable: nothing is retained.
+  expect(JSON.stringify(deployed)).not.toContain("DeletionPolicy");
   expect(calls).toHaveLength(1);
   expect(calls[0]?.command).toEqual([
     "aws",

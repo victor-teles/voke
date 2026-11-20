@@ -1,11 +1,11 @@
 import { beforeEach, expect, test } from "bun:test";
 
-import { createLambdaHandlers } from "@voke/aws";
+import { createLambdaHandlers } from "@vokejs/aws";
 import type {
   DynamodbStreamAwsEvent,
   KinesisAwsEvent,
   StreamBatchResult,
-} from "@voke/aws";
+} from "@vokejs/aws";
 
 import { functions, orderTotals, pageViews } from "../src/functions";
 

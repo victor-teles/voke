@@ -3,8 +3,8 @@ title: Durable Functions
 description: Write multi-step work that survives failures and long waits as one TypeScript Function, test it locally, and deploy it as an AWS Lambda durable function.
 ---
 
-After reading this page you can declare a **Durable Function** with `durable()`, start executions
-from your code, test them without AWS, and deploy them.
+After this page you can declare a **Durable Function** with `durable()`, start executions from your
+code, test them without AWS, and deploy them.
 
 ## When to use a Durable Function
 
@@ -21,19 +21,19 @@ For work that finishes within one Lambda invocation, use a plain [Function](/doc
 
 ## Declare a Durable Function
 
-Create the Function with `durable()` from `@voke/aws`:
+Create the Function with `durable()` from `@vokejs/aws`:
 
 ```ts twoslash
 // @filename: voke.config.ts
-import { aws } from "@voke/aws";
+import { aws } from "@vokejs/aws";
 import { defineConfig } from "voke";
 
 export default defineConfig({ name: "shop", provider: aws() });
 
 // @filename: src/index.ts
 // ---cut---
-import { durable } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { durable } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 import { createFunctions, voke } from "voke";
 import config from "../voke.config";
 
@@ -65,20 +65,25 @@ export const functions = createFunctions({
 export default voke(functions, { config });
 ```
 
-- `input` and `output` are the Function Contract, as for `fn()`. Voke validates the payload before
-  the handler runs and the result after it returns.
-- `executionTimeout` is required. It limits how long one execution can run in total, across all
-  waits and replays (`{ days, hours, minutes, seconds }`, at most 366 days).
-- `retentionDays` (1 to 90, default 14) sets how long Lambda keeps the history of a finished
-  execution.
-- `name`, `synthesis` and `variables` work as they do for `fn()`.
-- The handler receives the payload and the invoke context. `context.durable` is the
-  `DurableContext` of the
-  [AWS durable execution SDK](https://github.com/aws/aws-durable-execution-sdk-js): `step`, `wait`,
-  `waitForCallback`, `createCallback`, `waitForCondition`, `invoke`, `runInChildContext`, `map`,
-  `parallel`, `promise.all` and the other operations. Voke does not wrap it.
+| Option                           | Effect                                                                                                                                             |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `input`, `output`                | The Function Contract, as for `fn()`. Voke validates the payload before the handler runs and the result after it returns.                          |
+| `executionTimeout`               | Required. It limits how long one execution can run in total, across all waits and replays (`{ days, hours, minutes, seconds }`, at most 366 days). |
+| `retentionDays`                  | How long Lambda keeps the history of a finished execution (1 to 90, default 14).                                                                   |
+| `name`, `synthesis`, `variables` | They work as they do for `fn()`.                                                                                                                   |
 
-A Durable Function is an invokable Function. It cannot have HTTP routes or Event Sources.
+The handler receives the payload and the invoke context. `context.durable` is the `DurableContext`
+of the [AWS durable execution SDK](https://github.com/aws/aws-durable-execution-sdk-js): `step`,
+`wait`, `waitForCallback`, `createCallback`, `waitForCondition`, `invoke`, `runInChildContext`,
+`map`, `parallel`, `promise.all` and the other operations. Voke does not wrap it.
+
+<Callout type="info" title="No HTTP routes or Event Sources">
+
+A Durable Function is an invokable Function. It cannot have HTTP routes or Event Sources. To start
+one from an event, see
+[Start an execution from an Event Source](#start-an-execution-from-an-event-source).
+
+</Callout>
 
 ## Write a handler that replays
 
@@ -99,8 +104,8 @@ gives the same result:
 A step retries with the SDK's default strategy. Pass `retryStrategy` to change it:
 
 ```ts twoslash
-import { durable } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { durable } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 
 const chargeCard = async () => ({ chargeId: "ch_1" });
 // ---cut---
@@ -125,8 +130,8 @@ export const charge = durable({
 Start a Durable Function with `functions.invoke`, like any invokable Function:
 
 ```ts twoslash
-import { durable } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { durable } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 import { createFunctions, voke } from "voke";
 
 const functions = createFunctions({
@@ -169,8 +174,8 @@ An Event Source cannot trigger a Durable Function directly. Consume the events w
 Function and start one execution per event:
 
 ```ts twoslash
-import { durable, sqs } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { durable, sqs } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 import { createFunctions } from "voke";
 
 const order = schema.object({ id: schema.string() });
@@ -203,13 +208,13 @@ The execution name keeps a redelivered message from starting a second execution.
 
 ## Test a Durable Function
 
-`@voke/aws/testing` runs executions locally with the AWS durable execution testing runner. It needs
+`@vokejs/aws/testing` runs executions locally with the AWS durable execution testing runner. It needs
 no AWS credentials and no containers.
 
 ```ts twoslash
 // @filename: src/functions.ts
-import { durable } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { durable } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 import { createFunctions, voke } from "voke";
 
 export const functions = createFunctions({
@@ -235,7 +240,7 @@ import {
   runDurable,
   setupDurableTests,
   teardownDurableTests,
-} from "@voke/aws/testing";
+} from "@vokejs/aws/testing";
 import { functions } from "../src/functions";
 
 beforeAll(async () => {
@@ -281,10 +286,13 @@ their checkpointed results, and step retries follow `retryStrategy`.
 ## Callbacks
 
 `context.durable.waitForCallback(name, submit)` pauses the execution until another system reports a
-result. `submit` receives a callback id; send it to the system that does the work. That system
-completes the callback with the Lambda API actions `SendDurableExecutionCallbackSuccess` or
-`SendDurableExecutionCallbackFailure` (in `@aws-sdk/client-lambda`), using the callback id. Voke has
-no helper for this yet. The caller needs `lambda:SendDurableExecutionCallbackSuccess` and
+result. `submit` receives a callback id; send it to the system that does the work.
+
+That system completes the callback with the Lambda API actions `SendDurableExecutionCallbackSuccess`
+or `SendDurableExecutionCallbackFailure` (in `@aws-sdk/client-lambda`), using the callback id. Voke
+has no helper for this yet.
+
+The caller needs `lambda:SendDurableExecutionCallbackSuccess` and
 `lambda:SendDurableExecutionCallbackFailure` on the Function's qualified ARN
 (`arn:aws:lambda:<region>:<account>:function:<name>:*`).
 
@@ -301,12 +309,19 @@ no helper for this yet. The caller needs `lambda:SendDurableExecutionCallbackSuc
 - For every Function in the stack, a `VOKE_INVOKE_TARGET_<KEY>` variable and
   `lambda:InvokeFunction` on the alias, so any Function can start the Durable Function.
 
+<Callout
+  type="warn"
+  title="Durable execution is set when Lambda creates a function"
+>
+
+To make an existing Function durable, or to stop it being durable, give it a new registry key or
+`name`, deploy, and then remove the old Function. `voke deploy` stops with an error before it
+changes anything when a Function would need to be replaced.
+
+</Callout>
+
 Keep these limits in mind:
 
-- **Durable execution is set when Lambda creates a function.** To make an existing Function durable,
-  or to stop it being durable, give it a new registry key or `name`, deploy, and then remove the old
-  Function. `voke deploy` stops with an error before it changes anything when a Function would need
-  to be replaced.
 - **Runtimes**: `nodejs22.x` and `nodejs24.x`, the two runtimes Voke supports.
 - **Regions**: not every region supports durable functions. Check the Lambda console or the AWS
   documentation for your region before you deploy.
@@ -323,7 +338,25 @@ in `voke.config.ts`, with its own role and permissions.
 
 ## Next steps
 
-- [Functions](/docs/guides/functions): invoke options and the handler context.
-- [Testing](/docs/guides/testing): test setup for Functions and the Gateway.
-- [Deploy](/docs/guides/deploy): deploy a project to AWS.
-- [Troubleshooting](/docs/guides/troubleshooting): errors from durable deploys and invocations.
+<Cards>
+  <Card
+    icon={<SquareFunction />}
+    href="/docs/guides/functions"
+    title="Functions"
+  >
+    Invoke options and the handler context.
+  </Card>
+  <Card icon={<FlaskConical />} href="/docs/guides/testing" title="Testing">
+    Test setup for Functions and the Gateway.
+  </Card>
+  <Card icon={<CloudUpload />} href="/docs/guides/deploy" title="Deploy">
+    Deploy a project to AWS.
+  </Card>
+  <Card
+    icon={<LifeBuoy />}
+    href="/docs/guides/troubleshooting"
+    title="Troubleshooting"
+  >
+    Errors from durable deploys and invocations.
+  </Card>
+</Cards>

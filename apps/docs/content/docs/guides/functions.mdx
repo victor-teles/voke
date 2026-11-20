@@ -9,15 +9,15 @@ After reading this page you can define a **Function** with `fn()`, register it w
 
 A Function is a named unit of compute that Voke deploys as one AWS Lambda function. An invokable Function has a **Function Contract**: an `input` schema for the payload and an `output` schema for the result. Voke validates both on every call.
 
-```ts twoslash
+```ts title="src/index.ts" twoslash
 // @filename: voke.config.ts
-import { aws } from "@voke/aws";
+import { aws } from "@vokejs/aws";
 import { defineConfig } from "voke";
 
 export default defineConfig({ name: "users-api", provider: aws() });
 // @filename: src/index.ts
 // ---cut---
-import { schema } from "@voke/schema";
+import { schema } from "@vokejs/schema";
 import { createFunctions, fn, voke } from "voke";
 import config from "../voke.config";
 
@@ -40,26 +40,28 @@ const result = await functions.invoke("getUser", { id: "usr_1" });
 //    ^?
 ```
 
-- `fn()` declares the Function. The handler receives the payload after the `input` schema parsed it, so `payload.id` is typed as `string`.
-- `createFunctions()` builds the **Function Registry**. Each object key becomes the Function's identity in your project.
-- `voke(functions, { config })` creates the **Gateway**. It also activates the registry for local invocation (see [Activate the registry](#activate-the-registry)).
-- `functions.invoke(key, payload)` validates the payload, runs the handler, validates the result, and returns it. The key and the payload are type-checked against the contract.
+| Call                             | What it does                                                                                                                                  |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fn()`                           | Declares the Function. The handler receives the payload after the `input` schema parsed it, so `payload.id` is typed as `string`.             |
+| `createFunctions()`              | Builds the **Function Registry**. Each object key becomes the Function's identity in your project.                                            |
+| `voke(functions, { config })`    | Creates the **Gateway**. It also activates the registry for local invocation (see [Activate the registry](#activate-the-registry)).           |
+| `functions.invoke(key, payload)` | Validates the payload, runs the handler, validates the result, and returns it. The key and the payload are type-checked against the contract. |
 
-The `input` and `output` fields accept any Standard Schema validator. This page uses `@voke/schema`; Zod works the same way. See [Schemas and validation](/docs/guides/schemas).
+The `input` and `output` fields accept any Standard Schema validator. This page uses `@vokejs/schema`; Zod works the same way. See [Schemas and validation](/docs/guides/schemas).
 
 ### Functions without input
 
 Leave out `input` when a Function takes no payload. Call it with the key only:
 
-```ts twoslash
+```ts title="src/index.ts" twoslash
 // @filename: voke.config.ts
-import { aws } from "@voke/aws";
+import { aws } from "@vokejs/aws";
 import { defineConfig } from "voke";
 
 export default defineConfig({ name: "users-api", provider: aws() });
 // @filename: src/index.ts
 // ---cut---
-import { schema } from "@voke/schema";
+import { schema } from "@vokejs/schema";
 import { createFunctions, fn, voke } from "voke";
 import config from "../voke.config";
 
@@ -79,11 +81,33 @@ const { total } = await functions.invoke("countUsers");
 
 A handler receives a second argument, the invoke context:
 
-| Field          | Description                                                                                |
-| -------------- | ------------------------------------------------------------------------------------------ |
-| `functionName` | The Function's deployed name: `name` when set, otherwise the registry key.                 |
-| `trace`        | The trace metadata passed with `invoke(..., { trace })`.                                   |
-| `variables`    | The Function's Runtime Variables. See [Runtime Variables](/docs/guides/runtime-variables). |
+| Field           | Description                                                                                |
+| --------------- | ------------------------------------------------------------------------------------------ |
+| `functionName`  | The Function's deployed name: `name` when set, otherwise the registry key.                 |
+| `resource(key)` | The binding value of a resource the Function links in `resources`. See below.              |
+| `trace`         | The trace metadata passed with `invoke(..., { trace })`.                                   |
+| `variables`     | The Function's Runtime Variables. See [Runtime Variables](/docs/guides/runtime-variables). |
+
+### Use a resource
+
+A Function lists the resources it uses from `voke.config.ts` in `resources`, by resource key. Every
+Function builder takes it. The handler reads a linked resource with `context.resource(key)`, and the
+Function's IAM role gets access to the linked resources and no others:
+
+```ts twoslash
+import { schema } from "@vokejs/schema";
+import { fn } from "voke";
+
+// ---cut---
+const archiveUser = fn({
+  input: schema.object({ id: schema.string() }),
+  output: schema.object({ table: schema.string() }),
+  resources: ["usersTable"],
+  handler: (payload, context) => ({ table: context.resource("usersTable") }),
+});
+```
+
+See [Resources and bindings](/docs/guides/resources#read-a-resource-from-a-function).
 
 ## Activate the registry
 
@@ -99,26 +123,26 @@ In tests, import the module that calls `voke(...)`, or call `voke(functions, { c
 
 `functions.invoke(key, payload, options)` accepts these options:
 
-| Option          | Type                                       | Default   | Description                                                                                                        |
-| --------------- | ------------------------------------------ | --------- | ------------------------------------------------------------------------------------------------------------------ |
-| `mode`          | `"sync"` or `"async"`                      | `"sync"`  | `"async"` returns `{ accepted: true }` at once and runs the Function in the background.                            |
-| `trace`         | object of string, number or boolean values | none      | Metadata the handler reads from `context.trace`.                                                                   |
-| `timeoutMs`     | `number`                                   | none      | Rejects with an `InvokeError` with code `TIMEOUT` when the call takes longer.                                      |
-| `retries`       | `number`                                   | `0`       | Extra attempts after a failed attempt. `retries: 2` runs the Function at most three times.                         |
-| `onAsyncError`  | `(error: InvokeError) => void`             | none      | Receives the error of a failed `"async"` call. Without it, Voke logs the message with `console.error`.             |
-| `executionName` | `string`                                   | none      | Names the execution of a [Durable Function](/docs/guides/durable-functions), so starting it is idempotent.         |
-| `runtime`       | `"local"` or `"aws"`                       | `"local"` | `"local"` runs the handler in the current process. `"aws"` calls the deployed Lambda through `transport`.          |
-| `transport`     | `InvokeTransport`                          | none      | Required when `runtime` is `"aws"`. `createAwsLambdaInvokeTransport()` from `@voke/aws` calls Lambda's Invoke API. |
+| Option          | Type                                       | Default   | Description                                                                                                          |
+| --------------- | ------------------------------------------ | --------- | -------------------------------------------------------------------------------------------------------------------- |
+| `mode`          | `"sync"` or `"async"`                      | `"sync"`  | `"async"` returns `{ accepted: true }` at once and runs the Function in the background.                              |
+| `trace`         | object of string, number or boolean values | none      | Metadata the handler reads from `context.trace`.                                                                     |
+| `timeoutMs`     | `number`                                   | none      | Rejects with an `InvokeError` with code `TIMEOUT` when the call takes longer.                                        |
+| `retries`       | `number`                                   | `0`       | Extra attempts after a failed attempt. `retries: 2` runs the Function at most three times.                           |
+| `onAsyncError`  | `(error: InvokeError) => void`             | none      | Receives the error of a failed `"async"` call. Without it, Voke logs the message with `console.error`.               |
+| `executionName` | `string`                                   | none      | Names the execution of a [Durable Function](/docs/guides/durable-functions), so starting it is idempotent.           |
+| `runtime`       | `"local"` or `"aws"`                       | `"local"` | `"local"` runs the handler in the current process. `"aws"` calls the deployed Lambda through `transport`.            |
+| `transport`     | `InvokeTransport`                          | none      | Required when `runtime` is `"aws"`. `createAwsLambdaInvokeTransport()` from `@vokejs/aws` calls Lambda's Invoke API. |
 
-```ts twoslash
+```ts title="src/index.ts" twoslash
 // @filename: voke.config.ts
-import { aws } from "@voke/aws";
+import { aws } from "@vokejs/aws";
 import { defineConfig } from "voke";
 
 export default defineConfig({ name: "users-api", provider: aws() });
 // @filename: src/index.ts
 // ---cut---
-import { schema } from "@voke/schema";
+import { schema } from "@vokejs/schema";
 import { createFunctions, fn, voke } from "voke";
 import type { InvokeError } from "voke";
 import config from "../voke.config";
@@ -154,7 +178,11 @@ const queued = await functions.invoke(
 // queued is { accepted: true }
 ```
 
-A local timeout rejects the call, but it does not stop the handler: the handler runs until it returns. The default runtime is `"local"` unless the environment variable `VOKE_INVOKE_RUNTIME` is `aws`. With `runtime: "aws"`, Voke invokes the Lambda by its deployed name, and `mode: "async"` uses Lambda's `Event` invocation type.
+<Callout type="warn" title="A local timeout does not stop the handler">
+  A local timeout rejects the call, but the handler runs until it returns.
+</Callout>
+
+The default runtime is `"local"` unless the environment variable `VOKE_INVOKE_RUNTIME` is `aws`. With `runtime: "aws"`, Voke invokes the Lambda by its deployed name, and `mode: "async"` uses Lambda's `Event` invocation type.
 
 ### Invoke errors
 
@@ -177,15 +205,15 @@ An error that the handler throws in a `"sync"` local call rejects the call uncha
 
 The registry key is the identity you use in code: `functions.invoke("getUser", ...)`, typed route calls and Lambda handler names all use it. The optional `name` field on `fn()` changes only the deployed Lambda function name.
 
-```ts twoslash
+```ts title="src/index.ts" twoslash
 // @filename: voke.config.ts
-import { aws } from "@voke/aws";
+import { aws } from "@vokejs/aws";
 import { defineConfig } from "voke";
 
 export default defineConfig({ name: "users-api", provider: aws() });
 // @filename: src/index.ts
 // ---cut---
-import { schema } from "@voke/schema";
+import { schema } from "@vokejs/schema";
 import { createFunctions, fn, voke } from "voke";
 import config from "../voke.config";
 
@@ -206,15 +234,20 @@ voke(functions, { config });
 await functions.invoke("getUser", { id: "usr_1" });
 ```
 
-Without `name`, the deployed Lambda is named `<project name>-<stage>-<registry key>`, for example `users-api-dev-getUser`. With `name`, it is that value in every stage. Error messages such as `Invalid payload for production-user-reader` use the deployed name. The keys `invoke`, `route` and `sendEvent` are reserved: `createFunctions()` throws when you use one.
+Without `name`, the deployed Lambda is named `<project name>-<stage>-<registry key>`, for example `users-api-dev-getUser`. With `name`, it is that value in every stage. Error messages such as `Invalid payload for production-user-reader` use the deployed name.
+
+<Callout type="warn" title="Reserved registry keys">
+  The keys `invoke`, `route` and `sendEvent` are reserved. `createFunctions()`
+  throws when you use one.
+</Callout>
 
 ## Set timeout and memory per Function
 
 Every Function gets its timeout and memory from `runtime` in `voke.config.ts`: 15 seconds and 1024 MB by default. Override them for one Function with `synthesis`:
 
-```ts twoslash
+```ts title="src/index.ts" twoslash
 // @filename: voke.config.ts
-import { aws } from "@voke/aws";
+import { aws } from "@vokejs/aws";
 import { defineConfig } from "voke";
 
 export default defineConfig({
@@ -224,7 +257,7 @@ export default defineConfig({
 });
 // @filename: src/index.ts
 // ---cut---
-import { schema } from "@voke/schema";
+import { schema } from "@vokejs/schema";
 import { createFunctions, fn, voke } from "voke";
 import config from "../voke.config";
 
@@ -240,21 +273,40 @@ const functions = createFunctions({
 export default voke(functions, { config });
 ```
 
-`synthesis.timeout` is in seconds and `synthesis.memory` is in MB. When the AWS Provider synthesizes the stack, it rejects a timeout outside 1-900 seconds and memory outside 128-10240 MB. A Function that serves HTTP routes cannot have a timeout above 30 seconds. See [HTTP routes](/docs/guides/http-routes) and the [configuration reference](/docs/reference/config).
+`synthesis.timeout` is in seconds and `synthesis.memory` is in MB. When the AWS Provider synthesizes the stack, it rejects a timeout outside 1-900 seconds and memory outside 128-10240 MB. See the [configuration reference](/docs/reference/config).
+
+<Callout type="warn" title="HTTP routes allow 30 seconds at most">
+  A Function that serves HTTP routes cannot have a timeout above 30 seconds. See
+  [HTTP routes](/docs/guides/http-routes).
+</Callout>
 
 ## Other kinds of Functions
 
 `fn()` declares an invokable Function: other code calls it by key. The same registry also holds:
 
 - HTTP route Functions, declared with `http()`. See [HTTP routes](/docs/guides/http-routes).
-- SQS Event Source Functions, declared with `sqs()` from `@voke/aws`. See [SQS events](/docs/guides/sqs-events).
-- Request Authorizer Functions, declared with `requestAuthorizer()` from `@voke/aws`. See [Authorizers](/docs/guides/authorizers).
+- SQS Event Source Functions, declared with `sqs()` from `@vokejs/aws`. See [SQS events](/docs/guides/sqs-events).
+- Request Authorizer Functions, declared with `requestAuthorizer()` from `@vokejs/aws`. See [Authorizers](/docs/guides/authorizers).
 
 `functions.invoke(...)` calls only invokable Functions. Use `functions.route(...)` for HTTP routes and `functions.sendEvent(...)` for SQS Functions.
 
 ## Next steps
 
-- [HTTP routes](/docs/guides/http-routes)
-- [Schemas and validation](/docs/guides/schemas)
-- [Testing](/docs/guides/testing)
-- [Concepts](/docs/concepts)
+<Cards>
+  <Card icon={<Route />} href="/docs/guides/http-routes" title="HTTP routes">
+    Serve HTTP routes from a Function with the Route Builder.
+  </Card>
+  <Card
+    icon={<ShieldCheck />}
+    href="/docs/guides/schemas"
+    title="Schemas and validation"
+  >
+    Write the schemas of a Function Contract and choose a validator.
+  </Card>
+  <Card icon={<FlaskConical />} href="/docs/guides/testing" title="Testing">
+    Test Functions and the Gateway without AWS.
+  </Card>
+  <Card icon={<BookOpen />} href="/docs/concepts" title="Concepts">
+    The terms Voke uses and how the parts of a project connect.
+  </Card>
+</Cards>

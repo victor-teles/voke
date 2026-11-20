@@ -249,7 +249,7 @@ const removedSettings = (
   if ("local" in raw) {
     issues.push({
       message:
-        'local AWS settings moved to the provider: aws({ local: floci() }) from "@voke/aws" and "@voke/aws/local"',
+        'local AWS settings moved to the provider: aws({ local: floci() }) from "@vokejs/aws" and "@vokejs/aws/local"',
       path: "local",
     });
   }
@@ -369,7 +369,7 @@ export const loadVokeConfig = async (
   } = {}
 ): Promise<VokeConfig> => {
   const path = options.path ?? "voke.config.ts";
-  const cwd = options.cwd ?? readEnv("PWD") ?? ".";
+  const cwd = options.cwd ?? process.cwd();
   const absolutePath = isAbsolute(path) ? path : resolve(cwd, path);
   const configFile = Bun.file(absolutePath);
 

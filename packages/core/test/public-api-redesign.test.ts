@@ -1,14 +1,14 @@
 import { expect, test } from "bun:test";
+import { realpathSync } from "node:fs";
 
-import { sqs } from "@voke/aws";
-import type { SqsMessageBatchIncludeInvalid } from "@voke/aws";
-import { response } from "@voke/http";
-import { schema } from "@voke/schema";
+import { sqs } from "@vokejs/aws";
+import type { SqsMessageBatchIncludeInvalid } from "@vokejs/aws";
+import { response } from "@vokejs/http";
+import { schema } from "@vokejs/schema";
 
 import { createFunctions, fn, http, route, voke } from "../src/index";
 import type { Middleware } from "../src/index";
 import type { StandardSchemaV1 } from "../src/invoke";
-import { setEnv } from "./support/env";
 import { tempPath } from "./support/temp";
 
 const standardSchema = <TInput, TOutput = TInput>(
@@ -88,57 +88,63 @@ test("rejects reserved Function Registry keys", () => {
   ).toThrow('Function Registry key "invoke" is reserved');
 });
 
+/** Runs `body` with `directory` as the working directory; `voke()` is synchronous, so nothing interleaves. */
+const inDirectory = <TResult>(
+  directory: string,
+  body: () => TResult
+): TResult => {
+  const previous = process.cwd();
+
+  process.chdir(directory);
+
+  try {
+    return body();
+  } finally {
+    process.chdir(previous);
+  }
+};
+
 test("auto-loads voke.config.ts when composing a Gateway", async () => {
-  const previousPwd = Bun.env.PWD;
   const directory = tempPath("voke-autoload-config-test");
   await Bun.$`mkdir -p ${directory}`;
   await Bun.write(
     `${directory}/voke.config.ts`,
     'export default { name: "autoload-api", stage: "test" };'
   );
-  Bun.env.PWD = directory;
 
-  try {
-    const functions = createFunctions({
-      ping: fn({
-        handler: () => ({ ok: true }),
-        output: standardSchema<unknown, { ok: boolean }>(() => ({
-          ok: true,
-        })),
-      }),
-    });
-    const gateway = voke(functions);
+  const functions = createFunctions({
+    ping: fn({
+      handler: () => ({ ok: true }),
+      output: standardSchema<unknown, { ok: boolean }>(() => ({
+        ok: true,
+      })),
+    }),
+  });
+  const gateway = inDirectory(directory, () => voke(functions));
 
-    expect(gateway.config.name).toBe("autoload-api");
-    expect(gateway.config.stage).toBe("test");
-    await expect(functions.invoke("ping")).resolves.toEqual({ ok: true });
-  } finally {
-    setEnv("PWD", previousPwd);
-  }
+  expect(gateway.config.name).toBe("autoload-api");
+  expect(gateway.config.stage).toBe("test");
+  await expect(functions.invoke("ping")).resolves.toEqual({ ok: true });
 });
 
 test("fails clearly when voke.config.ts cannot be auto-loaded", async () => {
-  const previousPwd = Bun.env.PWD;
   const directory = tempPath("voke-missing-config-test");
   await Bun.$`mkdir -p ${directory}`;
-  Bun.env.PWD = directory;
 
-  try {
-    const functions = createFunctions({
-      ping: fn({
-        handler: () => ({ ok: true }),
-        output: standardSchema<unknown, { ok: boolean }>(() => ({
-          ok: true,
-        })),
-      }),
-    });
+  const functions = createFunctions({
+    ping: fn({
+      handler: () => ({ ok: true }),
+      output: standardSchema<unknown, { ok: boolean }>(() => ({
+        ok: true,
+      })),
+    }),
+  });
+  // process.cwd() is the real path; the OS temp directory is a symlink on macOS.
+  const expectedPath = `${realpathSync(directory)}/voke.config.ts`;
 
-    expect(() => voke(functions)).toThrow(
-      `Voke config file not found: ${directory}/voke.config.ts. In a deployed bundle voke.config.ts is not on disk; pass it explicitly: voke(functions, { config }).`
-    );
-  } finally {
-    setEnv("PWD", previousPwd);
-  }
+  expect(() => inDirectory(directory, () => voke(functions))).toThrow(
+    `Voke config file not found: ${expectedPath}. In a deployed bundle voke.config.ts is not on disk; pass it explicitly: voke(functions, { config }).`
+  );
 });
 
 test("keeps Function Registry activation idempotent within one Gateway context", async () => {
@@ -165,12 +171,9 @@ test("serves route-backed Functions through route, http, and Gateway request", a
     http: http({
       routes: route.get("/users/:id", {
         handler: (req) => ({
-          header: req.headers.get("x-request-id"),
+          header: req.headers["x-request-id"],
           id: req.params.id,
-          query:
-            req.query instanceof URLSearchParams
-              ? req.query.get("includePosts")
-              : req.query.includePosts,
+          query: req.query.includePosts,
           raw: req.raw instanceof Request,
         }),
       }),
@@ -180,9 +183,9 @@ test("serves route-backed Functions through route, http, and Gateway request", a
 
   await expect(
     functions.route("GET", "/users/:id", {
-      headers: new Headers({ "x-request-id": "req_1" }),
+      headers: { "x-request-id": "req_1" },
       params: { id: "usr_1" },
-      query: new URLSearchParams({ includePosts: "true" }),
+      query: { includePosts: "true" },
     })
   ).resolves.toEqual({
     header: "req_1",
@@ -261,6 +264,7 @@ test("returns route validation issues with the public error envelope", async () 
   expect(invalidResponse.status).toBe(400);
   await expect(invalidResponse.json()).resolves.toEqual({
     error: {
+      code: "INVALID_REQUEST",
       issues: [{ message: "Expected string", path: ["body", "name"] }],
       message: "Invalid body",
     },

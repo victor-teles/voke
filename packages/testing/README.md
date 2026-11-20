@@ -1,11 +1,11 @@
-# @voke/testing
+# @vokejs/testing
 
 Test clients for Voke Gateways and Function Registries.
 
 Part of [Voke](https://github.com/victor-teles/voke). Every Voke package is released at the same version as `voke`.
 
 ```bash
-bun add voke @voke/testing
+bun add voke @vokejs/testing
 ```
 
 Documentation:

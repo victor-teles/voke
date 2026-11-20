@@ -68,14 +68,3 @@ export const response = {
   noContent,
   ok,
 } as const;
-
-export interface JsonBody<TData> {
-  data: TData;
-}
-
-export interface JsonErrorBody {
-  error: {
-    code: string;
-    message: string;
-  };
-}

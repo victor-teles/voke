@@ -1,9 +1,9 @@
 ---
 title: Concepts
-description: Learn the terms Voke uses, how the parts of a project connect, and what each command produces.
+description: The terms Voke uses, how the parts of a project connect, and what each command produces.
 ---
 
-This page defines the words the rest of the documentation uses and shows how they fit together. After reading it, you know where each part of a Voke project lives and what `voke dev`, `voke build`, `voke synth` and `voke deploy` do with it.
+This page defines the words the rest of the documentation uses. After reading it, you know where each part of a Voke project lives and what `voke dev`, `voke build`, `voke synth` and `voke deploy` do with it.
 
 ## A project at a glance
 
@@ -25,8 +25,8 @@ The same project in code:
 
 ```ts twoslash
 // @filename: voke.config.ts
-import { aws } from "@voke/aws";
-import { sqsQueue } from "@voke/aws/cloudformation";
+import { aws } from "@vokejs/aws";
+import { sqsQueue } from "@vokejs/aws/cloudformation";
 import { defineConfig } from "voke";
 
 export default defineConfig({
@@ -38,8 +38,8 @@ export default defineConfig({
 });
 
 // @filename: src/index.ts
-import { sqs } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { sqs } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 import { createFunctions, fn, http, route, voke } from "voke";
 
 import config from "../voke.config";
@@ -89,7 +89,7 @@ A named unit of serverless work. Each Function becomes one AWS Lambda function w
 
 - **Invokable**, made with `fn()`: other project code calls it by its registry key.
 - **Route-backed**, made with `http()`: it serves HTTP routes through the Gateway.
-- **Event Source**, for example `sqs()` from `@voke/aws`: an AWS service invokes it.
+- **Event Source**, for example `sqs()` from `@vokejs/aws`: an AWS service invokes it.
 
 See [Functions](/docs/guides/functions).
 
@@ -99,7 +99,7 @@ The typed catalog of the project's Functions, made with `createFunctions({ ... }
 
 ### Function Contract
 
-The input and output schemas of a Function (`input` and `output` on `fn()`). Voke validates the payload before the handler runs and the result after it returns. Any [Standard Schema](https://standardschema.dev) validator works; `@voke/schema` is Voke's own. See [Schemas](/docs/guides/schemas).
+The input and output schemas of a Function (`input` and `output` on `fn()`). Voke validates the payload before the handler runs and the result after it returns. Any [Standard Schema](https://standardschema.dev) validator works; `@vokejs/schema` is Voke's own. See [Schemas](/docs/guides/schemas).
 
 ### Gateway
 
@@ -111,19 +111,24 @@ The HTTP side of the project, made with `voke(functions, { config })`. It serves
 
 ### Provider
 
-The platform adapter that builds, synthesizes, deploys and runs local infrastructure for the project. The first-party Provider is `aws()` from `@voke/aws`. A project has at most one Provider, and you set it only in `voke.config.ts` with `provider: aws()`. `voke build`, `voke synth`, `voke deploy`, `voke remove` and `voke local` fail with an error when no Provider is set. Function code stays the same whatever the Provider.
+The platform adapter that builds, synthesizes, deploys and runs local infrastructure for the project. The first-party Provider is `aws()` from `@vokejs/aws`. A project has at most one Provider, and you set it only in `voke.config.ts` with `provider: aws()`. `voke build`, `voke synth`, `voke deploy`, `voke remove` and `voke local` fail with an error when no Provider is set. Function code stays the same whatever the Provider.
 
 ### Local AWS Provider
 
-A program that emulates AWS services on your machine, so the queues, tables and other resources the project declares exist during development. Voke supports the AWS Emulator (the default) and Floci; choose Floci with `aws({ local: floci() })` and `floci` from `@voke/aws/local`. `voke local start` starts it. It is not the Provider: the Provider decides where the project deploys, and the Local AWS Provider only emulates AWS locally. See [Local AWS](/docs/guides/local-aws).
+A program that emulates AWS services on your machine, so the queues, tables and other resources the project declares exist during development. Voke supports the AWS Emulator (the default) and Floci; choose Floci with `aws({ local: floci() })` and `floci` from `@vokejs/aws/local`. `voke local start` starts it. See [Local AWS](/docs/guides/local-aws).
+
+<Callout type="info" title="Not the Provider">
+  The Provider decides where the project deploys. The Local AWS Provider only
+  emulates AWS locally.
+</Callout>
 
 ### Runtime Variable
 
-A value a Function loads at runtime from AWS Secrets Manager or SSM Parameter Store, declared with `secret()` or `parameter()` from `@voke/aws` in the Function's `variables`. The handler reads it through `context.variables.<key>.text()` or `.json()`. Runtime Variables are not part of the Function Contract. See [Runtime Variables](/docs/guides/runtime-variables).
+A value a Function loads at runtime from AWS Secrets Manager or SSM Parameter Store, declared with `secret()` or `parameter()` from `@vokejs/aws` in the Function's `variables`. The handler reads it through `context.variables.<key>.text()` or `.json()`. Runtime Variables are not part of the Function Contract. See [Runtime Variables](/docs/guides/runtime-variables).
 
 ### Event Source
 
-A trigger where an AWS service invokes a Function. Voke supports SQS: `sqs({ queue, message, handler })` from `@voke/aws` attaches a queue that you declare in `resources`. The handler receives a batch of messages, and in tests you send one with `functions.sendEvent(...)`. See [SQS events](/docs/guides/sqs-events).
+A trigger where an AWS service invokes a Function. Voke supports SQS: `sqs({ queue, message, handler })` from `@vokejs/aws` attaches a queue that you declare in `resources`. The handler receives a batch of messages, and in tests you send one with `functions.sendEvent(...)`. See [SQS events](/docs/guides/sqs-events).
 
 ## What each command produces
 
@@ -134,7 +139,12 @@ A trigger where an AWS service invokes a Function. Voke supports SQS: `sqs({ que
 | `voke synth`  | Imports the entrypoint and asks the Provider for a deployment template.                                   | A CloudFormation template, by default `dist/cloudformation.json`.                                                                         |
 | `voke deploy` | Builds the project, uploads the bundle and the template, and creates or updates the stack.                | A CloudFormation stack named `<name>-<stage>`, the outputs printed to the terminal (the API URL first), and `.voke/outputs/<stage>.json`. |
 
-`voke deploy` refuses the stage `local`, which is reserved for local development. See the [CLI reference](/docs/reference/cli) for every flag.
+See the [CLI reference](/docs/reference/cli) for every flag.
+
+<Callout type="warn" title="The local stage is reserved">
+  `voke deploy` refuses the stage `local`, which is reserved for local
+  development.
+</Callout>
 
 ## How Functions become Lambda handlers
 
@@ -152,7 +162,7 @@ if (process.env.VOKE_SYNTH !== "1") {
 }
 ```
 
-`voke build` then writes `.voke/build/index.ts`, a generated module that exports one Lambda handler per Function, and bundles it to `dist/index.js`. `dist/voke-manifest.json` records the handler of each Function.
+`voke build` then writes `.voke/build/index.ts`, a generated module that exports one Lambda handler per Function, and bundles it, run-time code only, to `dist/index.js`. `dist/voke-manifest.json` records the handler of each Function.
 
 Handler export names come from the registry keys:
 
@@ -164,7 +174,21 @@ Deployed Lambda function names are `<name>-<stage>-<key>`, where `<name>` and `<
 
 ## Next steps
 
-- [Getting Started](/docs/getting-started): create and deploy a project.
-- [Functions](/docs/guides/functions): invokable Functions and the Function Registry in detail.
-- [HTTP routes](/docs/guides/http-routes): build routes with the Route Builder.
-- [Deploy](/docs/guides/deploy): stages, regions and removing a stage.
+<Cards>
+  <Card icon={<Rocket />} href="/docs/getting-started" title="Quickstart">
+    Create and deploy a project.
+  </Card>
+  <Card
+    icon={<SquareFunction />}
+    href="/docs/guides/functions"
+    title="Functions"
+  >
+    Invokable Functions and the Function Registry in detail.
+  </Card>
+  <Card icon={<Route />} href="/docs/guides/http-routes" title="HTTP routes">
+    Build routes with the Route Builder.
+  </Card>
+  <Card icon={<CloudUpload />} href="/docs/guides/deploy" title="Deploy">
+    Stages, regions and removing a stage.
+  </Card>
+</Cards>

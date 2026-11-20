@@ -1,5 +1,5 @@
-import { aws } from "@voke/aws";
-import type { LocalProvider } from "@voke/aws/local";
+import { aws } from "@vokejs/aws";
+import type { LocalProvider } from "@vokejs/aws/local";
 
 import { voke } from "../src/app";
 import type { VokeConfigInput } from "../src/config";

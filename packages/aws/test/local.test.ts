@@ -311,6 +311,32 @@ test("creates a local bootstrap plan for CloudFormation through Floci", async ()
   ]);
 });
 
+test("the Floci bootstrap template retains nothing, so local data stays disposable", async () => {
+  const templatePath = join(scratchPath("voke-local-retain"), "template.json");
+
+  await createLocalBootstrapPlan({
+    model: createVokeModel({
+      name: "orders-api",
+      resources: {
+        ordersTable: dynamodbTable({ partitionKey: "id" }),
+        uploadsBucket: s3Bucket(),
+      },
+      stage: "local",
+    }),
+    name: "orders-api",
+    provider: floci(),
+    region: "us-east-1",
+    stage: "local",
+    templatePath,
+  });
+
+  const template = await Bun.file(templatePath).json();
+
+  expect(template.Resources.OrdersTable.Type).toBe("AWS::DynamoDB::Table");
+  expect(JSON.stringify(template)).not.toContain("DeletionPolicy");
+  expect(JSON.stringify(template)).not.toContain("VokeRetain");
+});
+
 test("keeps provided templates as a local bootstrap escape hatch", async () => {
   const templatePath = join(
     scratchPath("voke-local-template-escape"),

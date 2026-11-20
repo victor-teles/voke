@@ -17,6 +17,13 @@ export interface ProviderExtensionRecord {
 
 export interface ProviderRuntimeCapability {
   /**
+   * True when the platform delivered this request to a deployed Function (for example API
+   * Gateway invoking the Lambda). Local Authorizer Evaluation never verifies a JWT signature,
+   * so for such a request the Gateway answers 401 for a JWT Authorizer route that `routeAuth`
+   * reported nothing for, instead of evaluating the token itself.
+   */
+  isPlatformRequest?: (input: { env: unknown }) => boolean;
+  /**
    * Returns the authorization result the platform already established for this request (for
    * example an API Gateway authorizer), or undefined to evaluate the route's authorizer locally.
    * `env` is the Gateway request's Hono env, set by the Provider's own runtime adapter.
@@ -93,6 +100,8 @@ export interface ProviderDeployInput {
   region?: string;
   /** Plan the deployment and report the changes without applying them. */
   dryRun: boolean;
+  /** The user accepted changes that remove or replace resources holding data. */
+  acceptDataLoss: boolean;
   output: (line: string) => void;
 }
 

@@ -205,9 +205,10 @@ export const createLocalResourceBindings = (
 export const createLocalBootstrapPlan = async (
   options: LocalBootstrapPlanOptions
 ): Promise<LocalBootstrapPlan> => {
+  // Local data is disposable, and a retained resource would block a later create.
   const template =
     options.template === undefined
-      ? synthesizeCloudFormationFromModel(options.model)
+      ? synthesizeCloudFormationFromModel(options.model, { retainData: false })
       : options.template;
   const templatePath =
     options.templatePath ?? ".voke/local/cloudformation.json";
@@ -427,6 +428,7 @@ export const createLocalWorkflow = (
       region: config.region,
       stage: config.stage,
       template: synthesizeCloudFormationFromModel(model, {
+        retainData: false,
         scope: "resources",
       }),
       templatePath:

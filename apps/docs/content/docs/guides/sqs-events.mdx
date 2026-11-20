@@ -3,19 +3,19 @@ title: SQS events
 description: Run a Function for each batch of messages on an SQS queue, report failed messages, and test the Function locally.
 ---
 
-After reading this page you can declare an SQS queue, attach a Function to it as an **Event Source**,
-report the messages that failed, and test the Function without AWS.
+After this page you can declare an SQS queue, attach a Function to it as an **Event Source**, report
+the messages that failed, and test the Function without AWS.
 
 ## Declare the queue and the Function
 
 Declare the queue in `resources` in `voke.config.ts` with `sqsQueue()` from
-`@voke/aws/cloudformation`. Then create the Function with `sqs()` from `@voke/aws`, and pass the
+`@vokejs/aws/cloudformation`. Then create the Function with `sqs()` from `@vokejs/aws`, and pass the
 queue's resource key as `queue`:
 
 ```ts twoslash
 // @filename: voke.config.ts
-import { aws } from "@voke/aws";
-import { sqsQueue } from "@voke/aws/cloudformation";
+import { aws } from "@vokejs/aws";
+import { sqsQueue } from "@vokejs/aws/cloudformation";
 import { defineConfig } from "voke";
 
 export default defineConfig({
@@ -27,8 +27,8 @@ export default defineConfig({
 });
 
 // @filename: src/index.ts
-import { sqs } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { sqs } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 import { createFunctions } from "voke";
 
 const orderMessage = schema.object({
@@ -88,8 +88,8 @@ succeeded and makes the failed messages visible again for a retry.
   then return the builder.
 
 ```ts twoslash
-import { sqs } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { sqs } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 
 const chargeOrder = async (orderId: string): Promise<void> => {
   if (orderId === "") {
@@ -131,8 +131,8 @@ Set `invalidMessageBody: "include"` to receive invalid messages too, for example
 `batch.messages` then holds both kinds. Check `message.valid` to tell them apart:
 
 ```ts twoslash
-import { sqs } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { sqs } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 
 // ---cut---
 export const processOrder = sqs({
@@ -156,9 +156,57 @@ export const processOrder = sqs({
 ```
 
 An invalid message has `valid: false`, `rawBody` (the body as received) and `error` (an
-`InvokeError` with code `INVALID_PAYLOAD`). It is still reported as a failure, so SQS delivers it
-again. With no dead-letter queue (see [Limits](#limits)), an invalid message is retried until the
-queue's retention period ends.
+`InvokeError` with code `INVALID_PAYLOAD`).
+
+<Callout type="warn" title="Invalid messages still count as failed">
+
+An invalid message is still reported as a failure, so SQS delivers it again. After 5 failed
+receives, SQS moves it to the queue's [dead-letter queue](/docs/guides/dead-letter-queues), where it stays for 14 days.
+
+</Callout>
+
+## Run each message once
+
+SQS delivers a message at least once: a timeout or a partial batch failure sends it again, and a
+producer can send the same business event twice with a new message id. To run each message once,
+wrap a per-message function with `idempotentBatch` from `@vokejs/idempotency` and add the
+`idempotency()` Plugin to `voke.config.ts`:
+
+```ts twoslash
+import { sqs } from "@vokejs/aws";
+import { idempotentBatch } from "@vokejs/idempotency";
+import { schema } from "@vokejs/schema";
+
+const settlePayment = async (paymentId: string): Promise<void> => {
+  // Charge or record the payment.
+};
+
+// ---cut---
+export const settle = sqs({
+  queue: "paymentsQueue",
+  // The Plugin's table is linked like any resource.
+  resources: ["idempotencyTable"],
+  message: schema.object({
+    paymentId: schema.string(),
+    amount: schema.number(),
+  }),
+  handler: idempotentBatch(
+    async (message) => await settlePayment(message.body.paymentId),
+    { key: (message) => message.body.paymentId }
+  ),
+});
+```
+
+A message that throws is reported as a batch item failure, and a message that was already processed
+counts as a success. See [Idempotency](/docs/guides/idempotency).
+
+## What gets deployed
+
+The consuming Function's role gets `sqs:ReceiveMessage`, `sqs:DeleteMessage` and
+`sqs:GetQueueAttributes` on its queue, which the event source mapping needs to poll it. That is all:
+the role cannot send to the queue, and the Function gets no `VOKE_RESOURCE_*` binding for it. A
+handler that sends messages, to its own queue or another, links that queue with `resources`. See
+[Resources and bindings](/docs/guides/resources#access-a-link-grants).
 
 ## Batch options
 
@@ -174,8 +222,8 @@ To consume more than one queue with one Function, pass `queues` instead of `queu
 resource key, or an object with `queue` and its own options:
 
 ```ts twoslash
-import { sqs } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { sqs } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 
 // ---cut---
 export const processOrder = sqs({
@@ -187,76 +235,6 @@ export const processOrder = sqs({
 ```
 
 Pass `queue` or `queues`, not both. `sqs()` throws a `VokeConfigError` otherwise.
-
-## Test an SQS Function
-
-`voke dev` does not read messages from queues. Test an SQS Function with
-`functions.sendEvent(name, { messages })`. It runs the same parsing, validation and handler code as
-the deployed Lambda, and returns the batch result:
-
-```ts twoslash
-import { sqs } from "@voke/aws";
-import { schema } from "@voke/schema";
-import { createFunctions } from "voke";
-
-const functions = createFunctions({
-  processOrder: sqs({
-    queue: "ordersQueue",
-    message: schema.object({ orderId: schema.string() }),
-    handler: (batch) => batch.ok(),
-  }),
-});
-
-// ---cut---
-const result = await functions.sendEvent("processOrder", {
-  messages: [
-    { id: "m1", body: { orderId: "ord_1" } },
-    { id: "m2", body: "not json" },
-  ],
-});
-
-console.info(result);
-// { batchItemFailures: [{ itemIdentifier: "m2" }] }
-```
-
-Each message needs only a `body`. An object body is serialized to JSON; a string body is used as it
-is, so you can test bodies that are not valid JSON. Voke fills in the SQS metadata. `id` defaults to
-`msg_1`, `msg_2`, and so on.
-
-See [Testing](/docs/guides/testing) for test setup.
-
-## Run each message once
-
-SQS delivers a message at least once: a timeout or a partial batch failure sends it again, and a
-producer can send the same business event twice with a new message id. To run each message once,
-wrap a per-message function with `idempotentBatch` from `@voke/idempotency` and add the
-`idempotency()` Plugin to `voke.config.ts`:
-
-```ts twoslash
-import { sqs } from "@voke/aws";
-import { idempotentBatch } from "@voke/idempotency";
-import { schema } from "@voke/schema";
-
-const settlePayment = async (paymentId: string): Promise<void> => {
-  // Charge or record the payment.
-};
-
-// ---cut---
-export const settle = sqs({
-  queue: "paymentsQueue",
-  message: schema.object({
-    paymentId: schema.string(),
-    amount: schema.number(),
-  }),
-  handler: idempotentBatch(
-    async (message) => await settlePayment(message.body.paymentId),
-    { key: (message) => message.body.paymentId }
-  ),
-});
-```
-
-A message that throws is reported as a batch item failure, and a message that was already processed
-counts as a success. See [Idempotency](/docs/guides/idempotency).
 
 ## Queue visibility timeout
 
@@ -270,9 +248,9 @@ the largest value wins.
 
 To set it yourself, pass `visibilityTimeoutSeconds`:
 
-```ts twoslash
-import { aws } from "@voke/aws";
-import { sqsQueue } from "@voke/aws/cloudformation";
+```ts title="voke.config.ts" twoslash
+import { aws } from "@vokejs/aws";
+import { sqsQueue } from "@vokejs/aws/cloudformation";
 import { defineConfig } from "voke";
 
 export default defineConfig({
@@ -291,14 +269,56 @@ SQS Functions are not behind API Gateway, so the 30-second HTTP limit does not a
 timeout can go up to the Lambda limit of 900 seconds (`synthesis: { timeout }` on the Function). See
 [Functions](/docs/guides/functions).
 
+## Test an SQS Function
+
+Test an SQS Function with `functions.sendEvent(name, { messages })`. It runs the same parsing,
+validation and handler code as the deployed Lambda, and returns the batch result:
+
+```ts twoslash
+import { sqs } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
+import { createFunctions } from "voke";
+
+const functions = createFunctions({
+  processOrder: sqs({
+    queue: "ordersQueue",
+    message: schema.object({ orderId: schema.string() }),
+    handler: (batch) => batch.ok(),
+  }),
+});
+
+// ---cut---
+const result = await functions.sendEvent("processOrder", {
+  messages: [
+    { id: "m1", body: { orderId: "ord_1" } },
+    { id: "m2", body: "not json" as never },
+  ],
+});
+
+console.info(result);
+// { batchItemFailures: [{ itemIdentifier: "m2" }] }
+```
+
+Each message needs only a `body`. An object body is serialized to JSON; a string body is used as it
+is, so you can test bodies that are not valid JSON. The body is typed from the message schema, so
+cast a deliberately invalid body with `as never`. Voke fills in the SQS metadata. `id` defaults to
+`msg_1`, `msg_2`, and so on.
+
+<Callout type="info" title="Local runs do not create the trigger">
+
+`voke dev` does not read messages from queues.
+
+</Callout>
+
+See [Testing](/docs/guides/testing) for test setup.
+
 ## Limits
 
-<Callout type="info">
+<Callout type="info" title="SQS support is intentionally small in v1">
 
-SQS support is intentionally small in v1:
-
-- There is no dead-letter queue or redrive policy. `sqsQueue()` has no option for them, and failed
-  messages are retried until the queue's retention period ends.
+- The dead-letter queue always moves a message after 5 receives and keeps it 14 days.
+  `sqsQueue({ deadLetterQueue: false })` turns it off; a queue you write by hand with its own
+  `RedrivePolicy` keeps that policy. See [Dead-letter queues](/docs/guides/dead-letter-queues).
 - An `sqs()` Function cannot have HTTP routes or an output schema. Its output is always the batch
   result. Put routes on a separate Function in the same registry.
 - The Event Source options are only `batchSize`, `maxBatchingWindowSeconds` and `enabled`.
@@ -307,7 +327,25 @@ SQS support is intentionally small in v1:
 
 ## Next steps
 
-- [Resources and bindings](/docs/guides/resources): send messages to the queue from another Function.
-- [Runtime Variables](/docs/guides/runtime-variables): read secrets in an SQS handler.
-- [Testing](/docs/guides/testing): test Functions and the Gateway.
-- [Deploy](/docs/guides/deploy): deploy the queue and the Function.
+<Cards>
+  <Card
+    icon={<Database />}
+    href="/docs/guides/resources"
+    title="Resources and bindings"
+  >
+    Send messages to the queue from another Function.
+  </Card>
+  <Card
+    icon={<KeyRound />}
+    href="/docs/guides/runtime-variables"
+    title="Runtime Variables"
+  >
+    Read secrets in an SQS handler.
+  </Card>
+  <Card icon={<FlaskConical />} href="/docs/guides/testing" title="Testing">
+    Test Functions and the Gateway.
+  </Card>
+  <Card icon={<CloudUpload />} href="/docs/guides/deploy" title="Deploy">
+    Deploy the queue and the Function.
+  </Card>
+</Cards>

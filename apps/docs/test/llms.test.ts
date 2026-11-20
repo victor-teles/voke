@@ -19,7 +19,7 @@ test("a page renders as Markdown with its title, description and code", async ()
 
   const markdown = await pageMarkdown(page);
 
-  expect(markdown).toStartWith("# Getting Started (/docs/getting-started)");
+  expect(markdown).toStartWith("# Quickstart (/docs/getting-started)");
   expect(markdown).toContain(page.data.description ?? "");
   expect(markdown).toContain("voke create my-api");
   expect(markdownUrl(page)).toBe("/llms.mdx/docs/getting-started");

@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test";
 
-import { bindResource } from "@voke/aws";
 import {
   dynamodbTable,
   eventBus,
@@ -10,8 +9,8 @@ import {
   sqsQueue,
   ssmParameter,
   synthesizeCloudFormation,
-} from "@voke/aws/cloudformation";
-import { createLocalResourceBindings } from "@voke/aws/local";
+} from "@vokejs/aws/cloudformation";
+import { createLocalResourceBindings } from "@vokejs/aws/local";
 
 import { createResourceBindingName } from "../src/bindings";
 import { createFunctions, http } from "../src/invoke";
@@ -27,15 +26,23 @@ test("uses one stable binding naming convention everywhere", () => {
   expect(createResourceBindingName("signingSecret", "id")).toBe(
     "VOKE_RESOURCE_SIGNING_SECRET_ID"
   );
-  expect(bindResource("ordersTable", "name").envName).toBe(
-    createResourceBindingName("ordersTable", "name")
-  );
 });
 
 test("keeps synthesized and local resource bindings on the same logical contract", () => {
   const template = synthesizeCloudFormation({
     functions: createFunctions({
-      http: http({ routes: [route.get("/health", { handler: () => "ok" })] }),
+      http: http({
+        resources: [
+          "appSecret",
+          "eventsBus",
+          "eventsQueue",
+          "ordersTable",
+          "publicConfig",
+          "uploadsBucket",
+          "userTopic",
+        ],
+        routes: [route.get("/health", { handler: () => "ok" })],
+      }),
     }),
     name: "binding-api",
     resources: {

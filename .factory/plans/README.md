@@ -13,6 +13,11 @@ Plans 014–021 were added on 2026-11-14 at commit `4015c46`. They plan the Lamb
 features the owner asked for: more Event Sources, durable functions, a Plugin contract, and the
 first two integrations (OpenAPI with Scalar, idempotency). They have their own table below.
 
+Plans 022–034 were added on 2026-11-15 at commit `1c59d39` (branch `feature/docs-revamp`),
+after an audit that asked "is Voke solid, and what should improve before a first release?".
+They fix defects the audit reproduced and close the gaps between a working framework and one
+that is safe to run with real data and to publish. They have their own table below.
+
 **Base branch.** `origin/main` stops at PR #52. PRs #53–#62 were merged into each other's
 branches instead of `main`, so the newest code and this index exist only on
 `origin/feature/docs-site-platform` (`4015c46`). Plans 014–021 are written against that commit.
@@ -89,6 +94,31 @@ Three tracks: Event Sources (014 → 015 → 016 → 017), durable functions (01
 (019 → 020 → 021). The tracks have no hard dependency on each other, but they edit the same
 files, so run them one at a time. Recommended order: 014 → 015 → 018 → 019 → 020 → 016 → 017 → 021. That puts every P1 plan first.
 
+### Hardening before a first release (plans 022–034)
+
+| Plan | Title                                                                                                                                   | Priority | Effort | Depends on                | Status             |
+| ---- | --------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------ | ------------------------- | ------------------ |
+| 022  | `bun test` from the repository root passes, and no test depends on the shell it runs in                                                 | P1       | S      | —                         | DONE (663a647)     |
+| 023  | A route's `query` and `headers` are plain objects, and a client's mistake gets a 4xx in the Error Envelope                              | P1       | M      | (022)                     | DONE (663a647)     |
+| 024  | A Function Contract written with `@voke/schema` types callers and handler results as strictly as one written with Zod                   | P1       | M      | (022, 023)                | DONE (663a647)     |
+| 025  | `voke migrate serverless` never reports a lossy conversion as supported                                                                 | P1       | L      | (022–024)                 | DONE (663a647)     |
+| 026  | The CLI rejects arguments it does not use and finds the project from the process working directory                                      | P2       | M      | (022, 023, 025)           | DONE (663a647)     |
+| 027  | Tables, buckets and secrets survive a rename, a replacement, a removal from config and `voke remove`                                    | P1       | M      | (026)                     | DONE (663a647)     |
+| 028  | A failed event lands in a dead-letter queue instead of looping or disappearing                                                          | P1       | L      | (027)                     | DONE (05df4b3)     |
+| 029  | Each Function's role and bindings cover only the resources that Function links                                                          | P2       | L      | (023, 024, 027, 028)      | DONE (05df4b3)     |
+| 030  | A Lambda bundle holds only run-time code, is minified with function names intact, and a test with a size budget keeps it that way       | P2       | M      | (022–029)                 | DONE (05df4b3)     |
+| 031  | Remote Function Registries have one implementation, in `@voke/remote`, and a failed remote call always rejects with an `InvokeError`    | P2       | M      | (022, 023, 024, 026)      | DONE (cae2ad3)     |
+| 032  | `@voke/idempotency` runs a retried handler once when the handler outlives its expiry or a store write fails, and reports the real error | P2       | M      | (022, 028, 029)           | DONE (cae2ad3)     |
+| 033  | A route behind a JWT Authorizer answers 401 without a valid-looking token under `voke dev` and in tests                                 | P2       | M      | (022, 023, 024, 031)      | DONE (cae2ad3)     |
+| 034  | The packages can be versioned, packed and installed into a fresh project, and CI proves it on every pull request                        | P1       | M      | (022, 025, 026, 030, 031) | DONE (uncommitted) |
+
+No plan in this round has a hard prerequisite; every dependency is ordering only, because the
+plans share files. Recommended order: 022 → 023 → 024 → 025 → 026 → 027 → 028 → 029 → 030 → 031
+→ 032 → 033 → 034. To reach "safe for real data" soonest, the P1 plans can run first
+(022 → 023 → 024 → 025 → 027 → 028), then the P2 plans in number order, then 034 last. 029 is
+the one HIGH-risk plan: it changes how every Function reads a resource, so it must land before
+a first release or wait for a major version.
+
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJECTED (with one-line rationale — finding fixed independently or approach abandoned)
 
 ## Dependency notes
@@ -133,6 +163,27 @@ Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJE
 - 021 requires 019 (resource contributions, the wrap hook). It runs after 014 and 018 so its
   batch form matches the final SQS types and it can defer to `executionName` for Durable
   Functions.
+- 022 comes first in the 022–034 round. It makes root `bun test` green and isolates every
+  package's tests from the shell environment, so later executors start from a clean baseline.
+  It wraps one CLI test in `process.chdir`; 026 may replace that with its `runCli(argv, { cwd })`.
+- 023, 024 and 031 edit `packages/core/src/invoke.ts` and `remote.ts`. 023 changes run-time
+  request handling and error mapping, 024 changes only types, and 031 moves the remote client
+  out of core. Run them in that order. 023 leaves the Dev Function Invoke Endpoint's error
+  bodies to 031.
+- 025 and 026 edit `packages/core/src/cli.ts` (the `migrate` handler, then argument checking).
+  025 takes the generated `package.json` from the scaffold; 034 owns the versions it writes.
+- 027, 028 and 029 edit the resource and Function loops of
+  `packages/aws/src/cloudformation-synthesis.ts`. 027 adds retention policies and the
+  data-loss pre-flight. 028 adds dead-letter queues and copies 027's rule for which queues are
+  retained. 029 rewrites how role statements are assembled, so it goes last of the three.
+- 029 removes `bindResource` in favour of `context.resource(key)` and makes Plugin resources
+  linked explicitly. 032 edits `@voke/idempotency` after it, so the table lookup has one
+  shape by then.
+- 030 splits `aws()` into a run-time and a deploy-time half with a package `imports` entry
+  (`#provider`). It runs after 027–029 because they add deploy-time code that must stay out of
+  the bundle. 033 adds a `runtime` member to the Provider, which stays in the run-time half.
+- 034 runs last. It must keep 030's `imports` entry working in the published packages, and it
+  publishes the export surface 031 leaves in `@voke/remote`.
 
 ## Owner decisions
 
@@ -211,6 +262,37 @@ Still open for plans 014–021 (each plan states its default and how to reverse 
 | Idempotency key                                                                                                       | 021           | Required; no automatic key from the message id                                                 |
 | Add `@aws-sdk/client-dynamodb` for `@voke/idempotency`                                                                | 021           | Yes                                                                                            |
 
+Still open for plans 022–034. None was confirmed by the owner; each plan states its default
+and how to reverse it, and these are the ones that change what a user sees:
+
+| Decision                                                           | Needed by | Default in the plan                                                                                                                                                                                                          |
+| ------------------------------------------------------------------ | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Whole-repository test command                                      | 022       | `bun run test` is the gate; root `bun test` passes but leaves out `apps/docs`; CI runs both                                                                                                                                  |
+| Shape of `request.query` and `request.headers`                     | 023       | Always plain objects; header names lower-case; a repeated key is one comma-joined string, never an array                                                                                                                     |
+| A `body` schema with a non-JSON content type                       | 023       | 415 `UNSUPPORTED_MEDIA_TYPE`; the "pass the body as text" behaviour is removed                                                                                                                                               |
+| Wrong method on an existing path                                   | 023       | Stays 404, no 405: API Gateway answers 404 itself, so a local 405 would differ from production                                                                                                                               |
+| Route handler that returns a `Response`                            | 024       | Stays legal and skips output validation                                                                                                                                                                                      |
+| YAML parser of the migrator                                        | 025       | Replace the hand-written parser with `Bun.YAML.parse`; no new package                                                                                                                                                        |
+| A route whose authorizer cannot be converted                       | 025       | Generated closed behind a deny-all Request Authorizer plus a new `blocking` risk level; never generated public                                                                                                               |
+| Positional stage (`voke deploy prod`) and short flags              | 026       | Both rejected with a usage error that names `--stage`; no short flags except `-h` and `-v`                                                                                                                                   |
+| Which resources are retained                                       | 027       | `dynamodbTable`, `s3Bucket` and `secret()` get `Retain` on every stage; queues, streams and topics do not                                                                                                                    |
+| Opt-out of retention                                               | 027       | `aws({ retainData })`, a boolean or a function of key, stage and type                                                                                                                                                        |
+| Deploy that would replace or remove a retained resource            | 027       | Refused unless `voke deploy --accept-data-loss`                                                                                                                                                                              |
+| Dead-letter queues                                                 | 028       | On by default on every stage; opt out with `deadLetterQueue: false`; `maxReceiveCount` 5, not configurable                                                                                                                   |
+| Stream retry limit (reverses plan 016's "no retry limit")          | 028       | 10 attempts, then the batch pointer goes to the dead-letter queue; a new ADR supersedes that part of ADR 0012                                                                                                                |
+| How a Function declares the resources it uses                      | 029       | `resources: ["key"]` on every builder, read with `context.resource(key)`; `bindResource` is removed                                                                                                                          |
+| Read-only versus read-write links, and a custom grant escape hatch | 029       | Deferred; every link grants the builder's full action list                                                                                                                                                                   |
+| How deploy-time code is kept out of the bundle                     | 030       | A `voke-runtime` build condition switches `@voke/aws`'s `#provider` import to a run-time-only `aws()`                                                                                                                        |
+| Minification and source maps                                       | 030       | Whitespace and syntax only, identifiers kept; no source maps and no setting                                                                                                                                                  |
+| Where the remote code lives                                        | 031       | Client in `@voke/remote` (one export, `createRemoteFunctions`); artifact, code generation and dev endpoints in core                                                                                                          |
+| Merging `@voke/http` with core's response helpers                  | 031       | Deferred to the owner; an identity test pins the two copies meanwhile                                                                                                                                                        |
+| A result too large to store, and a failed `complete`               | 032       | New errors `IDEMPOTENCY_RESULT_TOO_LARGE` and `IDEMPOTENCY_COMPLETE_FAILED`; `complete` is not retried                                                                                                                       |
+| Local evaluation of a JWT Authorizer                               | 033       | Decode without verifying the signature; check `iss`, audience, `exp`, `nbf`; 401 otherwise; never runs in a deployed Function                                                                                                |
+| What the published packages contain                                | 034       | TypeScript source at run time plus emitted `.d.ts`, so a consumer's compiler flags stop applying to Voke's source                                                                                                            |
+| Versioning tool and first version                                  | 034       | A small `scripts/release.ts` and a hand-written `CHANGELOG.md`, no Changesets; `0.1.0`                                                                                                                                       |
+| `hono` and `voke` in the `@voke/*` packages                        | 034       | Peer dependencies                                                                                                                                                                                                            |
+| Release gates only the owner can clear                             | 034       | Named in `docs/releasing.md`, not performed: npm name and scope, the real-AWS smoke deploys of plans 004 and 018, the S3 key encoding of plan 017, the release commit on `main`. The publish itself stays the owner's action |
+
 ## Product stance (ADR 0007)
 
 Decided 2026-11-14 and recorded in `docs/adr/0007-opinionated-framework.md`. How each plan applies it:
@@ -245,12 +327,12 @@ Ordered by how much they would add to "easy to use and deploy" once 001–006 la
   the deployed variants and log tailing.
 - **Parameters and secrets.** Runtime Variables landed on `main`; plan 009 makes them work when
   deployed. Remaining scope tracked as issue #36 and roadmap v2 phase 1.
-- **Data safety on `voke remove`.** Tables, buckets, and queues have no deletion or retention
-  policy, and a non-empty bucket fails stack deletion. Plan 004 adds only a confirmation prompt.
-  Roadmap v2 phase 1 (`removalPolicy`, `protect`).
-- **Least-privilege resource linking.** Every Function receives every resource binding
-  (`packages/core/src/model.ts:439-443`) and all share one IAM role
-  (`packages/core/src/cloudformation.ts:707-710`). Roadmap v2 phase 5.
+- **Data safety on `voke remove`.** Now plan 027 (retention policies and a data-loss
+  pre-flight). Still unplanned: `protect` for a stage, `voke remove --delete-data`, and a
+  command to adopt a retained resource into a new stack.
+- **Least-privilege resource linking.** Now plan 029. Still unplanned: read-only links, a
+  custom grant escape hatch, `voke resources`, and config keys typed into the entrypoint so a
+  misspelled link is a compile error.
 - **Cross-Lambda `functions.invoke`.** The AWS transport calls `definition.name ?? definition.key`
   (`packages/core/src/invoke.ts:878-879`) while deployed Lambdas are named
   `<name>-<stage>-<key>` (`model.ts:460-463`); the role has no `lambda:InvokeFunction` grant; and
@@ -272,13 +354,15 @@ Ordered by how much they would add to "easy to use and deploy" once 001–006 la
   (roadmap v2 phase 8). Deferred from the 014–021 round by owner choice.
 - **Durable execution tooling.** `voke executions` (list, inspect, stop), callback helpers, and
   pruning of retained Lambda versions. Plan 018 defers all three.
-- **DLQ and redrive** for queues and for the new asynchronous and stream sources.
+- **DLQ and redrive.** Now plan 028. Still unplanned: a `voke` command to read or redrive a
+  dead-letter queue, delivery-side dead-letter settings for SNS subscriptions and EventBridge
+  targets, and a destination that keeps a stream record's payload (a stream's dead-letter
+  message holds a pointer to the batch, not the records).
 - **Isolated emulator per test run** (`aws-emulator -p 0`) in `voke/testing`.
-- **Lazy `aws()` capabilities (bundle size).** Since plan 019 the generated Lambda entry imports
-  `voke.config.ts`, and `aws()` eagerly imports its deploy, synthesis, local and build code, so
-  every Lambda bundle carries it: `examples/sqs-events` went from 83 KB to 255 KB, and Gateway
-  projects already paid most of this. Load those capabilities with dynamic `import()` so a
-  deployed bundle holds only the runtime half.
+- **Deploy-time code in the Lambda bundle.** Now plan 030. Since plan 019 the generated Lambda
+  entry imports `voke.config.ts`, and `aws()` eagerly imports its deploy, synthesis, local and
+  build code: `examples/hello-api` builds to 279 KB. Dynamic `import()` does not fix it (Bun
+  inlines the module), so plan 030 uses a build condition instead.
 - **Confirm S3 key encoding** with a captured S3 → EventBridge event before the first release
   (plan 017, ADR 0013). If AWS URL-encodes keys, switch `s3()` to decoding.
 - **Real-AWS proof for Durable Functions** (plan 018, step 8): the managed runtime's SDK commands,
@@ -292,7 +376,52 @@ Ordered by how much they would add to "easy to use and deploy" once 001–006 la
 - **Friendlier Function options**: top-level `timeout`/`memory` on `fn`/`http`/`sqs` instead of
   the `synthesis` bag.
 - **Source maps and per-Function bundles** (roadmap v2 phase 6).
-- **Reproducible docs builds**: `apps/docs/package.json` depends on `latest` for every package.
+- **Reproducible docs builds**: fixed since this was written; `apps/docs/package.json` no longer
+  uses `latest` (checked while planning 034).
+
+Found by the 2026-11-15 audit and not planned in 022–034. The first group was reproduced or
+read end to end; verify each before planning it.
+
+- **Invocation options.** `timeoutMs` never clears its timer, so a process stays alive for the
+  full timeout after a fast call; `retries` repeats deterministic validation failures with no
+  backoff; a timed-out attempt keeps running and can overlap its retry
+  (`packages/core/src/invoke.ts`, around lines 1530–1565). The trace state is a module-level
+  array (`invoke.ts:827`), so two concurrent invocations can see each other's trace;
+  `AsyncLocalStorage` would fix it (plan 029 introduces one in core for Resource Links).
+- **Cross-Lambda `functions.invoke` with an explicit `runtime: "aws"`.** That path wraps the
+  payload as `{ payload, trace }` (`invoke.ts`, `invokeAws`, `envelope: true`), while the
+  deployed handler validates the whole Lambda event as the payload
+  (`packages/aws/src/lambda-handlers.ts:219-223`). The Provider-routed path sends the bare
+  payload and is not affected. `unwrapPayload` also strips any result that has a `data` key.
+- **Deploy pre-flight for AWS limits.** Nothing checks the 1 MB template limit, the
+  500-resource limit (plan 028 adds one or two resources per Event Source Function), 64-character
+  Function names or the 250 MB unzipped code limit before CloudFormation rejects the deploy.
+- **`voke deploy --dry-run` changes the account.** It creates the bootstrap stack and uploads
+  the bundle and the template before the dry-run flag is read
+  (`packages/aws/src/deploy.ts`, `ensureArtifactBucket` and the upload before `deployStack`).
+- **Stack states the deploy does not handle**: `CREATE_FAILED`, `ROLLBACK_FAILED` and
+  `DELETE_FAILED` fall through to an update change set.
+- **Artifact bucket growth.** The bootstrap bucket has no lifecycle rule, and
+  `durable-synthesis.ts` retains every published version of a Durable Function.
+- **An explicit Function `name` drops the stage** (`packages/core/src/model.ts`,
+  `definition.name ?? generatedFunctionName(name)`), so a second stage collides on the Lambda
+  name.
+- **Lambda Request Authorizer cache key.** With `cacheTtlSeconds > 0` the cache key is only the
+  identity source, while the handler also receives the path and method; a path-dependent
+  decision would be replayed across routes. Read, not confirmed against AWS.
+- **Hardening defaults**: no Kinesis `StreamEncryption`, no point-in-time recovery option for
+  tables, no access logs or throttling on the HTTP stage, no reserved concurrency, no FIFO
+  queues.
+- **HTTP details plan 023 leaves alone**: 405 with `Allow` (needs an `ANY` route per path in
+  synthesis, so local and deployed agree), `HEAD` on a `GET` route (answers 200 locally;
+  deployed behaviour unconfirmed), form, multipart and text body parsers, a cookie object, and
+  a status code for a validated result (a typed result is always 200 today).
+- **CLI features plan 026 leaves alone**: `--json`, `--verbose`, `--cwd`, distinct exit codes,
+  and `--config` in another directory still resolving the entrypoint against the working
+  directory.
+- **Test coverage of small packages**: `@voke/http` has no tests, `@voke/testing` has one.
+- **Node consumers.** `import("voke")` fails on Node (extensionless imports in TypeScript
+  source). ADR 0007 makes Node-only toolchains a non-goal; plan 034 keeps that.
 
 ## Findings considered and rejected
 
@@ -321,7 +450,34 @@ Ordered by how much they would add to "easy to use and deploy" once 001–006 la
   Gateway call, and the CLI needs Plugins at synth time. Plan 019 declares them in
   `voke.config.ts`, like the Provider.
 
+- Answer 405 locally for a wrong method (plan 023): rejected. The deployed HTTP API has one
+  route key per method and path, so API Gateway answers 404 before any Function runs; a local
+  405 would make `voke dev` disagree with production.
+- Load `aws()` capabilities with dynamic `import()` (plan 030): rejected after measuring. Bun
+  1.4.4 inlines the dynamically imported module into the bundle, or emits it as a chunk with
+  `--splitting`; either way the code ships.
+- A positional stage, `voke deploy prod` (plan 026): rejected. ADR 0007 allows one spelling;
+  the command fails with a usage error that names `--stage`.
+- A Serverless variable resolver in the migrator (plan 025): rejected. Only literal values are
+  copied; anything else is omitted and reported.
+- Changesets for versioning (plan 034): rejected for now. Versions are lockstep and there is
+  one maintainer, so a small script and a hand-written changelog do the job without a
+  dependency.
+- Validate `expiresAfterSeconds` against the Function timeout (plan 032): rejected. The defect
+  is the expiry value written for an in-progress record, which plan 032 fixes directly.
+- Retain queues, streams and topics on delete (plan 027): rejected. Their records are in
+  transit with a bounded lifetime, and a retained queue has no consumer left to read it.
+
 ## How the evidence was gathered
+
+Plans 022–034 (2026-11-15): source was read at commit `1c59d39`. The audit ran
+`bun run typecheck` and `bun run test` (both green, 34 tasks) and root `bun test` (5 failures,
+plan 022), built `examples/hello-api` into a scratch directory, and reproduced the defects
+behind plans 022, 023, 024 and 025 with throwaway probes that were deleted afterwards. Each
+plan lists what it measured and what it could not verify; items marked "verify before coding"
+or "Not verified" need a check by the executor. Nothing was deployed and no AWS API was called
+on purpose; while planning 034, one `voke doctor` run in a scratch project attempted its AWS
+credentials check, which timed out without a response.
 
 Plans 014–021 (2026-11-14): source was read at commit `4015c46`. No test suite, build or
 install ran during planning. AWS Lambda durable function facts in plan 018 were read from the

@@ -47,10 +47,27 @@ export const memoryStore = (): IdempotencyStore => {
     });
   };
 
+  const markResultTooLarge = (id: string, expiresAt: number): void => {
+    const existing = records.get(id);
+
+    if (existing === undefined) {
+      return;
+    }
+
+    records.set(id, {
+      expiresAt,
+      id,
+      status: "RESULT_TOO_LARGE",
+      validation: existing.validation,
+    });
+  };
+
   return {
     acquire: (record, now) => Promise.resolve(acquire(record, now)),
     complete: (id, data, expiresAt) =>
       Promise.resolve(complete(id, data, expiresAt)),
+    markResultTooLarge: (id, expiresAt) =>
+      Promise.resolve(markResultTooLarge(id, expiresAt)),
     release: (id) => {
       records.delete(id);
 

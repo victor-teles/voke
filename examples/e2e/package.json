@@ -1,5 +1,5 @@
 {
-  "name": "@voke/e2e",
+  "name": "@vokejs/e2e",
   "version": "0.0.0",
   "private": true,
   "license": "MIT",
@@ -8,20 +8,20 @@
     "test": "bun test",
     "typecheck": "bunx tsgo --project tsconfig.json --noEmit",
     "build": "voke build",
-    "deploy": "voke deploy",
-    "remove": "voke remove",
+    "deploy": "voke deploy --stage dev",
+    "remove": "voke remove --stage dev",
     "clean": "rm -rf dist coverage"
   },
   "dependencies": {
-    "@voke/aws": "workspace:*",
-    "@voke/http": "workspace:*",
-    "@voke/schema": "workspace:*",
-    "@voke/testing": "workspace:*",
+    "@vokejs/aws": "workspace:*",
+    "@vokejs/http": "workspace:*",
+    "@vokejs/schema": "workspace:*",
+    "@vokejs/testing": "workspace:*",
     "hono": "^4.0.0",
     "voke": "workspace:*"
   },
   "devDependencies": {
-    "@types/bun": "latest",
+    "@types/bun": "catalog:",
     "@typescript/native-preview": "^7.0.0-dev.20260516.1"
   }
 }

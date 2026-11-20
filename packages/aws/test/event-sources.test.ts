@@ -4,6 +4,8 @@ import { createFunctions, createVokeModel } from "voke";
 import type { EventFunctionDefinition, StandardSchemaV1 } from "voke";
 
 import { sqsQueue, synthesizeCloudFormation } from "../src/cloudformation";
+import { awsEventSourceRuntimeSources } from "../src/event-source-runtime";
+import { awsEventSources } from "../src/event-sources";
 import { aws, createLambdaHandlers, sqs } from "../src/index";
 import type { SqsMessageBatch } from "../src/index";
 
@@ -128,4 +130,11 @@ test("SQS Event Sources still synthesize one event source mapping per queue", ()
     template.Resources.ProcessOrderFunctionPriorityQueueEventSourceMapping
       ?.Properties
   ).toMatchObject({ BatchSize: 2, Enabled: false });
+});
+
+test("every Event Source has both a run-time and a deploy-time adapter", () => {
+  expect(awsEventSourceRuntimeSources().toSorted()).toEqual(
+    awsEventSources().toSorted()
+  );
+  expect(awsEventSources()).toHaveLength(7);
 });

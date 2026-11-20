@@ -113,7 +113,7 @@ const wordPattern = /[A-Za-z0-9]+/gu;
 
 const errorSchemaRef = { $ref: "#/components/schemas/Error" } as const;
 
-// Mirrors `ErrorBody` from @voke/http: every `{ error }` response the Gateway sends.
+// Mirrors `ErrorBody` from @vokejs/http: every `{ error }` response the Gateway sends.
 const errorSchema: JsonSchemaObject = {
   properties: {
     error: {
@@ -319,6 +319,11 @@ const routeResponses = (
 
   if (validatesRequest(route)) {
     responses["400"] = errorResponse("Invalid request");
+  }
+
+  // A `body` schema means a JSON body; any other content type is answered with 415.
+  if (route.body !== undefined) {
+    responses["415"] = errorResponse("Unsupported content type");
   }
 
   // API Gateway answers these itself with its own body, so only the status is documented.

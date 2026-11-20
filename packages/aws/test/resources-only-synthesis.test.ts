@@ -51,6 +51,7 @@ test("resources scope keeps only the declared resources and their outputs", () =
   ]);
   expect(template.Resources.UsersTable?.Metadata).toEqual({
     VokeBinding: { Attribute: "name", Resource: "usersTable" },
+    VokeRetain: true,
   });
   expect(Object.keys(template.Outputs).toSorted()).toEqual([
     "EventsQueueUrl",

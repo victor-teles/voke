@@ -1,10 +1,12 @@
 // CLI-time only: discovers the Function Registry by importing the project entrypoint.
+import { isAbsolute, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+
 import type { VokeConfig } from "./config";
 import { VokeConfigError } from "./errors";
 import { functionRegistryEntries } from "./invoke";
 import type { FunctionRegistry, FunctionRegistryInput } from "./invoke";
 import { projectFunctionEntries } from "./plugin";
-import { readEnv } from "./runtime-env";
 
 export interface LoadedProject {
   config: VokeConfig;
@@ -49,16 +51,6 @@ export const resolveProjectFunctions = (
   return undefined;
 };
 
-const toAbsolutePath = (path: string, cwd: string): string => {
-  if (path.startsWith("/")) {
-    return path;
-  }
-
-  const relative = path.startsWith("./") ? path.slice(2) : path;
-
-  return `${cwd.replace(/\/+$/u, "")}/${relative}`;
-};
-
 const importWithSynthFlag = async (
   url: string
 ): Promise<Record<string, unknown>> => {
@@ -85,15 +77,13 @@ export const loadProject = async (options: {
   cwd?: string;
   entrypoint?: string;
 }): Promise<LoadedProject> => {
-  const cwd = options.cwd ?? readEnv("PWD") ?? ".";
-  const entrypoint = toAbsolutePath(
-    options.entrypoint ?? options.config.entrypoint,
-    cwd
-  );
+  const cwd = options.cwd ?? process.cwd();
+  const path = options.entrypoint ?? options.config.entrypoint;
+  const entrypoint = isAbsolute(path) ? path : resolve(cwd, path);
   let module: Record<string, unknown>;
 
   try {
-    module = await importWithSynthFlag(new URL(`file://${entrypoint}`).href);
+    module = await importWithSynthFlag(pathToFileURL(entrypoint).href);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
 

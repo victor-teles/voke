@@ -1,11 +1,11 @@
-# @voke/http
+# @vokejs/http
 
 HTTP helpers for Voke Gateways.
 
 Part of [Voke](https://github.com/victor-teles/voke). Every Voke package is released at the same version as `voke`.
 
 ```bash
-bun add voke @voke/http
+bun add voke @vokejs/http
 ```
 
 Documentation:

@@ -12,12 +12,22 @@ import type {
   CloudFormationResource,
   CloudFormationValue,
 } from "./cloudformation-template";
+import {
+  asyncFailureResourcesFor,
+  deadLetterQueueArn,
+  deadLetterQueueLogicalId,
+  deadLetterQueueOptionIssues,
+  functionDeadLetterQueueStatements,
+  hasDeadLetterQueue,
+} from "./dead-letter-queue";
 import { toAwsEventTime } from "./event-payload";
+import type { AwsEventSourceRuntimeAdapter } from "./event-source-runtime";
 import type { AwsEventSourceAdapter, VokeIssue } from "./event-sources";
 
 /** A Schedule Event Source as `schedule()` stores it, defaults applied. */
 export interface ScheduleEventSourceDefinition extends EventSourceDefinition {
   readonly properties: {
+    readonly deadLetterQueue: boolean;
     readonly enabled: boolean;
     readonly expression: string;
     readonly timezone: string;
@@ -69,19 +79,27 @@ export interface ScheduledEventSchema extends StandardSchemaV1<
 
 export interface ScheduleFunctionDefinitionInput<
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+  TResources extends readonly string[] = readonly string[],
 > {
+  /**
+   * Keep events this Function fails after Lambda's retries, and invocations Scheduler could not
+   * deliver, in a dead-letter queue. Default true.
+   */
+  readonly deadLetterQueue?: boolean;
   /** `false` creates the schedule turned off. Defaults to `true`. */
   readonly enabled?: boolean;
   /** A `rate(...)` or `cron(...)` expression, for example `"rate(5 minutes)"` or `"cron(0 9 * * ? *)"`. */
   readonly expression: string;
   readonly handler: (
     event: ScheduledEvent,
-    context: InvokeContext<TVariables>
+    context: InvokeContext<TVariables, TResources[number]>
   ) => void | Promise<void>;
   readonly name?: string;
   readonly synthesis?: FunctionSynthesisConfig;
   /** The IANA time zone the expression is evaluated in, for example `"America/Sao_Paulo"`. Defaults to `"UTC"`. */
   readonly timezone?: string;
+  /** Resource Links: the resource keys this Function reads through `context.resource`. */
+  readonly resources?: TResources;
   readonly variables?: TVariables;
 }
 
@@ -186,8 +204,9 @@ const scheduledEventSchema: ScheduledEventSchema = {
 /** A Function that EventBridge Scheduler invokes on a recurring `rate(...)` or `cron(...)` schedule. */
 export const schedule = <
   const TVariables extends RuntimeVariableCatalog = Record<never, never>,
+  const TResources extends readonly string[] = readonly [],
 >(
-  definition: ScheduleFunctionDefinitionInput<TVariables>
+  definition: ScheduleFunctionDefinitionInput<TVariables, TResources>
 ): EventFunctionDefinition<string, ScheduledEventSchema, TVariables, void> => {
   const error = expressionError(definition.expression);
 
@@ -205,6 +224,7 @@ export const schedule = <
 
   const eventSource: ScheduleEventSourceDefinition = {
     properties: {
+      deadLetterQueue: definition.deadLetterQueue ?? true,
       enabled: definition.enabled ?? true,
       expression: definition.expression,
       timezone,
@@ -219,6 +239,7 @@ export const schedule = <
     key: "",
     kind: "event",
     name: definition.name,
+    resources: definition.resources,
     routes: [],
     synthesis: definition.synthesis,
     variables: definition.variables,
@@ -239,25 +260,41 @@ const scheduleTargetInput = JSON.stringify({
   voke: "schedule",
 });
 
-const scheduleIssues = ({
-  eventSource,
-  eventSourceIndex,
-  functionKey,
-}: Parameters<AwsEventSourceAdapter["validate"]>[0]): VokeIssue[] => {
+const scheduleIssues = (
+  context: Parameters<AwsEventSourceAdapter["validate"]>[0]
+): VokeIssue[] => {
+  const { eventSource, eventSourceIndex, functionKey } = context;
   const error = expressionError(eventSource.properties.expression);
+  const expressionIssues =
+    error === undefined
+      ? []
+      : [
+          {
+            message: `Function "${functionKey}" ${error}`,
+            path: `functions.${functionKey}.eventSources.${eventSourceIndex}.properties.expression`,
+          },
+        ];
 
-  return error === undefined
+  return [...expressionIssues, ...deadLetterQueueOptionIssues(context)];
+};
+
+/** Scheduler sends an invocation it could not deliver to the queue with this role. */
+const sendToDeadLetterQueuesStatement = (
+  queueLogicalIds: readonly string[]
+): CloudFormationValue[] =>
+  queueLogicalIds.length === 0
     ? []
     : [
         {
-          message: `Function "${functionKey}" ${error}`,
-          path: `functions.${functionKey}.eventSources.${eventSourceIndex}.properties.expression`,
+          Action: "sqs:SendMessage",
+          Effect: "Allow",
+          Resource: queueLogicalIds.map(deadLetterQueueArn),
         },
       ];
-};
 
 const schedulerRole = (
-  lambdaLogicalIds: readonly string[]
+  lambdaLogicalIds: readonly string[],
+  deadLetterQueueLogicalIds: readonly string[]
 ): CloudFormationResource => ({
   Properties: {
     AssumeRolePolicyDocument: {
@@ -294,6 +331,7 @@ const schedulerRole = (
                 })
               ),
             },
+            ...sendToDeadLetterQueuesStatement(deadLetterQueueLogicalIds),
           ],
           Version: "2012-10-17",
         },
@@ -305,13 +343,36 @@ const schedulerRole = (
 });
 
 /** How a Schedule Event Source runs on Lambda and synthesizes to an EventBridge Scheduler schedule. */
-export const scheduleEventSourceAdapter: AwsEventSourceAdapter = {
+export const scheduleEventRuntimeAdapter: AwsEventSourceRuntimeAdapter = {
   source: "schedule",
-  synthesize: ({ eventSource, lambdaLogicalId }) => {
+  // The schema checks the envelope, so a stray event fails the same way locally and on Lambda.
+  toInvocation: (event) => ({ raw: event }),
+  toResponse: () => {
+    // Scheduler invokes asynchronously and ignores the result.
+  },
+};
+
+export const scheduleEventSourceAdapter: AwsEventSourceAdapter = {
+  roleStatements: functionDeadLetterQueueStatements,
+  source: "schedule",
+  synthesize: (context) => {
+    const { eventSource, lambdaLogicalId } = context;
     const { enabled, expression, timezone } = eventSource.properties;
+    // The same queue keeps invocations Scheduler could not deliver to the Function.
+    const deadLetterConfig: Record<string, CloudFormationValue> =
+      hasDeadLetterQueue(context)
+        ? {
+            DeadLetterConfig: {
+              Arn: deadLetterQueueArn(
+                deadLetterQueueLogicalId(lambdaLogicalId)
+              ),
+            },
+          }
+        : {};
 
     return {
       resources: {
+        ...asyncFailureResourcesFor(context),
         [`${lambdaLogicalId}Schedule`]: {
           Properties: {
             FlexibleTimeWindow: { Mode: "OFF" },
@@ -321,6 +382,7 @@ export const scheduleEventSourceAdapter: AwsEventSourceAdapter = {
             // Scheduler invokes through the shared role, so no Lambda permission is needed.
             Target: {
               Arn: { "Fn::GetAtt": [lambdaLogicalId, "Arn"] },
+              ...deadLetterConfig,
               Input: scheduleTargetInput,
               RoleArn: { "Fn::GetAtt": [schedulerRoleLogicalId, "Arn"] },
             },
@@ -330,18 +392,23 @@ export const scheduleEventSourceAdapter: AwsEventSourceAdapter = {
       },
     };
   },
-  // One role per stack, allowed to invoke exactly the scheduled Functions.
+  // One role per stack, allowed to invoke exactly the scheduled Functions and to send to their
+  // dead-letter queues.
   synthesizeStack: (contexts) => ({
     resources: {
-      [schedulerRoleLogicalId]: schedulerRole([
-        ...new Set(contexts.map(({ lambdaLogicalId }) => lambdaLogicalId)),
-      ]),
+      [schedulerRoleLogicalId]: schedulerRole(
+        [...new Set(contexts.map(({ lambdaLogicalId }) => lambdaLogicalId))],
+        [
+          ...new Set(
+            contexts
+              .filter(hasDeadLetterQueue)
+              .map(({ lambdaLogicalId }) =>
+                deadLetterQueueLogicalId(lambdaLogicalId)
+              )
+          ),
+        ]
+      ),
     },
   }),
-  // The schema checks the envelope, so a stray event fails the same way locally and on Lambda.
-  toInvocation: (event) => ({ raw: event }),
-  toResponse: () => {
-    // Scheduler invokes asynchronously and ignores the result.
-  },
   validate: scheduleIssues,
 };

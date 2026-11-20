@@ -1,5 +1,5 @@
-import { durable } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { durable } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 import { createFunctions, http, route } from "voke";
 import type { StandardSchemaOutput } from "voke";
 

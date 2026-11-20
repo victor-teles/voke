@@ -79,6 +79,17 @@ export interface CliFlagSpec {
   boolean?: boolean;
 }
 
+/** One argument a command takes, in order. An argument beyond the declared ones is rejected. */
+export interface CliPositionalSpec {
+  /** The word shown in `usage`, for example "entrypoint". */
+  name: string;
+  /** The only accepted values, for a subcommand position. */
+  choices?: readonly string[];
+  /** The flag that sets the same value; passing both is an error. */
+  flag?: string;
+  required?: boolean;
+}
+
 export interface PluginCommandInput {
   readonly config: VokeConfig;
   readonly cwd: string;
@@ -95,6 +106,8 @@ export interface PluginCommand {
   readonly description: string;
   readonly usage: string;
   readonly flags?: Readonly<Record<string, CliFlagSpec>>;
+  /** The arguments the command takes, passed to `run` as `positional`. Omitted: none. */
+  readonly positionals?: readonly CliPositionalSpec[];
   readonly run: (input: PluginCommandInput) => Promise<void>;
 }
 

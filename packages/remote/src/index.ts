@@ -1,89 +1,10 @@
-import { createHash } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
-
-import { error as errorResponse, ok } from "@voke/http";
-import type { Hono } from "hono";
-import {
-  InvokeError,
-  invokeRegistryFunction,
-  readJsonSchema,
-  toContractJsonSchema,
-  VokeConfigError,
-} from "voke";
+import { InvokeError, VokeConfigError } from "voke";
 import type {
-  FunctionRegistry,
-  FunctionRegistryInput,
-  InvokableFunctionDefinition,
+  ContractJsonSchema as JsonSchema,
+  FunctionContractArtifact,
+  FunctionContractMetadata,
   InvokeOptions,
-  StandardSchemaV1,
-  VokeConfig,
-  VokeEnv,
 } from "voke";
-type JsonPrimitive = boolean | null | number | string;
-
-// Same rule as @voke/aws resource bindings; private so @voke/remote stays provider-neutral.
-const toEnvKey = (value: string): string =>
-  value
-    .replaceAll(/([a-z0-9])([A-Z])/gu, "$1_$2")
-    .replaceAll(/[^A-Za-z0-9]+/gu, "_")
-    .replaceAll(/^_+|_+$/gu, "")
-    .toUpperCase();
-
-export type JsonSchema =
-  | boolean
-  | {
-      additionalProperties?: boolean | JsonSchema;
-      const?: JsonPrimitive;
-      enum?: readonly JsonPrimitive[];
-      items?: JsonSchema;
-      properties?: Record<string, JsonSchema>;
-      required?: readonly string[];
-      type?:
-        | "array"
-        | "boolean"
-        | "integer"
-        | "null"
-        | "number"
-        | "object"
-        | "string";
-    };
-
-export interface FunctionContractMetadata {
-  input?: JsonSchema;
-  output: JsonSchema;
-}
-
-export interface FunctionContractArtifact<
-  TFunctions extends Record<string, FunctionContractMetadata> = Record<
-    string,
-    FunctionContractMetadata
-  >,
-> {
-  fingerprint: string;
-  functions: TFunctions;
-  project: string;
-  version: 1;
-}
-
-export type RemoteTarget =
-  | string
-  | {
-      contract?: string;
-      origin: string;
-    };
-
-export interface VokeRemoteConfig {
-  contract: string;
-  origin: string;
-  out: string;
-}
-
-export interface VokeRemoteConfigInput {
-  contract?: string;
-  out?: string;
-  targets: Record<string, RemoteTarget>;
-}
 
 type JsonSchemaType<TSchema> = TSchema extends true
   ? unknown
@@ -148,6 +69,15 @@ type RemoteZeroInputKey<TFunctions> = {
     : TKey;
 }[keyof TFunctions];
 
+/**
+ * The invoke options a Remote Function Registry honours. `timeoutMs` bounds each attempt and
+ * cancels its request; `retries` adds attempts after a timeout, a failed request or a 5xx answer.
+ */
+export type RemoteInvokeOptions = Pick<
+  InvokeOptions,
+  "retries" | "timeoutMs" | "trace"
+>;
+
 export interface RemoteFunctionRegistry<
   TFunctions extends Record<string, FunctionContractMetadata> = Record<
     string,
@@ -158,12 +88,12 @@ export interface RemoteFunctionRegistry<
     <TKey extends RemotePayloadKey<TFunctions>>(
       functionName: TKey,
       payload: RemoteInput<TFunctions[TKey]>,
-      options?: InvokeOptions
+      options?: RemoteInvokeOptions
     ): Promise<RemoteOutput<TFunctions[TKey]>>;
     <TKey extends RemoteZeroInputKey<TFunctions>>(
       functionName: TKey,
       payload?: undefined,
-      options?: InvokeOptions
+      options?: RemoteInvokeOptions
     ): Promise<RemoteOutput<TFunctions[TKey]>>;
   };
 }
@@ -173,77 +103,23 @@ interface JsonSchemaIssue {
   path: string;
 }
 
+// The wire request of the Dev Function Invoke Endpoint; core reads the same shape.
 interface RemoteInvokeRequest {
   contractFingerprint?: string;
   payload?: unknown;
   trace?: Record<string, boolean | number | string | undefined>;
 }
 
-const helperKeys = new Set(["invoke", "route", "sendEvent"]);
+// Same rule as core's remote config; private so @vokejs/remote stays provider-neutral.
+const toEnvKey = (value: string): string =>
+  value
+    .replaceAll(/([a-z0-9])([A-Z])/gu, "$1_$2")
+    .replaceAll(/[^A-Za-z0-9]+/gu, "_")
+    .replaceAll(/^_+|_+$/gu, "")
+    .toUpperCase();
 
 const normalizeOrigin = (origin: string): string =>
   origin.replace(/[/]+$/u, "");
-
-const stableStringify = (value: unknown): string => {
-  if (Array.isArray(value)) {
-    return `[${value.map(stableStringify).join(",")}]`;
-  }
-
-  if (value !== null && typeof value === "object") {
-    return `{${Object.entries(value)
-      .toSorted(([left], [right]) => left.localeCompare(right))
-      .map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`)
-      .join(",")}}`;
-  }
-
-  return JSON.stringify(value);
-};
-
-const fingerprint = (value: unknown): string => {
-  const digest = createHash("sha256")
-    .update(stableStringify(value))
-    .digest("hex");
-
-  return `sha256:${digest}`;
-};
-
-const schemaMetadata = (
-  schema: StandardSchemaV1 | undefined,
-  io: "input" | "output"
-): JsonSchema => toContractJsonSchema(readJsonSchema(schema, io));
-
-export const createFunctionContractArtifact = (
-  project: string,
-  registry: FunctionRegistry | FunctionRegistryInput
-): FunctionContractArtifact => {
-  const functions: Record<string, FunctionContractMetadata> = {};
-
-  for (const [key, definition] of Object.entries(registry)) {
-    if (helperKeys.has(key) || definition.kind !== "invokable") {
-      continue;
-    }
-
-    const invokable = definition as InvokableFunctionDefinition;
-    functions[key] = {
-      input:
-        invokable.input === undefined
-          ? undefined
-          : schemaMetadata(invokable.input, "input"),
-      output: schemaMetadata(invokable.output, "output"),
-    };
-  }
-
-  const artifact = {
-    functions,
-    project,
-    version: 1,
-  } as const;
-
-  return {
-    ...artifact,
-    fingerprint: fingerprint(artifact),
-  };
-};
 
 const pathFor = (path: string, key: string): string =>
   path === "" ? key : `${path}.${key}`;
@@ -361,9 +237,6 @@ const formatJsonSchemaIssues = (issues: JsonSchemaIssue[]): string =>
 const remoteOriginEnvName = (project: string): string =>
   `VOKE_REMOTE_${toEnvKey(project)}_ORIGIN`;
 
-const remoteContractEnvName = (project: string): string =>
-  `VOKE_REMOTE_${toEnvKey(project)}_CONTRACT_URL`;
-
 const resolveRemoteOrigin = (project: string): string => {
   const origin = process.env[remoteOriginEnvName(project)];
 
@@ -378,6 +251,189 @@ const resolveRemoteOrigin = (project: string): string => {
 
 const invokeUrl = (project: string, functionName: string): string =>
   `${resolveRemoteOrigin(project)}/_voke/functions/${encodeURIComponent(functionName)}/invoke`;
+
+const supportedOptions: ReadonlySet<string> = new Set([
+  "retries",
+  "timeoutMs",
+  "trace",
+] satisfies (keyof RemoteInvokeOptions)[]);
+
+const invalidOption = (functionName: string, message: string): InvokeError =>
+  new InvokeError(`Remote Function ${functionName} ${message}`, {
+    code: "INVALID_OPTIONS",
+    functionName,
+  });
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const readOptions = (
+  functionName: string,
+  options: unknown
+): RemoteInvokeOptions => {
+  if (options === undefined) {
+    return {};
+  }
+
+  if (!isRecord(options)) {
+    throw invalidOption(functionName, "invoke options must be an object");
+  }
+
+  for (const [option, value] of Object.entries(options)) {
+    if (value !== undefined && !supportedOptions.has(option)) {
+      throw invalidOption(
+        functionName,
+        `does not support the invoke option "${option}"`
+      );
+    }
+  }
+
+  const { retries, timeoutMs } = options;
+  const validTimeout =
+    timeoutMs === undefined ||
+    (typeof timeoutMs === "number" &&
+      Number.isFinite(timeoutMs) &&
+      timeoutMs > 0);
+  const validRetries =
+    retries === undefined ||
+    (Number.isInteger(retries) && Number(retries) >= 0);
+
+  if (!validTimeout) {
+    throw invalidOption(
+      functionName,
+      'invoke option "timeoutMs" must be a finite number above 0'
+    );
+  }
+
+  if (!validRetries) {
+    throw invalidOption(
+      functionName,
+      'invoke option "retries" must be an integer of 0 or more'
+    );
+  }
+
+  return options as RemoteInvokeOptions;
+};
+
+// "Not JSON" is a normal answer to map, so a parse failure becomes this marker.
+const notJson = Symbol("not JSON");
+
+const parseJson = (text: string): unknown => {
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return notJson;
+  }
+};
+
+const errorMessageOf = (body: unknown): string | undefined => {
+  if (!(isRecord(body) && isRecord(body.error))) {
+    return undefined;
+  }
+
+  const { message } = body.error;
+
+  return typeof message === "string" && message !== "" ? message : undefined;
+};
+
+interface RemoteAttempt {
+  body: string;
+  functionName: string;
+  timeoutMs: number | undefined;
+  url: string;
+}
+
+const requestOnce = async (
+  attempt: RemoteAttempt
+): Promise<{ body: unknown; response: Response }> => {
+  const { functionName, timeoutMs } = attempt;
+  // One signal per attempt: the limit covers the request and reading the body.
+  const signal =
+    timeoutMs === undefined ? undefined : AbortSignal.timeout(timeoutMs);
+
+  try {
+    const response = await fetch(attempt.url, {
+      body: attempt.body,
+      headers: { "content-type": "application/json" },
+      method: "POST",
+      signal,
+    });
+
+    return { body: parseJson(await response.text()), response };
+  } catch (error) {
+    if (signal?.aborted === true) {
+      throw new InvokeError(
+        `Remote Function ${functionName} timed out after ${timeoutMs}ms`,
+        { cause: error, code: "TIMEOUT", functionName }
+      );
+    }
+
+    const reason = error instanceof Error ? error.message : String(error);
+
+    throw new InvokeError(
+      `Remote Function ${functionName} request failed: ${reason}`,
+      { cause: error, code: "TRANSPORT_FAILED", functionName }
+    );
+  }
+};
+
+const answerOf = async (attempt: RemoteAttempt): Promise<unknown> => {
+  const { functionName } = attempt;
+  const { body, response } = await requestOnce(attempt);
+  const { status } = response;
+
+  if (!response.ok) {
+    throw new InvokeError(
+      errorMessageOf(body) ??
+        `Remote Function invocation failed with HTTP ${status}`,
+      {
+        code: status === 404 ? "MISSING_FUNCTION" : "TRANSPORT_FAILED",
+        functionName,
+        statusCode: status,
+      }
+    );
+  }
+
+  if (!isRecord(body)) {
+    throw new InvokeError(
+      `Remote Function ${functionName} answered HTTP ${status} without a Voke data envelope`,
+      { code: "TRANSPORT_FAILED", functionName, statusCode: status }
+    );
+  }
+
+  return body.data;
+};
+
+// Repeat only when repeating can help: a timeout, a request that failed, or a 5xx answer.
+const isRetryable = (error: unknown): boolean => {
+  if (!(error instanceof InvokeError)) {
+    return false;
+  }
+
+  if (error.code === "TIMEOUT") {
+    return true;
+  }
+
+  return (
+    error.code === "TRANSPORT_FAILED" &&
+    (error.statusCode === undefined || error.statusCode >= 500)
+  );
+};
+
+const answerWithRetries = async (
+  attempt: RemoteAttempt,
+  retries: number
+): Promise<unknown> => {
+  for (let remaining = retries; ; remaining -= 1) {
+    try {
+      return await answerOf(attempt);
+    } catch (error) {
+      if (remaining === 0 || !isRetryable(error)) {
+        throw error;
+      }
+    }
+  }
+};
 
 export const createRemoteFunctions = <
   const TFunctions extends Record<string, FunctionContractMetadata>,
@@ -398,7 +454,7 @@ export const createRemoteFunctions = <
     value: async (
       functionName: string,
       payload?: unknown,
-      options: InvokeOptions = {}
+      rawOptions?: unknown
     ): Promise<unknown> => {
       const contract = artifact.functions[functionName];
 
@@ -409,7 +465,9 @@ export const createRemoteFunctions = <
         });
       }
 
+      const options = readOptions(functionName, rawOptions);
       const inputIssues = validateJsonSchema(contract.input, payload);
+
       if (inputIssues.length > 0) {
         throw new InvokeError(
           `Invalid remote payload for ${functionName}: ${formatJsonSchemaIssues(inputIssues)}`,
@@ -420,34 +478,19 @@ export const createRemoteFunctions = <
         );
       }
 
-      const response = await fetch(invokeUrl(project, functionName), {
-        body: JSON.stringify({
-          contractFingerprint: artifact.fingerprint,
-          payload,
-          trace: options.trace,
-        } satisfies RemoteInvokeRequest),
-        headers: { "content-type": "application/json" },
-        method: "POST",
-      });
-      const body = (await response.json()) as
-        | { data: unknown }
-        | { error: { message: string } };
-
-      if (!response.ok) {
-        const message =
-          "error" in body
-            ? body.error.message
-            : `Remote Function invocation failed with HTTP ${response.status}`;
-
-        throw new InvokeError(message, {
-          code:
-            response.status === 404 ? "MISSING_FUNCTION" : "TRANSPORT_FAILED",
+      const result = await answerWithRetries(
+        {
+          body: JSON.stringify({
+            contractFingerprint: artifact.fingerprint,
+            payload,
+            trace: options.trace,
+          } satisfies RemoteInvokeRequest),
           functionName,
-          statusCode: response.status,
-        });
-      }
-
-      const result = "data" in body ? body.data : undefined;
+          timeoutMs: options.timeoutMs,
+          url: invokeUrl(project, functionName),
+        },
+        options.retries ?? 0
+      );
       const outputIssues = validateJsonSchema(contract.output, result);
 
       if (outputIssues.length > 0) {
@@ -465,192 +508,4 @@ export const createRemoteFunctions = <
   });
 
   return registry;
-};
-
-const selectedTarget = (
-  target: RemoteTarget | undefined
-): { contract?: string; origin: string } | undefined => {
-  if (typeof target === "string") {
-    return { origin: target };
-  }
-
-  return target;
-};
-
-export const defineRemoteConfig = (
-  name: string,
-  input: VokeRemoteConfig | VokeRemoteConfigInput,
-  stage: string
-): VokeRemoteConfig => {
-  if ("origin" in input) {
-    return input;
-  }
-
-  const target = selectedTarget(input.targets[stage] ?? input.targets.local);
-
-  if (target === undefined) {
-    throw VokeConfigError.validation([
-      {
-        message: `missing target for stage "${stage}"`,
-        path: `remotes.${name}.targets.${stage}`,
-      },
-    ]);
-  }
-
-  const origin = normalizeOrigin(target.origin);
-
-  return {
-    contract: input.contract ?? target.contract ?? `${origin}/_voke/contract`,
-    origin,
-    out: input.out ?? `src/voke/remotes/${name}.ts`,
-  };
-};
-
-export const remoteEnvironment = (
-  remotes: Record<string, VokeRemoteConfig>
-): Record<string, string> => {
-  const environment: Record<string, string> = {};
-
-  for (const [name, remote] of Object.entries(remotes)) {
-    environment[remoteOriginEnvName(name)] = remote.origin;
-    environment[remoteContractEnvName(name)] = remote.contract;
-  }
-
-  return environment;
-};
-
-const generatedIdentifier = (name: string): string => {
-  const value = name.replaceAll(/[^A-Za-z0-9_$]+/gu, "_");
-  const identifier = value === "" ? "remote" : value;
-
-  return /^[A-Za-z_$]/u.test(identifier) ? identifier : `_${identifier}`;
-};
-
-export const renderRemoteModule = (
-  name: string,
-  artifact: FunctionContractArtifact
-): string =>
-  [
-    "// @generated by Voke. Do not edit manually.",
-    'import { createRemoteFunctions } from "@voke/remote";',
-    "",
-    `export const ${generatedIdentifier(name)} = createRemoteFunctions(${JSON.stringify(name)}, ${JSON.stringify(artifact, null, 2)} as const);`,
-    "",
-  ].join("\n");
-
-export interface GenerateRemoteOptions {
-  fetch?: typeof fetch;
-  names?: string[];
-  write?: (path: string, text: string) => Promise<void>;
-}
-
-export const generateRemoteModules = async (
-  config: VokeConfig,
-  options: GenerateRemoteOptions = {}
-): Promise<string[]> => {
-  const fetcher = options.fetch ?? fetch;
-  const writer =
-    options.write ??
-    (async (path, text) => {
-      await mkdir(dirname(path), { recursive: true });
-      await writeFile(path, text);
-    });
-  const remotes = config.remotes ?? {};
-  const names = options.names ?? Object.keys(remotes);
-  const outputs: string[] = [];
-
-  for (const name of names) {
-    const remote = remotes[name];
-
-    if (remote === undefined) {
-      throw new VokeConfigError(`Unknown remote: ${name}`);
-    }
-
-    const response = await fetcher(remote.contract);
-
-    if (!response.ok) {
-      throw new VokeConfigError(
-        `Failed to fetch remote contract for "${name}" from ${remote.contract}: HTTP ${response.status}`
-      );
-    }
-
-    const body = (await response.json()) as { data?: FunctionContractArtifact };
-    const artifact = body.data;
-
-    if (artifact === undefined) {
-      throw new VokeConfigError(
-        `Remote contract for "${name}" from ${remote.contract} did not return a Voke data envelope`
-      );
-    }
-
-    await writer(remote.out, renderRemoteModule(name, artifact));
-    outputs.push(remote.out);
-  }
-
-  return outputs;
-};
-
-export const mountDevFunctionEndpoints = (
-  gateway: Hono<VokeEnv>,
-  options: {
-    functions: FunctionRegistry | FunctionRegistryInput;
-    project: string;
-  }
-): void => {
-  gateway.get("/_voke/contract", () =>
-    ok(createFunctionContractArtifact(options.project, options.functions))
-  );
-  gateway.post("/_voke/functions/:functionName/invoke", async (c) => {
-    const artifact = createFunctionContractArtifact(
-      options.project,
-      options.functions
-    );
-    const functionName = c.req.param("functionName");
-    const body = (await c.req.json()) as RemoteInvokeRequest;
-
-    if (
-      body.contractFingerprint !== undefined &&
-      body.contractFingerprint !== artifact.fingerprint
-    ) {
-      return errorResponse(
-        `Remote Function contract drift for "${options.project}". Run \`voke remote generate ${options.project}\`.`,
-        { code: "CONTRACT_DRIFT", status: 409 }
-      );
-    }
-
-    const definition = options.functions[
-      functionName as keyof typeof options.functions
-    ] as InvokableFunctionDefinition | undefined;
-
-    if (definition?.kind !== "invokable") {
-      return errorResponse(`Remote Function not found: ${functionName}`, {
-        code: "NOT_FOUND",
-        status: 404,
-      });
-    }
-
-    try {
-      return ok(
-        await invokeRegistryFunction(
-          options.functions,
-          definition,
-          body.payload,
-          {
-            runtime: "local",
-            trace: body.trace,
-          }
-        )
-      );
-    } catch (error) {
-      const isInvokeError = error instanceof InvokeError;
-
-      return errorResponse(
-        error instanceof Error ? error.message : String(error),
-        {
-          code: isInvokeError ? "BAD_REQUEST" : "INTERNAL_SERVER_ERROR",
-          status: isInvokeError ? 400 : 500,
-        }
-      );
-    }
-  });
 };

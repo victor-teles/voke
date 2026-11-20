@@ -8,7 +8,7 @@ Public framework workflows should throw `VokeError` subclasses instead of plain 
 
 - `VokeConfigError`: invalid or missing `voke.config.ts` input, unsupported runtime settings, and dev/build config problems.
 - `VokeModelError`: invalid internal model relationships or malformed model fields.
-- `VokeResourceBindingError`: runtime resource binding environment variables are missing.
+- `VokeResourceBindingError`: `context.resource(key)` reads a resource the Function (or the entry Function of an in-process invocation) does not link, the registry has no config, or the binding environment variable is missing.
 - `VokeRuntimeVariableError`: runtime variable resolution, provider loading, JSON parsing, schema validation, and unsupported value-shape failures.
 - `CliUsageError`: invalid CLI commands, flags, or command shapes.
 - `InvokeError`: function invocation validation, transport, timeout, and missing function failures.

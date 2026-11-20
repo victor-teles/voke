@@ -64,7 +64,7 @@ const userOutputSchema: StandardSchemaV1<
 };
 
 const awsTransportOptions = async () => {
-  const specifier = "@voke/aws";
+  const specifier = "@vokejs/aws";
   const { createAwsLambdaInvokeTransport } = (await import(specifier)) as {
     createAwsLambdaInvokeTransport: (options: {
       client: { send: (command: { input: unknown }) => Promise<unknown> };

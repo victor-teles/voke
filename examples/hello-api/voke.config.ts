@@ -1,6 +1,6 @@
-import { aws } from "@voke/aws";
-import { dynamodbTable, sqsQueue } from "@voke/aws/cloudformation";
-import { openapi } from "@voke/openapi";
+import { aws } from "@vokejs/aws";
+import { dynamodbTable, sqsQueue } from "@vokejs/aws/cloudformation";
+import { openapi } from "@vokejs/openapi";
 import { defineConfig } from "voke";
 
 import { requestTiming } from "./src/plugins/request-timing";

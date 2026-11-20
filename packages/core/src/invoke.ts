@@ -1,15 +1,21 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+
 import type { Context, Hono, MiddlewareHandler } from "hono";
 
 import packageJson from "../package.json";
 import type {
   AuthorizerRegistryInput,
   AuthorizerRequest,
+  JwtAuthorizerDefinition,
+  LambdaAuthorizerDefinition,
   RequestAuthorizerFunctionDefinition,
   RequestAuthorizerHandler,
 } from "./authorizers";
 import type { VokeEnv } from "./context";
-import { VokeConfigError } from "./errors";
+import { VokeConfigError, VokeResourceBindingError } from "./errors";
 import { json, jsonError } from "./http";
+import { evaluateJwt, readIdentityValue } from "./jwt-authorizer";
+import type { JwtRejection } from "./jwt-authorizer";
 import type {
   VokeModelProviderExtensionRecord,
   VokeModelRecord,
@@ -20,6 +26,7 @@ import type {
   ProviderInvokeTarget,
   VokeProvider,
 } from "./provider";
+import { error as responseError } from "./response";
 import { Voke } from "./route-builder";
 import { readEnv, sleep } from "./runtime-env";
 import { formatValidationIssue, readStandardResult } from "./standard-schema";
@@ -96,8 +103,16 @@ export class InvokeError extends Error {
 
 export interface InvokeContext<
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+  TResource extends string = string,
 > {
   functionName: string;
+  /**
+   * The binding value of a resource this Function links in `resources` (a table name, a queue
+   * URL, a topic ARN, ...). Throws VokeResourceBindingError for a resource it does not link.
+   */
+  // Method syntax on purpose: its parameter is compared bivariantly, so a handler annotated with
+  // the plain `InvokeContext` still fits a Function whose `resources` narrow the key.
+  resource(key: TResource): string;
   trace: InvokeTrace;
   variables: RuntimeVariableHandles<TVariables>;
 }
@@ -144,7 +159,10 @@ export type RouteAuthorizerReference = "none" | string;
 
 export interface RouteAuthContext {
   readonly context: Record<string, unknown>;
-  /** "lambda" for Request/Lambda authorizer results, "jwt" for verified JWT claims. */
+  /**
+   * "lambda" for Request/Lambda authorizer results, "jwt" for JWT claims: verified by the
+   * platform when deployed, unverified (no signature check) in Local Authorizer Evaluation.
+   */
   readonly source: "jwt" | "lambda";
 }
 
@@ -163,11 +181,14 @@ export type RouteReturn<TResult> =
   | Response
   | Promise<Response>;
 
+/** Query string values or headers without a schema: plain strings, header names lower-case. */
+type RouteRecord = Record<string, string | undefined>;
+
 export interface RouteRequest<
   TBody = undefined,
   TParams = Record<string, string>,
-  TQuery = URLSearchParams,
-  THeaders = Headers,
+  TQuery = RouteRecord,
+  THeaders = RouteRecord,
 > {
   readonly auth: RouteAuthContext;
   readonly body: TBody;
@@ -185,22 +206,40 @@ export type RouteHandler<
   THeaders,
   TResult,
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+  TResource extends string = string,
 > = (
   request: RouteRequest<TBody, TParams, TQuery, THeaders>,
-  context: InvokeContext<TVariables>
+  context: InvokeContext<TVariables, TResource>
 ) => RouteReturn<TResult>;
 
+// A slot without a schema infers to the wide `StandardSchemaV1<unknown, unknown>`, so a schema
+// whose two sides are both `unknown` cannot be told apart from "no schema" and keeps the fallback.
+// A schema that types either side is read as declared, even when the other side is `unknown`.
+type IsUntypedSchema<TSchema> =
+  unknown extends StandardSchemaInput<TSchema>
+    ? unknown extends StandardSchemaOutput<TSchema>
+      ? true
+      : false
+    : false;
+
 type RouteSchemaOutput<TSchema, TFallback> = TSchema extends AnyStandardSchema
-  ? unknown extends StandardSchemaOutput<TSchema>
+  ? IsUntypedSchema<TSchema> extends true
     ? TFallback
     : StandardSchemaOutput<TSchema>
   : TFallback;
 
 type RouteSchemaInput<TSchema, TFallback> = TSchema extends AnyStandardSchema
-  ? unknown extends StandardSchemaInput<TSchema>
+  ? IsUntypedSchema<TSchema> extends true
     ? TFallback
     : StandardSchemaInput<TSchema>
   : TFallback;
+
+// With an `output` schema the handler returns what that schema accepts; without one, anything.
+// A `Response` is always allowed (`RouteReturn`) and is not validated.
+type RouteHandlerResult<TOutputSchema, TResult> =
+  TOutputSchema extends AnyStandardSchema
+    ? StandardSchemaInput<TOutputSchema>
+    : TResult;
 
 /** Documentation for a route. The Gateway ignores it at run time. */
 export interface RouteMeta {
@@ -223,16 +262,18 @@ export interface RouteDefinitionInput<
   TOutputSchema extends AnyStandardSchema | undefined,
   TResult,
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+  TResource extends string = string,
 > {
   readonly authorizer?: RouteAuthorizerReference;
   readonly body?: TBodySchema;
   readonly handler: RouteHandler<
     RouteSchemaOutput<TBodySchema, undefined>,
     RouteSchemaOutput<TParamsSchema, Record<string, string>>,
-    RouteSchemaOutput<TQuerySchema, Record<string, string>>,
-    RouteSchemaOutput<THeadersSchema, Headers>,
-    TResult,
-    TVariables
+    RouteSchemaOutput<TQuerySchema, RouteRecord>,
+    RouteSchemaOutput<THeadersSchema, RouteRecord>,
+    RouteHandlerResult<TOutputSchema, TResult>,
+    TVariables,
+    TResource
   >;
   readonly headers?: THeadersSchema;
   readonly meta?: RouteMeta;
@@ -262,6 +303,7 @@ export interface RouteDefinition<
     | undefined,
   TResult = unknown,
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+  TResource extends string = string,
 > extends RouteDefinitionInput<
   TMethod,
   TPath,
@@ -271,7 +313,8 @@ export interface RouteDefinition<
   THeadersSchema,
   TOutputSchema,
   TResult,
-  TVariables
+  TVariables,
+  TResource
 > {
   readonly method: TMethod;
   readonly middleware: readonly MiddlewareHandler<VokeEnv>[];
@@ -301,14 +344,14 @@ export interface RouteInvocationInput<TRoute> {
     ? RouteSchemaInput<TSchema, undefined>
     : undefined;
   readonly headers?: TRoute extends { readonly headers?: infer TSchema }
-    ? RouteSchemaInput<TSchema, Headers | Record<string, string>>
-    : Headers | Record<string, string>;
+    ? RouteSchemaInput<TSchema, Record<string, string>>
+    : Record<string, string>;
   readonly params?: TRoute extends { readonly params?: infer TSchema }
     ? RouteSchemaInput<TSchema, Record<string, string>>
     : Record<string, string>;
   readonly query?: TRoute extends { readonly query?: infer TSchema }
-    ? RouteSchemaInput<TSchema, URLSearchParams | Record<string, string>>
-    : Record<string, string> | URLSearchParams;
+    ? RouteSchemaInput<TSchema, Record<string, string>>
+    : Record<string, string>;
   readonly request?: Request;
 }
 
@@ -388,18 +431,20 @@ export type FunctionHandler<
   TPayload,
   TResult,
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+  TResource extends string = string,
 > = (
   payload: TPayload,
-  context: InvokeContext<TVariables>
+  context: InvokeContext<TVariables, TResource>
 ) => TResult | Promise<TResult>;
 
 export type EventFunctionHandler<
   TPayload,
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
   TResult = unknown,
+  TResource extends string = string,
 > = (
   payload: TPayload,
-  context: InvokeContext<TVariables>
+  context: InvokeContext<TVariables, TResource>
 ) => TResult | Promise<TResult>;
 
 export interface BaseFunctionDefinition<
@@ -410,6 +455,8 @@ export interface BaseFunctionDefinition<
   readonly key: TKey;
   readonly kind: TKind;
   readonly name?: string;
+  /** Resource Links: the resource keys this Function reads through `context.resource`. */
+  readonly resources?: readonly string[];
   readonly synthesis?: FunctionSynthesisConfig;
   readonly variables?: TVariables;
 }
@@ -486,6 +533,7 @@ export type AnyFunctionDefinition = BaseFunctionDefinition<string> & {
 
 interface FunctionDefinitionInputBase {
   name?: string;
+  resources?: readonly string[];
   routes?: readonly AnyRouteDefinition[];
   synthesis?: FunctionSynthesisConfig;
   variables?: RuntimeVariableCatalog;
@@ -495,29 +543,35 @@ type InvokableFunctionWithInputDefinitionInput<
   TInputSchema extends AnyStandardSchema,
   TOutputSchema extends AnyStandardSchema,
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+  TResources extends readonly string[] = readonly string[],
 > = FunctionDefinitionInputBase & {
   handler: FunctionHandler<
     StandardSchemaOutput<TInputSchema>,
     | StandardSchemaInput<TOutputSchema>
     | Promise<StandardSchemaInput<TOutputSchema>>,
-    TVariables
+    TVariables,
+    TResources[number]
   >;
   input: TInputSchema;
   output: TOutputSchema;
+  resources?: TResources;
   variables?: TVariables;
 };
 
 type InvokableZeroInputFunctionDefinitionInput<
   TOutputSchema extends AnyStandardSchema,
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+  TResources extends readonly string[] = readonly string[],
 > = FunctionDefinitionInputBase & {
   handler: FunctionHandler<
     undefined,
     | StandardSchemaInput<TOutputSchema>
     | Promise<StandardSchemaInput<TOutputSchema>>,
-    TVariables
+    TVariables,
+    TResources[number]
   >;
   output: TOutputSchema;
+  resources?: TResources;
   variables?: TVariables;
 };
 
@@ -536,10 +590,15 @@ type RouteInputList<
 export interface HttpFunctionDefinitionInput<
   TRoutes extends AnyRouteDefinition | readonly AnyRouteDefinition[],
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
-> extends Omit<FunctionDefinitionInputBase, "routes"> {
+  TResources extends readonly string[] = readonly string[],
+> extends Omit<FunctionDefinitionInputBase, "resources" | "routes"> {
   readonly authorizer?: string;
   readonly authorizers?: AuthorizerRegistryInput;
-  readonly routes: TRoutes | ((route: Voke<TVariables>) => TRoutes);
+  /** Resource Links: every route of this Function may read these resources. */
+  readonly resources?: TResources;
+  readonly routes:
+    | TRoutes
+    | ((route: Voke<TVariables, TResources[number]>) => TRoutes);
   readonly variables?: TVariables;
 }
 
@@ -832,6 +891,8 @@ interface FunctionRegistryActivation {
   unregisteredVariableProviders: "defer" | "error";
   variableOverrides?: RuntimeVariableOverrides;
   variableProviders: readonly RuntimeVariableProvider[];
+  /** Resource key → its binding variable name. Absent when the registry has no config. */
+  resourceBindings?: Readonly<Record<string, string>>;
   /** Plugin Function Wraps, outermost first. Absent when no Plugin wraps. */
   wraps?: readonly PluginFunctionWrap[];
 }
@@ -887,6 +948,8 @@ export const activateFunctionRegistry = (
   options: {
     /** The Provider's invoke capability; its `target` can route Functions through its transport. */
     invoke?: ProviderInvokeCapability;
+    /** Resource key → its binding variable name, from the config's resources. */
+    resourceBindings?: Readonly<Record<string, string>>;
     variableOverrides?: RuntimeVariableOverrides;
     variableProviders?: readonly RuntimeVariableProvider[];
     /** Plugin Function Wraps around every handler call, outermost first. */
@@ -908,6 +971,9 @@ export const activateFunctionRegistry = (
   const activation: FunctionRegistryActivation = {
     activationKey,
     invoke: options.invoke,
+    ...(options.resourceBindings === undefined
+      ? {}
+      : { resourceBindings: options.resourceBindings }),
     // Without any provider (no configured Provider, no explicit providers), Runtime Variables
     // can still resolve from overrides and the environment, so provider checks wait for load.
     unregisteredVariableProviders:
@@ -985,6 +1051,84 @@ const runWrapped = async (
   return await dispatch(0);
 };
 
+interface EntryFunction {
+  readonly entry: BaseFunctionDefinition;
+}
+
+// The Function a handler call entered the process through. An in-process `functions.invoke` runs
+// with that Function's deployed role and environment, so a read must be linked by it as well.
+const entryFunction = new AsyncLocalStorage<EntryFunction | undefined>();
+
+/** Runs `run` with `definition` as the entry Function, unless an entry is already set. */
+const runAsEntry = <TResult>(
+  definition: BaseFunctionDefinition,
+  run: () => TResult
+): TResult =>
+  entryFunction.getStore() === undefined
+    ? entryFunction.run({ entry: definition }, run)
+    : run();
+
+/** Runs `run` outside every entry: the invocation leaves the process, so it starts a new one. */
+const runOutsideEntry = <TResult>(run: () => TResult): TResult =>
+  entryFunction.run(undefined, run);
+
+const notLinkedError = (
+  functionKey: string,
+  resource: string
+): VokeResourceBindingError =>
+  new VokeResourceBindingError(
+    `Function "${functionKey}" does not link resource "${resource}". Add it to the Function: resources: ["${resource}"]`
+  );
+
+const isLinked = (
+  definition: BaseFunctionDefinition,
+  resource: string
+): boolean => definition.resources?.includes(resource) === true;
+
+// Checks run when the handler reads, so the entry Function is the one of that call.
+const readResource = (
+  definition: BaseFunctionDefinition,
+  activation: FunctionRegistryActivation | undefined,
+  resource: string
+): string => {
+  if (!isLinked(definition, resource)) {
+    throw notLinkedError(definition.key, resource);
+  }
+
+  const entry = entryFunction.getStore()?.entry;
+
+  if (
+    entry !== undefined &&
+    entry !== definition &&
+    !isLinked(entry, resource)
+  ) {
+    throw new VokeResourceBindingError(
+      `Function "${definition.key}" reads resource "${resource}" while running in-process inside Function "${entry.key}", which does not link it. An in-process invocation runs with the caller's role: add resources: ["${resource}"] to "${entry.key}"`
+    );
+  }
+
+  if (activation?.resourceBindings === undefined) {
+    throw new VokeResourceBindingError(
+      `Function "${definition.key}" reads resource "${resource}", but its Function Registry was activated without a config, so Voke cannot resolve the binding. Create the Gateway with the config: voke(functions, { config })`
+    );
+  }
+
+  const envName = activation.resourceBindings[resource];
+
+  // The model rejects a link to an unknown resource, so this is a link the config lacks.
+  if (envName === undefined) {
+    throw notLinkedError(definition.key, resource);
+  }
+
+  const value = readEnv(envName);
+
+  if (value === undefined || value === "") {
+    throw new VokeResourceBindingError(`Missing resource binding: ${envName}`);
+  }
+
+  return value;
+};
+
 const createInvokeContext = <TVariables extends RuntimeVariableCatalog>(
   definition: BaseFunctionDefinition<string, FunctionKind, TVariables>,
   options: InvokeOptions
@@ -994,6 +1138,8 @@ const createInvokeContext = <TVariables extends RuntimeVariableCatalog>(
 
   return {
     functionName,
+    resource: (key) =>
+      readResource(definition as BaseFunctionDefinition, activation, key),
     trace: resolveTrace(options),
     variables: createRuntimeVariables({
       cache: activation?.variableCache,
@@ -1093,71 +1239,190 @@ const parseResult = async <TOutputSchema extends AnyStandardSchema>(
   )) as StandardSchemaOutput<TOutputSchema>;
 };
 
+// The keys a `@vokejs/schema` object exposes, for checks other validators cannot support.
+const schemaObjectKeys = (schema: unknown): readonly string[] | undefined => {
+  if (typeof schema !== "object" || schema === null || !("~voke" in schema)) {
+    return undefined;
+  }
+
+  const metadata = (schema as { "~voke"?: { keys?: readonly string[] } })[
+    "~voke"
+  ];
+
+  return metadata?.keys;
+};
+
+type RouteRequestPart = "body" | "headers" | "params" | "query";
+
+interface RouteRequestErrorOptions extends InvokeErrorOptions {
+  readonly part: RouteRequestPart;
+  readonly status: 400 | 415;
+}
+
+/** The request does not fit the route: the client's mistake. Callers outside the Gateway see an InvokeError. */
+// oxlint-disable-next-line eslint/max-classes-per-file -- an internal InvokeError subclass, kept beside the class it extends.
+class RouteRequestError extends InvokeError {
+  readonly part: RouteRequestPart;
+  readonly status: 400 | 415;
+
+  // oxlint-disable-next-line unicorn/custom-error-definition -- keeps the InvokeError name: functions.route callers see an InvokeError.
+  constructor(message: string, options: RouteRequestErrorOptions) {
+    super(message, options);
+    this.part = options.part;
+    this.status = options.status;
+  }
+}
+
+const routeName = (route: AnyRouteDefinition): string =>
+  `${route.method} ${route.path}`;
+
 const parseRoutePart = async <TSchema extends AnyStandardSchema | undefined>(
   schema: TSchema,
   value: RouteSchemaInput<TSchema, unknown>,
-  part: string,
-  route: AnyRouteDefinition,
-  code: Extract<
-    InvokeErrorCode,
-    "INVALID_PAYLOAD" | "INVALID_RESULT"
-  > = "INVALID_PAYLOAD"
+  part: RouteRequestPart | "result",
+  route: AnyRouteDefinition
 ): Promise<RouteSchemaOutput<TSchema, typeof value>> => {
   if (schema === undefined) {
     return value as RouteSchemaOutput<TSchema, typeof value>;
   }
 
   return (await parseWithSchema(schema, value, (message, cause, issues) => {
+    const functionName = routeName(route);
+    const errorMessage = `Invalid ${part} for ${functionName}: ${message}`;
     const prefixedIssues = issues?.map((issue) => ({
       ...issue,
       path: [part, ...(issue.path ?? [])],
     }));
 
-    return new InvokeError(
-      `Invalid ${part} for ${route.method} ${route.path}: ${message}`,
-      {
+    if (part === "result") {
+      return new InvokeError(errorMessage, {
         cause,
-        code,
-        functionName: `${route.method} ${route.path}`,
+        code: "INVALID_RESULT",
+        functionName,
         issues: prefixedIssues,
-      }
-    );
+      });
+    }
+
+    return new RouteRequestError(errorMessage, {
+      cause,
+      code: "INVALID_PAYLOAD",
+      functionName,
+      issues: prefixedIssues,
+      part,
+      status: 400,
+    });
   })) as RouteSchemaOutput<TSchema, typeof value>;
 };
 
-const headersFromInput = (
-  headers: Headers | Record<string, string> | undefined
-): Headers => {
+// A repeated key is one value, joined with "," in order of appearance. Built from a Map so a key
+// named "__proto__" becomes an ordinary own property.
+const queryRecord = (url: string): Record<string, string> => {
+  const values = new Map<string, string>();
+
+  for (const [key, value] of new URL(url).searchParams) {
+    const previous = values.get(key);
+    values.set(key, previous === undefined ? value : `${previous},${value}`);
+  }
+
+  return Object.fromEntries(values);
+};
+
+// `Headers` already lower-cases names and combines repeated values.
+const headerRecord = (
+  headers: Headers | Record<string, unknown>
+): Record<string, string> => {
   if (headers instanceof Headers) {
+    return Object.fromEntries(headers);
+  }
+
+  const values = new Map<string, string>();
+
+  for (const [name, value] of Object.entries(headers)) {
+    if (value !== undefined) {
+      values.set(name.toLowerCase(), String(value));
+    }
+  }
+
+  return Object.fromEntries(values);
+};
+
+// A headers schema that names its keys receives only those: clients, proxies and API Gateway add
+// headers the route never declared.
+const headersForSchema = (
+  schema: AnyStandardSchema | undefined,
+  headers: Record<string, string>
+): Record<string, string> => {
+  const keys = schemaObjectKeys(schema);
+
+  if (keys === undefined) {
     return headers;
   }
 
-  return new Headers(headers);
+  const declared = new Set(keys);
+
+  return Object.fromEntries(
+    Object.entries(headers).filter(([name]) => declared.has(name))
+  );
 };
 
-const searchParamsFromUrl = (url: string): URLSearchParams =>
-  new URL(url).searchParams;
+const jsonMediaType = /^application\/(?:[\w.-]+\+)?json$/u;
 
-const bodyFromRequest = async (request: Request): Promise<unknown> => {
+// A `body` schema means a JSON body. No body or an empty one is `undefined`.
+const readJsonBody = async (
+  route: AnyRouteDefinition,
+  request: Request,
+  readText: () => Promise<string>
+): Promise<unknown> => {
   if (request.body === null) {
     return undefined;
   }
 
-  const contentType = request.headers.get("content-type") ?? "";
+  const text = await readText();
 
-  if (contentType.includes("application/json")) {
-    return await request.clone().json();
+  if (text === "") {
+    return undefined;
   }
 
-  return await request.clone().text();
+  const functionName = routeName(route);
+  const mediaType = (request.headers.get("content-type") ?? "")
+    .split(";")[0]
+    ?.trim()
+    .toLowerCase();
+
+  if (mediaType === undefined || !jsonMediaType.test(mediaType)) {
+    throw new RouteRequestError(
+      `Unsupported content type for ${functionName}: send application/json`,
+      { code: "INVALID_PAYLOAD", functionName, part: "body", status: 415 }
+    );
+  }
+
+  try {
+    return JSON.parse(text) as unknown;
+  } catch (error) {
+    // The parser's message differs between runtimes, so it never reaches the client.
+    throw new RouteRequestError(
+      `Invalid body for ${functionName}: Malformed JSON`,
+      {
+        cause: error,
+        code: "INVALID_PAYLOAD",
+        functionName,
+        issues: [{ message: "Malformed JSON", path: ["body"] }],
+        part: "body",
+        status: 400,
+      }
+    );
+  }
 };
 
 const createRouteRequest = async (
   route: AnyRouteDefinition,
-  input: RouteInvocationInput<AnyRouteDefinition>
+  input: RouteInvocationInput<AnyRouteDefinition>,
+  readText?: () => Promise<string>
 ): Promise<RouteRequest<unknown, unknown, unknown, unknown>> => {
-  const headers = headersFromInput(
-    input.headers as Headers | Record<string, string> | undefined
+  const headers = headerRecord(
+    (input.headers as Record<string, unknown> | undefined) ??
+      input.request?.headers ??
+      {}
   );
   const request =
     input.request ??
@@ -1168,16 +1433,22 @@ const createRouteRequest = async (
         route.method === "HEAD"
           ? undefined
           : JSON.stringify(input.body),
-      headers,
+      headers: new Headers(headers),
       method: route.method,
     });
   const rawBody =
     input.body ??
-    (route.body === undefined ? undefined : await bodyFromRequest(request));
+    (route.body === undefined
+      ? undefined
+      : await readJsonBody(
+          route,
+          request,
+          readText ?? (() => request.clone().text())
+        ));
   const parsedBody = await parseRoutePart(route.body, rawBody, "body", route);
   const parsedHeaders = await parseRoutePart(
     route.headers,
-    headers,
+    headersForSchema(route.headers, headers),
     "headers",
     route
   );
@@ -1189,7 +1460,7 @@ const createRouteRequest = async (
   );
   const parsedQuery = await parseRoutePart(
     route.query,
-    input.query ?? searchParamsFromUrl(request.url),
+    input.query ?? queryRecord(request.url),
     "query",
     route
   );
@@ -1213,28 +1484,24 @@ const parseRouteOutput = async (
     return value;
   }
 
-  return await parseRoutePart(
-    route.output,
-    value,
-    "result",
-    route,
-    "INVALID_RESULT"
-  );
+  return await parseRoutePart(route.output, value, "result", route);
 };
 
-const runRoute = async (
+const runRouteHandler = async (
   route: AnyRouteDefinition,
-  input: RouteInvocationInput<AnyRouteDefinition>,
+  request: RouteRequest<unknown, unknown, unknown, unknown>,
   definition?: AnyFunctionDefinition
 ): Promise<unknown> => {
-  const request = await createRouteRequest(route, input);
   const context =
     definition === undefined
       ? {
-          functionName: `${route.method} ${route.path}`,
+          functionName: routeName(route),
+          resource: (key: string): string => {
+            throw notLinkedError(routeName(route), key);
+          },
           trace: currentTrace(),
           variables: createRuntimeVariables({
-            functionKey: `${route.method} ${route.path}`,
+            functionKey: routeName(route),
             providers: [],
             variables: {},
           }),
@@ -1249,39 +1516,81 @@ const runRoute = async (
     unknown,
     RuntimeVariableCatalog
   >;
-  const wraps =
-    definition === undefined ? undefined : functionWraps(definition);
-  const result =
-    wraps === undefined || definition === undefined
-      ? await handler(
-          request as RouteRequest<never, never, never, never>,
-          context
-        )
-      : await runWrapped(
+  const run = () =>
+    handler(request as RouteRequest<never, never, never, never>, context);
+
+  if (definition === undefined) {
+    return await parseRouteOutput(route, await run());
+  }
+
+  const wraps = functionWraps(definition);
+  const result = await runAsEntry(definition, () =>
+    wraps === undefined
+      ? run()
+      : runWrapped(
           wraps,
           {
             context,
             functionKey: definition.key,
             input: request,
             kind: "route",
-            route: `${route.method} ${route.path}`,
+            route: routeName(route),
           },
-          () =>
-            handler(
-              request as RouteRequest<never, never, never, never>,
-              context
-            )
-        );
+          run
+        )
+  );
 
   return await parseRouteOutput(route, result);
 };
 
-const routeResponse = async (
+// `functions.route(...)`: every failure propagates as an InvokeError with its full issues.
+const runRoute = async (
   route: AnyRouteDefinition,
   input: RouteInvocationInput<AnyRouteDefinition>,
   definition?: AnyFunctionDefinition
+): Promise<unknown> =>
+  await runRouteHandler(
+    route,
+    await createRouteRequest(route, input),
+    definition
+  );
+
+const routeRequestErrorResponse = (error: RouteRequestError): Response => {
+  if (error.status === 415) {
+    return responseError("Unsupported content type: send application/json", {
+      code: "UNSUPPORTED_MEDIA_TYPE",
+      status: 415,
+    });
+  }
+
+  return responseError(`Invalid ${error.part}`, {
+    code: "INVALID_REQUEST",
+    issues: error.issues,
+    status: 400,
+  });
+};
+
+// Only a failure while building the Route Request is the client's mistake. Anything the handler
+// throws, an InvokeError from a nested call included, is a server failure for `app.onError`.
+const routeResponse = async (
+  route: AnyRouteDefinition,
+  input: RouteInvocationInput<AnyRouteDefinition>,
+  definition: AnyFunctionDefinition,
+  readText: () => Promise<string>
 ): Promise<Response> => {
-  const result = await runRoute(route, input, definition);
+  let request: RouteRequest<unknown, unknown, unknown, unknown>;
+
+  try {
+    request = await createRouteRequest(route, input, readText);
+  } catch (error) {
+    if (error instanceof RouteRequestError) {
+      return routeRequestErrorResponse(error);
+    }
+
+    throw error;
+  }
+
+  const result = await runRouteHandler(route, request, definition);
 
   if (result instanceof Response) {
     return result;
@@ -1296,12 +1605,6 @@ const routeResponse = async (
 
 const contextHeaders = (context: Context<VokeEnv>): Headers =>
   new Headers(context.req.raw.headers);
-
-const identityHeaderName = (identitySource: string): string | undefined => {
-  const match = /^\$request\.header\.([^.\s]+)$/iu.exec(identitySource);
-
-  return match?.[1];
-};
 
 const routeAuthorizerName = (
   route: AnyRouteDefinition,
@@ -1335,19 +1638,22 @@ export const runRequestAuthorizer = async (
   );
   await loadRuntimeVariablesBeforeHandler(runtimeContext.variables);
   const wraps = functionWraps(definition);
-  const result =
-    wraps === undefined
-      ? await handler(request, runtimeContext)
-      : ((await runWrapped(
-          wraps,
-          {
-            context: runtimeContext,
-            functionKey: definition.key,
-            input: request,
-            kind: "authorizer",
-          },
-          () => handler(request, runtimeContext)
-        )) as Awaited<ReturnType<RequestAuthorizerHandler>> | undefined);
+  const result = (await runAsEntry(
+    definition as unknown as BaseFunctionDefinition,
+    () =>
+      wraps === undefined
+        ? handler(request, runtimeContext)
+        : runWrapped(
+            wraps,
+            {
+              context: runtimeContext,
+              functionKey: definition.key,
+              input: request,
+              kind: "authorizer",
+            },
+            () => handler(request, runtimeContext)
+          )
+  )) as Awaited<ReturnType<RequestAuthorizerHandler>> | undefined;
 
   if (typeof result?.authorized !== "boolean") {
     throw new InvokeError("Invalid authorizer result", {
@@ -1379,12 +1685,85 @@ export const runRequestAuthorizer = async (
   return { authorized: true, context };
 };
 
+const unauthorizedJwt = (reason?: JwtRejection): Response =>
+  jsonError("Unauthorized", {
+    code: "UNAUTHORIZED",
+    headers: {
+      "www-authenticate":
+        reason === undefined || reason === "missing token"
+          ? "Bearer"
+          : `Bearer error="invalid_token", error_description="${reason}"`,
+    },
+    status: 401,
+  });
+
+const JWT_TOKEN_SOURCE = /^\$request\.(?:header|querystring)\./iu;
+
+// Local Authorizer Evaluation of a JWT Authorizer checks the token's shape and claims, never its
+// signature, so it does not run for a request the platform delivered to a deployed Function.
+const evaluateLocalJwtAuthorizer = (
+  name: string,
+  authorizer: JwtAuthorizerDefinition,
+  request: Request,
+  headers: Headers,
+  platformRequest: boolean
+): Response | RouteAuthContext => {
+  if (platformRequest) {
+    return unauthorizedJwt();
+  }
+
+  const [source, ...extra] = authorizer.identitySource;
+  const identity =
+    source === undefined || extra.length > 0 || !JWT_TOKEN_SOURCE.test(source)
+      ? undefined
+      : readIdentityValue(source, request, headers);
+
+  if (identity?.kind !== "value") {
+    return jsonError(
+      `JWT Authorizer "${name}" needs exactly one identity source: $request.header.<name> or $request.querystring.<name>`,
+      { code: "INTERNAL_SERVER_ERROR", status: 500 }
+    );
+  }
+
+  const result = evaluateJwt(authorizer, identity.value, Date.now() / 1000);
+
+  return result.ok
+    ? { context: result.claims, source: "jwt" }
+    : unauthorizedJwt(result.reason);
+};
+
+// Every identity source must be present: API Gateway answers 401 without calling the Lambda
+// Request Authorizer otherwise. Returns the first expression local evaluation cannot read.
+const checkLambdaIdentity = (
+  authorizer: LambdaAuthorizerDefinition,
+  request: Request,
+  headers: Headers
+): Response | undefined => {
+  for (const source of authorizer.identitySource) {
+    const identity = readIdentityValue(source, request, headers);
+
+    if (identity.kind === "unsupported") {
+      return jsonError(
+        `Identity source "${source}" is not available in Local Authorizer Evaluation`,
+        { code: "INTERNAL_SERVER_ERROR", status: 500 }
+      );
+    }
+
+    if (identity.kind === "value" && identity.value === undefined) {
+      return jsonError("Unauthorized", { code: "UNAUTHORIZED", status: 401 });
+    }
+  }
+
+  return undefined;
+};
+
 const evaluateLocalAuthorizer = async (
   route: AnyRouteDefinition,
   definition: AnyFunctionDefinition,
   registry: FunctionRegistry | FunctionRegistryInput,
   request: Request,
-  headers: Headers
+  headers: Headers,
+  platformRequest: boolean
 ): Promise<Response | RouteAuthContext | undefined> => {
   const authorizerName = routeAuthorizerName(route, definition);
 
@@ -1394,24 +1773,27 @@ const evaluateLocalAuthorizer = async (
 
   const authorizer = definition.authorizers?.[authorizerName];
 
-  if (authorizer?.kind !== "lambda") {
-    return undefined;
+  if (authorizer === undefined) {
+    return jsonError(
+      `Route ${route.method} ${route.path} references unknown HTTP Authorizer "${authorizerName}"`,
+      { code: "INTERNAL_SERVER_ERROR", status: 500 }
+    );
   }
 
-  const hasIdentity = authorizer.identitySource.every((source) => {
-    const header = identityHeaderName(source);
+  if (authorizer.kind === "jwt") {
+    return evaluateLocalJwtAuthorizer(
+      authorizerName,
+      authorizer,
+      request,
+      headers,
+      platformRequest
+    );
+  }
 
-    if (header === undefined) {
-      return false;
-    }
+  const identityFailure = checkLambdaIdentity(authorizer, request, headers);
 
-    const value = headers.get(header);
-
-    return value !== null && value.trim() !== "";
-  });
-
-  if (!hasIdentity) {
-    return jsonError("Unauthorized", { code: "UNAUTHORIZED", status: 401 });
+  if (identityFailure !== undefined) {
+    return identityFailure;
   }
 
   if (typeof authorizer.function !== "string") {
@@ -1477,7 +1859,8 @@ const resolveRouteAuth = async (
     definition,
     registry,
     context.req.raw,
-    contextHeaders(context)
+    contextHeaders(context),
+    provider?.runtime?.isPlatformRequest?.({ env: context.env }) === true
   );
 };
 
@@ -1505,12 +1888,17 @@ const mountRoute = (
       route,
       {
         auth,
-        headers: contextHeaders(context),
+        headers: headerRecord(context.req.raw.headers),
         params: context.req.param(),
-        query: searchParamsFromUrl(context.req.url),
+        query: queryRecord(context.req.url),
         request: context.req.raw,
       },
-      definition
+      definition,
+      // Hono caches a body that route middleware already read through `c.req`.
+      async () =>
+        context.req.raw.bodyUsed
+          ? await context.req.text()
+          : await context.req.raw.clone().text()
     );
   });
 };
@@ -1597,18 +1985,20 @@ const runLocalFunction = async <
   await loadRuntimeVariablesBeforeHandler(context.variables);
   const wraps = functionWraps(definition);
   const result = await withTimeout(
-    wraps === undefined
-      ? definition.handler(parsedPayload, context)
-      : (runWrapped(
-          wraps,
-          {
-            context,
-            functionKey: definition.key,
-            input: parsedPayload,
-            kind: "invokable",
-          },
-          () => definition.handler(parsedPayload, context)
-        ) as Promise<StandardSchemaInput<TOutputSchema>>),
+    runAsEntry(definition, () =>
+      wraps === undefined
+        ? definition.handler(parsedPayload, context)
+        : (runWrapped(
+            wraps,
+            {
+              context,
+              functionKey: definition.key,
+              input: parsedPayload,
+              kind: "invokable",
+            },
+            () => definition.handler(parsedPayload, context)
+          ) as Promise<StandardSchemaInput<TOutputSchema>>)
+    ),
     options.timeoutMs,
     `invoke("${functionName}") timed out after ${options.timeoutMs}ms`,
     functionName
@@ -1821,12 +2211,14 @@ const invokeFunction = async (
   if (routed !== undefined) {
     const functionName = deployedName(definition);
 
-    return await invokeThroughTransport(definition, payload, invokeOptions, {
-      envelope: false,
-      functionName: routed.target.functionName,
-      missingTransportMessage: `invoke("${functionName}") is routed by the Provider, which supplies no invoke transport`,
-      transport: routed.capability.transport?.(),
-    });
+    return await runOutsideEntry(() =>
+      invokeThroughTransport(definition, payload, invokeOptions, {
+        envelope: false,
+        functionName: routed.target.functionName,
+        missingTransportMessage: `invoke("${functionName}") is routed by the Provider, which supplies no invoke transport`,
+        transport: routed.capability.transport?.(),
+      })
+    );
   }
 
   const acceptsExecutionName =
@@ -1845,7 +2237,9 @@ const invokeFunction = async (
   }
 
   if (resolveRuntime(invokeOptions) === "aws") {
-    return await invokeAws(definition, payload, invokeOptions);
+    return await runOutsideEntry(() =>
+      invokeAws(definition, payload, invokeOptions)
+    );
   }
 
   if (options.mode === "async") {
@@ -1908,14 +2302,19 @@ const sendEventToFunction = async (
   await loadRuntimeVariablesBeforeHandler(context.variables);
   const wraps = functionWraps(definition);
 
-  if (wraps === undefined) {
-    return await definition.handler(parsedEvent, context);
-  }
-
-  return await runWrapped(
-    wraps,
-    { context, functionKey: definition.key, input: parsedEvent, kind: "event" },
-    () => definition.handler(parsedEvent, context)
+  return await runAsEntry(definition, () =>
+    wraps === undefined
+      ? definition.handler(parsedEvent, context)
+      : runWrapped(
+          wraps,
+          {
+            context,
+            functionKey: definition.key,
+            input: parsedEvent,
+            kind: "event",
+          },
+          () => definition.handler(parsedEvent, context)
+        )
   );
 };
 
@@ -1923,20 +2322,24 @@ export function fn<
   const TInputSchema extends AnyStandardSchema,
   const TOutputSchema extends AnyStandardSchema,
   const TVariables extends RuntimeVariableCatalog = Record<never, never>,
+  const TResources extends readonly string[] = readonly [],
 >(
   definition: InvokableFunctionWithInputDefinitionInput<
     TInputSchema,
     TOutputSchema,
-    TVariables
+    TVariables,
+    TResources
   >
 ): InvokableFunctionDefinition<string, TInputSchema, TOutputSchema, TVariables>;
 export function fn<
   const TOutputSchema extends AnyStandardSchema,
   const TVariables extends RuntimeVariableCatalog = Record<never, never>,
+  const TResources extends readonly string[] = readonly [],
 >(
   definition: InvokableZeroInputFunctionDefinitionInput<
     TOutputSchema,
-    TVariables
+    TVariables,
+    TResources
   >
 ): InvokableFunctionDefinition<string, undefined, TOutputSchema, TVariables>;
 export function fn<
@@ -1980,12 +2383,13 @@ export function fn(
 export const http = <
   const TRoutes extends AnyRouteDefinition | readonly AnyRouteDefinition[],
   const TVariables extends RuntimeVariableCatalog = Record<never, never>,
+  const TResources extends readonly string[] = readonly [],
 >(
-  definition: HttpFunctionDefinitionInput<TRoutes, TVariables>
+  definition: HttpFunctionDefinitionInput<TRoutes, TVariables, TResources>
 ): RouteFunctionDefinition<string, RouteInputList<TRoutes>, TVariables> => {
   const routeInput =
     typeof definition.routes === "function"
-      ? definition.routes(new Voke<TVariables>())
+      ? definition.routes(new Voke<TVariables, TResources[number]>())
       : definition.routes;
   const routes = (Array.isArray(routeInput)
     ? routeInput
@@ -1997,6 +2401,7 @@ export const http = <
     key: "",
     kind: "route",
     name: definition.name,
+    resources: definition.resources,
     routes: Object.freeze([...routes]) as unknown as RouteInputList<TRoutes>,
     synthesis: definition.synthesis,
     variables: definition.variables,
@@ -2071,18 +2476,6 @@ const routeParamKeys = (path: string): string[] =>
     .map((match) => match[1])
     .filter((key): key is string => key !== undefined);
 
-const schemaObjectKeys = (schema: unknown): readonly string[] | undefined => {
-  if (typeof schema !== "object" || schema === null || !("~voke" in schema)) {
-    return undefined;
-  }
-
-  const metadata = (schema as { "~voke"?: { keys?: readonly string[] } })[
-    "~voke"
-  ];
-
-  return metadata?.keys;
-};
-
 export const assertRouteParamSchemas = (
   registry: FunctionRegistry | FunctionRegistryInput
 ): void => {
@@ -2105,6 +2498,25 @@ export const assertRouteParamSchemas = (
       if (expected.join("\0") !== actual.join("\0")) {
         throw new VokeConfigError(
           `Route ${route.method} ${route.path} params schema expects ${actual.map((key) => JSON.stringify(key)).join(", ")}, but path defines ${expected.map((key) => JSON.stringify(key)).join(", ")}`
+        );
+      }
+    }
+  }
+};
+
+// Header names arrive lower-case, so a schema that names a header in another case never matches.
+export const assertRouteHeaderSchemas = (
+  registry: FunctionRegistry | FunctionRegistryInput
+): void => {
+  for (const [, definition] of functionRegistryEntries(registry)) {
+    for (const route of definition.routes ?? []) {
+      const invalid = (schemaObjectKeys(route.headers) ?? []).filter(
+        (key) => key !== key.toLowerCase()
+      );
+
+      if (invalid.length > 0) {
+        throw new VokeConfigError(
+          `Route ${route.method} ${route.path} headers schema names ${invalid.map((key) => JSON.stringify(key)).join(", ")}; header names are lower-case, so write ${invalid.map((key) => JSON.stringify(key.toLowerCase())).join(", ")}`
         );
       }
     }

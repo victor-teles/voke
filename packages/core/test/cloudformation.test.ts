@@ -10,8 +10,8 @@ import {
   parameter as runtimeParameter,
   secret as runtimeSecret,
   sqs,
-} from "@voke/aws";
-import type { SqsMessageBatch } from "@voke/aws";
+} from "@vokejs/aws";
+import type { SqsMessageBatch } from "@vokejs/aws";
 import {
   dynamodbTable,
   eventBus,
@@ -21,7 +21,7 @@ import {
   sqsQueue,
   ssmParameter,
   synthesizeCloudFormation,
-} from "@voke/aws/cloudformation";
+} from "@vokejs/aws/cloudformation";
 
 import { defineConfig } from "../src/config";
 import { VokeModelError } from "../src/errors";
@@ -108,7 +108,12 @@ test("matches the CloudFormation snapshot for an API stack with resources", asyn
     environment: {
       LOG_LEVEL: "info",
     },
-    functions: healthFunctions(),
+    functions: createFunctions({
+      http: http({
+        resources: ["eventsQueue", "ordersTable"],
+        routes: new Voke().get("/health", { handler: () => ({ ok: true }) }),
+      }),
+    }),
     name: "orders-api",
     region: "sa-east-1",
     resources: {
@@ -133,6 +138,7 @@ test("matches the CloudFormation snapshot for an API stack with explicit functio
     input: schema<{ email: string }>(),
     name: "sendWelcomeEmail",
     output: schema<{ queued: boolean; to: string }>(),
+    resources: ["eventsQueue"],
     synthesis: {
       entrypoint: "./src/functions/send-welcome-email.ts",
       environment: {
@@ -489,7 +495,21 @@ test("generates resource-specific IAM policy statements for each AWS helper", ()
   const configValueArn = `arn:aws:ssm:\${AWS::Region}:\${AWS::AccountId}:parameter/\${ConfigValue}`;
   const uploadsBucketObjectArn = `\${UploadsBucket.Arn}/*`;
   const template = synthesizeCloudFormation({
-    functions: healthFunctions(),
+    // The Function links every resource, so its role has each helper's statement.
+    functions: createFunctions({
+      http: http({
+        resources: [
+          "auditBus",
+          "configValue",
+          "eventsQueue",
+          "orderCreatedTopic",
+          "ordersTable",
+          "signingSecret",
+          "uploadsBucket",
+        ],
+        routes: new Voke().get("/health", { handler: () => ({ ok: true }) }),
+      }),
+    }),
     name: "policy-api",
     resources: {
       auditBus: eventBus(),
@@ -540,6 +560,9 @@ test("generates resource-specific IAM policy statements for each AWS helper", ()
         "dynamodb:DeleteItem",
         "dynamodb:Query",
         "dynamodb:Scan",
+        "dynamodb:BatchGetItem",
+        "dynamodb:BatchWriteItem",
+        "dynamodb:ConditionCheckItem",
       ],
       Effect: "Allow",
       Resource: { "Fn::GetAtt": ["OrdersTable", "Arn"] },

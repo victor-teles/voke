@@ -31,10 +31,12 @@ const s3Project = () =>
       handler: () => {},
       on: ["deleted"],
     }),
+    // Reads the uploaded object, so it links the bucket: its role then references the bucket.
     imageUploaded: s3({
       bucket: "uploadsBucket",
       handler: () => {},
       prefix: "incoming/",
+      resources: ["uploadsBucket"],
       suffix: ".jpg",
     }),
     report: fn({ handler: () => "ok", output: text }),

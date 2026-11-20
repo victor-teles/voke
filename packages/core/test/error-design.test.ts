@@ -1,7 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { bindResource } from "@voke/aws";
-
+import { voke } from "../src/app";
 import { runCli } from "../src/cli";
 import { defineConfig, loadVokeConfig } from "../src/config";
 import { createDevPlan } from "../src/dev";
@@ -11,6 +10,8 @@ import {
   VokeModelError,
   VokeResourceBindingError,
 } from "../src/errors";
+import { createFunctions, fn } from "../src/invoke";
+import type { InvokeContext, StandardSchemaV1 } from "../src/invoke";
 import { createInternalModel } from "../src/model";
 import { createServerlessMigration } from "../src/serverless-migration";
 import { withEnv } from "./support/env";
@@ -43,8 +44,25 @@ test("standardizes framework error types for public workflows", async () => {
     })
   ).toThrow(VokeModelError);
 
-  const missingBinding = bindResource("ordersTable", "name");
-  expect(() => missingBinding.value()).toThrow(VokeResourceBindingError);
+  const text: StandardSchemaV1<string, string> = {
+    "~standard": {
+      validate: (value) => ({ value: value as string }),
+      vendor: "voke-test",
+      version: 1,
+    },
+  };
+  const unlinked = createFunctions({
+    readOrders: fn({
+      handler: (_payload: undefined, context: InvokeContext) =>
+        context.resource("ordersTable"),
+      output: text,
+    }),
+  });
+
+  voke(unlinked, { config: { name: "unlinked-api" } });
+  await expect(unlinked.invoke("readOrders")).rejects.toThrow(
+    VokeResourceBindingError
+  );
 
   const missing = tempPath(
     `voke-error-design-${crypto.randomUUID()}/src/api.ts`

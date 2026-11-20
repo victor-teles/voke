@@ -175,3 +175,76 @@ test("undefined cannot be represented in JSON Schema", () => {
     jsonSchemaOf(schema.object({ nothing: schema.undefined() }))
   ).toThrow("undefined cannot be represented in JSON Schema");
 });
+
+// A child from another library may validate asynchronously (a Zod async refinement, for example).
+const asyncString = {
+  "~standard": {
+    validate: (value: unknown) =>
+      Promise.resolve(
+        typeof value === "string"
+          ? { value: value.toUpperCase() }
+          : { issues: [{ message: "Expected string (async)" }] }
+      ),
+    vendor: "voke-test",
+    version: 1 as const,
+  },
+};
+
+test("awaits a child schema that validates asynchronously", async () => {
+  const target = schema.object({
+    name: asyncString,
+    nick: schema.optional(asyncString),
+    tags: schema.array(asyncString),
+  });
+
+  expect(await validate(target, { name: 1, nick: 3, tags: [2, "a"] })).toEqual({
+    issues: [
+      { message: "Expected string (async)", path: ["name"] },
+      { message: "Expected string (async)", path: ["nick"] },
+      { message: "Expected string (async)", path: ["tags", 0] },
+    ],
+  });
+  expect(await validate(target, { name: "ada", tags: ["a"] })).toEqual({
+    value: { name: "ADA", tags: ["A"] },
+  });
+});
+
+test("stays synchronous when every child is synchronous", () => {
+  const result = validate(
+    schema.object({ tags: schema.array(schema.string()) }),
+    { tags: ["a"] }
+  );
+
+  expect(result).not.toBeInstanceOf(Promise);
+});
+
+test("keeps issue order with a missing key before an invalid one", () => {
+  const target = schema.object({
+    a: schema.string(),
+    b: schema.string(),
+    c: schema.string(),
+  });
+
+  expect(validate(target, { c: 1, extra: true })).toEqual({
+    issues: [
+      { message: "Unexpected property", path: ["extra"] },
+      { message: "Required", path: ["a"] },
+      { message: "Required", path: ["b"] },
+      { message: "Expected string", path: ["c"] },
+    ],
+  });
+});
+
+test("a child whose validation rejects makes the parent reject", async () => {
+  const child = {
+    "~standard": {
+      validate: (_value: unknown) => Promise.reject(new Error("boom")),
+      vendor: "voke-test",
+      version: 1 as const,
+    },
+  };
+
+  await expect(
+    validate(schema.object({ a: child }), { a: 1 }) as Promise<unknown>
+  ).rejects.toThrow("boom");
+});

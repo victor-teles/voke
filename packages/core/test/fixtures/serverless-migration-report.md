@@ -7,7 +7,8 @@
 | Service            | `orders-api` |
 | Generated files    | 9            |
 | Converted behavior | 8            |
-| Manual tasks       | 7            |
+| Manual tasks       | 9            |
+| Blocking tasks     | 0            |
 | Unknown fields     | 0            |
 
 ## Generated files
@@ -39,6 +40,10 @@
 
 ## Manual work by risk
 
+### Blocking
+
+- No blocking manual work.
+
 ### High risk
 
 | Area | Task                                                                                                                                  | Reason                                                                                         | Generated output | Confidence |
@@ -47,13 +52,15 @@
 
 ### Medium risk
 
-| Area    | Task                                                                                                                                      | Reason                                                                              | Generated output                            | Confidence |
-| ------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------- | ---------- |
-| Routing | Review generated route and worker handlers before deleting the matching Serverless Framework function.                                    | Generated skeletons are starter code and do not migrate business logic.             | -                                           | high       |
-| Build   | Review Serverless package patterns against the generated Bun build workflow.                                                              | Voke builds with Bun and does not execute Serverless packaging filters.             | `./voke-orders/package.json`                | medium     |
-| Build   | Review `custom.webpack` options and port any required aliases, loaders, externals, or minification settings into the Voke build workflow. | serverless-webpack: Build behavior maps to the Voke Bun build pipeline.             | `./voke-orders/SERVERLESS_COMPATIBILITY.md` | medium     |
-| Events  | sqs event on fulfillOrder requires manual implementation.                                                                                 | Queue source cannot be resolved to a migrated Voke SQS queue resource.              | -                                           | high       |
-| Events  | schedule event on scheduledReport requires manual implementation.                                                                         | Rewrite it with `schedule()` from `@voke/aws`; review the expression and time zone. | -                                           | high       |
+| Area    | Task                                                                                                                                      | Reason                                                                                                                                                                                                | Generated output                            | Confidence |
+| ------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- | ---------- |
+| Routing | Review generated route and worker handlers before deleting the matching Serverless Framework function.                                    | Generated skeletons are starter code and do not migrate business logic.                                                                                                                               | -                                           | high       |
+| Build   | Review Serverless package patterns against the generated Bun build workflow.                                                              | Voke builds with Bun and does not execute Serverless packaging filters.                                                                                                                               | `./voke-orders/package.json`                | medium     |
+| Build   | Review `custom.webpack` options and port any required aliases, loaders, externals, or minification settings into the Voke build workflow. | serverless-webpack: Build behavior maps to the Voke Bun build pipeline.                                                                                                                               | `./voke-orders/SERVERLESS_COMPATIBILITY.md` | medium     |
+| Events  | sqs event on fulfillOrder requires manual implementation.                                                                                 | Queue source cannot be resolved to a migrated Voke SQS queue resource.                                                                                                                                | -                                           | high       |
+| Events  | schedule event on scheduledReport requires manual implementation.                                                                         | Rewrite it with `schedule()` from `@vokejs/aws`; review the expression and time zone.                                                                                                                 | -                                           | high       |
+| Build   | Provider runtime nodejs20.x is not carried to the generated project.                                                                      | Voke deploys nodejs22.x or nodejs24.x; test the handlers on the runtime of the generated project.                                                                                                     | `./voke-orders/voke.config.ts`              | high       |
+| Build   | Function listOrders settings are not carried to the generated project: environment TABLE_NAME → LIST_ORDERS_TABLE_NAME.                   | All migrated routes share one http(...) Function, so per-function settings have no single target. Set them on the Voke Function that needs them, and update code that reads renamed environment keys. | `./voke-orders/src/index.ts`                | high       |
 
 ### Low risk
 
@@ -80,8 +87,6 @@
 - provider stage
 - provider region
 - provider environment
-- provider IAM statements
-- package patterns
 - plugins inventory
 - HTTP API event: listOrders GET /orders
 - REST API event: listOrders POST /orders
@@ -92,7 +97,7 @@
 
 - plugin serverless-webpack maps to Voke Bun build but requires bundler option review
 - sqs event on fulfillOrder requires manual implementation. Queue source cannot be resolved to a migrated Voke SQS queue resource.
-- schedule event on scheduledReport requires manual implementation. Rewrite it with `schedule()` from `@voke/aws`; review the expression and time zone.
+- schedule event on scheduledReport requires manual implementation. Rewrite it with `schedule()` from `@vokejs/aws`; review the expression and time zone.
 
 ### Manual steps
 
@@ -103,6 +108,8 @@
 - Review `custom.webpack` options and port any required aliases, loaders, externals, or minification settings into the Voke build workflow.
 - sqs event on fulfillOrder requires manual implementation.
 - schedule event on scheduledReport requires manual implementation.
+- Provider runtime nodejs20.x is not carried to the generated project.
+- Function listOrders settings are not carried to the generated project: environment TABLE_NAME → LIST_ORDERS_TABLE_NAME.
 
 ## Function inventory
 

@@ -42,6 +42,10 @@ export type AwsResourcePolicyResource =
 export interface AwsCloudFormationResourceProvider {
   cloudFormationType: string;
   bindingValue: AwsResourceBindingValue;
+  /** Set by the builders whose resource holds data: `dynamodbTable`, `s3Bucket`, `secret`. */
+  dataBearing?: boolean;
+  /** `false` when `sqsQueue({ deadLetterQueue: false })` turned the queue's dead-letter queue off. */
+  deadLetterQueue?: boolean;
   policyResource: AwsResourcePolicyResource;
   outputName: string;
 }
@@ -57,7 +61,7 @@ export const toLogicalId = (value: string): string => {
     .join("");
 };
 
-/** The AWS metadata every resource builder in `@voke/aws/cloudformation` records. */
+/** The AWS metadata every resource builder in `@vokejs/aws/cloudformation` records. */
 export const resourceProvider = (
   resource: VokeModelResource
 ): AwsCloudFormationResourceProvider => {

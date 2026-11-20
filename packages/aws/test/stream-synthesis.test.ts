@@ -53,7 +53,12 @@ const streamProject = (
       table: "ordersTable",
       ...options.orders,
     }),
-    report: fn({ handler: () => "ok", output: schema<string>() }),
+    // Produces to the stream, so it links it.
+    report: fn({
+      handler: () => "ok",
+      output: schema<string>(),
+      resources: ["clicksStream"],
+    }),
   });
 
 const streamResources = {
@@ -145,7 +150,7 @@ test("matches the CloudFormation snapshot for stream event source mappings", asy
   expect(synthesizeStreams()).toEqual(snapshot);
 });
 
-test("each stream mapping reports batch item failures, starts at trim horizon and retries until expiry", () => {
+test("each stream mapping reports batch item failures, starts at trim horizon and retries 10 times before its dead-letter queue", () => {
   const { Resources } = synthesizeStreams();
 
   for (const logicalId of [
@@ -161,9 +166,9 @@ test("each stream mapping reports batch item failures, starts at trim horizon an
       Enabled: true,
       FunctionResponseTypes: ["ReportBatchItemFailures"],
       MaximumBatchingWindowInSeconds: 0,
+      MaximumRetryAttempts: 10,
       StartingPosition: "TRIM_HORIZON",
     });
-    expect(mapping?.Properties).not.toHaveProperty("MaximumRetryAttempts");
   }
 
   expect(
@@ -219,7 +224,7 @@ test("stream-read permissions are on the consuming Function's role only", () => 
   expect(roleActions(reportRole)).not.toContain("kinesis:GetRecords");
   expect(roleActions(reportRole)).not.toContain("dynamodb:GetRecords");
   expect(roleActions(reportRole)).not.toContain("dynamodb:ListStreams");
-  // Producers of the stream still get the resource's own actions.
+  // A producer that links the stream gets the resource's own actions.
   expect(roleActions(reportRole)).toContain("kinesis:PutRecord");
 });
 

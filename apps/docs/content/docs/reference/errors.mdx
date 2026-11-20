@@ -6,7 +6,7 @@ description: Identify a Voke error by its class and code, read its message, and 
 This page lists the errors Voke throws, when each one is thrown, and the error body the Gateway sends to HTTP clients. Use it to catch an error by class or `code`, and to read its message.
 
 ```ts twoslash
-import { schema } from "@voke/schema";
+import { schema } from "@vokejs/schema";
 import { createFunctions, fn, InvokeError, voke } from "voke";
 
 const functions = createFunctions({
@@ -47,9 +47,19 @@ All classes below are exported by `voke`:
 | `VokeConfigError`          | `CONFIG_ERROR`           | `voke.config.ts` is missing, has no default export, has an invalid or removed setting, or the `aws()` options are invalid. Also for a missing `voke dev` entrypoint and a missing remote target.  |
 | `VokeModelError`           | `MODEL_ERROR`            | The project model is inconsistent (for example, a Function references a resource that is not declared), or a Function breaks a Provider limit (Lambda memory, timeout, the 30-second HTTP limit). |
 | `VokeDeployError`          | `DEPLOY_ERROR`           | A deploy or removal fails in the Provider: no valid AWS credentials, a failed stack or change set, or a bundle that cannot be packaged.                                                           |
-| `VokeResourceBindingError` | `RESOURCE_BINDING_ERROR` | A resource binding is read at runtime, but its environment variable is missing, for example `Missing AWS resource binding: VOKE_RESOURCE_USERS_TABLE_NAME`.                                       |
+| `VokeResourceBindingError` | `RESOURCE_BINDING_ERROR` | `context.resource(key)` cannot return a binding. See the messages below.                                                                                                                          |
 | `VokeRuntimeVariableError` | `RUNTIME_VARIABLE_ERROR` | A Runtime Variable cannot be loaded or resolved, is not valid JSON, fails its schema, has no registered provider, or a provider returns a non-string value.                                       |
 | `VokeError`                | Any code                 | The base class. Voke throws it directly when `voke doctor` finds a failing check (`CONFIG_ERROR`) and when `voke create` cannot run `bun install` (`CREATE_ERROR`).                               |
+
+`context.resource(key)` throws `VokeResourceBindingError` with one of these messages, in the order
+it checks:
+
+- `Function "<key>" does not link resource "<resource>". Add it to the Function: resources: ["<resource>"]`
+- `Function "<key>" reads resource "<resource>" while running in-process inside Function "<entry>", which does not link it. An in-process invocation runs with the caller's role: add resources: ["<resource>"] to "<entry>"`
+- `Function "<key>" reads resource "<resource>", but its Function Registry was activated without a config, so Voke cannot resolve the binding. Create the Gateway with the config: voke(functions, { config })`
+- `Missing resource binding: VOKE_RESOURCE_USERS_TABLE_NAME`, when the variable is unset or empty.
+
+See [Resources and bindings](/docs/guides/resources#read-a-resource-from-a-function).
 
 Catch the base class to handle every framework error, or a subclass to handle one kind:
 
@@ -93,7 +103,7 @@ Runtime variable "stripeKey" for Function "checkout" is not valid JSON.
 
 ## CLI errors
 
-`CliUsageError` extends `VokeError` with the code `CLI_USAGE_ERROR`. The CLI throws it for an unknown command, an unknown flag, a missing flag value, a missing Provider, a refused `voke deploy --stage local`, and a cancelled `voke remove`. It is not exported by `voke`; you see it as CLI output. The message gives the problem and the command's usage:
+`CliUsageError` extends `VokeError` with the code `CLI_USAGE_ERROR`. The CLI throws it for an unknown command, an unknown flag, an argument a command does not take, a short flag, a missing flag value, a missing Provider, a refused `voke deploy --stage local`, and a cancelled `voke remove`. It is not exported by `voke`; you see it as CLI output. The message gives the problem and the command's usage:
 
 ```txt
 Invalid CLI usage: Missing value for --stage
@@ -114,40 +124,44 @@ Unsupported Serverless event kafka on function worker: kafka is not an automatic
 
 - `code`: one of the codes below.
 - `functionName`: the Function, or the route as `METHOD /path`, when known.
-- `issues`: Standard Schema issues (`{ message, path? }`) for `INVALID_PAYLOAD` and `INVALID_RESULT`.
-- `statusCode` and `requestId`: from the transport, for `TRANSPORT_STATUS_ERROR`.
+- `issues`: Standard Schema issues (`{ message, path? }`) for `INVALID_PAYLOAD` and `INVALID_RESULT`. A Remote Function Registry puts its issues in the message instead.
+- `statusCode` and `requestId`: from the transport, for `TRANSPORT_STATUS_ERROR`. A Remote Function Registry sets `statusCode` whenever the other project answered, for example `409` on contract drift.
 - `cause`: the underlying error, when there is one.
 
-| `code`                   | Thrown when                                                                                                       |
-| ------------------------ | ----------------------------------------------------------------------------------------------------------------- |
-| `INVALID_PAYLOAD`        | The input does not match the Function's input schema, or a route's `body`, `params`, `query` or `headers` schema. |
-| `INVALID_RESULT`         | The handler's result does not match the output schema, or an authorizer returns an invalid result or context.     |
-| `TIMEOUT`                | The call takes longer than the `timeoutMs` invoke option.                                                         |
-| `MISSING_FUNCTION`       | The Function does not exist in the registry, or the remote project answers 404.                                   |
-| `MISSING_TRANSPORT`      | A deployed Function invokes another one and no `InvokeTransport` is set.                                          |
-| `TRANSPORT_FAILED`       | The transport (Lambda Invoke or HTTP to a remote) throws or answers with an error status.                         |
-| `TRANSPORT_STATUS_ERROR` | The invoked Lambda returns a function error or a status of 400 or more.                                           |
-| `LOCAL_FUNCTION_FAILED`  | An async local invocation (`mode: "async"`) fails. Voke passes it to `onAsyncError`, or logs it.                  |
-| `INVALID_OPTIONS`        | An invoke option does not apply to the Function, such as `executionName` on a Function that is not durable.       |
+| `code`                   | Thrown when                                                                                                                                                                                     |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `INVALID_PAYLOAD`        | The input does not match the Function's input schema, or a route's `body`, `params`, `query` or `headers` schema.                                                                               |
+| `INVALID_RESULT`         | The handler's result does not match the output schema, or an authorizer returns an invalid result or context.                                                                                   |
+| `TIMEOUT`                | The call takes longer than the `timeoutMs` invoke option. For a Remote Function Registry, one attempt does.                                                                                     |
+| `MISSING_FUNCTION`       | The Function does not exist in the registry, or the remote project answers 404.                                                                                                                 |
+| `MISSING_TRANSPORT`      | A deployed Function invokes another one and no `InvokeTransport` is set.                                                                                                                        |
+| `TRANSPORT_FAILED`       | The transport (Lambda Invoke or HTTP to a remote) throws, or a remote project does not answer, answers with an error status or answers without a data envelope.                                 |
+| `TRANSPORT_STATUS_ERROR` | The invoked Lambda returns a function error or a status of 400 or more.                                                                                                                         |
+| `LOCAL_FUNCTION_FAILED`  | An async local invocation (`mode: "async"`) fails. Voke passes it to `onAsyncError`, or logs it.                                                                                                |
+| `INVALID_OPTIONS`        | An invoke option does not apply to the Function, such as `executionName` on a Function that is not durable, or any option but `trace`, `timeoutMs` and `retries` on a Remote Function Registry. |
 
 The message names the Function and the failure, for example `Invalid payload for getUser: id: Expected string length to be at least 1`.
 
 ## Idempotency errors
 
-`IdempotencyError` is exported by `@voke/idempotency`. `idempotent(...)` throws it when a call cannot run or be replayed. It extends `Error` (not `VokeError`) and has a `code`. The message names the Function and the record status, never the key, the payload or the stored result. In a route, an uncaught `IdempotencyError` becomes the Gateway's generic 500 response; catch it to answer with another status. See [Idempotency](/docs/guides/idempotency).
+`IdempotencyError` is exported by `@vokejs/idempotency`. `idempotent(...)` throws it when a call cannot run or be replayed. It extends `Error` (not `VokeError`) and has a `code`. The message names the Function and the record status, never the key, the payload or the stored result. In a route, an uncaught `IdempotencyError` becomes the Gateway's generic 500 response; catch it to answer with another status. See [Idempotency](/docs/guides/idempotency).
 
-| `code`                                | Thrown when                                                                                               |
-| ------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `IDEMPOTENCY_IN_PROGRESS`             | Another call with the same key is still running, and its Function timeout has not passed. Retry later.    |
-| `IDEMPOTENCY_PAYLOAD_MISMATCH`        | A call with the same key already completed with a different payload (the part that `validate` selects).   |
-| `IDEMPOTENCY_KEY_MISSING`             | `key` returned `undefined` or `""` and the handler uses `onMissingKey: "throw"`.                          |
-| `IDEMPOTENCY_RESULT_NOT_SERIALIZABLE` | The handler returned a value that cannot be stored as JSON, such as a `Response`. The record is released. |
+| `code`                                | Thrown when                                                                                                                                                                                                                      |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `IDEMPOTENCY_COMPLETE_FAILED`         | The handler ran, but its record could not be marked completed. `cause` is the store's error. Calls with the same key get `IDEMPOTENCY_IN_PROGRESS` until the Function timeout passes; after that a retry runs the handler again. |
+| `IDEMPOTENCY_IN_PROGRESS`             | Another call with the same key is still running, and its Function timeout has not passed. Retry later.                                                                                                                           |
+| `IDEMPOTENCY_PAYLOAD_MISMATCH`        | A call with the same key already completed with a different payload (the part that `validate` selects).                                                                                                                          |
+| `IDEMPOTENCY_KEY_MISSING`             | `key` returned `undefined` or `""` and the handler uses `onMissingKey: "throw"`.                                                                                                                                                 |
+| `IDEMPOTENCY_RESULT_NOT_SERIALIZABLE` | The handler returned a value that cannot be stored as JSON, such as a `Response`. The record is released.                                                                                                                        |
+| `IDEMPOTENCY_RESULT_TOO_LARGE`        | The handler returned more than 350 KB of JSON. The operation ran once and is recorded; every call with the same key gets this code until the record expires, without running the handler.                                        |
 
 `idempotent(...)` throws a `VokeConfigError` when the `idempotency()` Plugin is not in `voke.config.ts` and no `store` is passed, and a `VokeResourceBindingError` when the table binding is missing at run time.
 
+In `idempotentBatch(...)`, only `IDEMPOTENCY_IN_PROGRESS`, `IDEMPOTENCY_PAYLOAD_MISMATCH`, `IDEMPOTENCY_KEY_MISSING` and an error thrown by the message's own function fail a single message. Store and configuration errors, including `IDEMPOTENCY_COMPLETE_FAILED`, fail the whole invocation.
+
 ## HTTP error responses
 
-When a route fails, the Gateway answers with this JSON body, locally and on AWS:
+When a route fails, the Gateway answers with an **Error Envelope**, locally and on AWS:
 
 ```ts twoslash
 interface ErrorBody {
@@ -160,35 +174,64 @@ interface ErrorBody {
 }
 ```
 
-There are three cases:
+Every body the Gateway writes has a `code`. `code` is optional in the type because a handler's own `error()` response may leave it out.
 
-| Case                                                         | Status | Body                                                                                                |
-| ------------------------------------------------------------ | ------ | --------------------------------------------------------------------------------------------------- |
-| Invalid input (`InvokeError` with `INVALID_PAYLOAD`)         | 400    | `message` is `Invalid body`, `Invalid params`, `Invalid query` or `Invalid headers`, with `issues`. |
-| Invalid handler output (`InvokeError` with `INVALID_RESULT`) | 500    | `message` is `Invalid result`, with `issues`.                                                       |
-| Any other thrown error                                       | 500    | `code` is `INTERNAL_SERVER_ERROR` and `message` is `Internal server error`.                         |
+| Case                                                     | Status  | `code`                   | `message`                                                            | Extra                                     |
+| -------------------------------------------------------- | ------- | ------------------------ | -------------------------------------------------------------------- | ----------------------------------------- |
+| `body`, `params`, `query` or `headers` fails its schema  | 400     | `INVALID_REQUEST`        | `Invalid body`, `Invalid params`, `Invalid query`, `Invalid headers` | `issues`                                  |
+| The JSON body does not parse                             | 400     | `INVALID_REQUEST`        | `Invalid body`                                                       | one issue, `Malformed JSON` at `["body"]` |
+| A body that is not JSON for a route with a `body` schema | 415     | `UNSUPPORTED_MEDIA_TYPE` | `Unsupported content type: send application/json`                    | none                                      |
+| No route matches the method and path                     | 404     | `NOT_FOUND`              | `Route not found`                                                    | none                                      |
+| `HTTPException` with a status below 500, without `res`   | its own | from the status          | its message, or the status name                                      | none                                      |
+| `HTTPException` with `res`                               | its own | n/a                      | n/a                                                                  | that response, unchanged                  |
+| Anything else                                            | 500     | `INTERNAL_SERVER_ERROR`  | `Internal server error`                                              | `details.message` under `voke dev` only   |
+
+"Anything else" includes an `HTTPException` of 500 or more (its status is kept), a return value that fails the `output` schema, and every `InvokeError` thrown inside a route handler, for example by a nested `functions.invoke(...)`. Only a failure while Voke reads the request is the client's mistake.
+
+The `HTTPException` codes are `BAD_REQUEST` (400 and any other 4xx), `UNAUTHORIZED` (401), `FORBIDDEN` (403), `NOT_FOUND` (404), `METHOD_NOT_ALLOWED` (405), `CONFLICT` (409), `PAYLOAD_TOO_LARGE` (413), `UNSUPPORTED_MEDIA_TYPE` (415), `UNPROCESSABLE_ENTITY` (422) and `TOO_MANY_REQUESTS` (429).
 
 Each issue path starts with the part that failed:
 
 ```txt
-400 {"error":{"issues":[{"message":"Required","path":["body","name"]}],"message":"Invalid body"}}
-500 {"error":{"issues":[{"message":"Expected string","path":["result","id"]}],"message":"Invalid result"}}
+400 {"error":{"code":"INVALID_REQUEST","issues":[{"message":"Required","path":["body","name"]}],"message":"Invalid body"}}
+400 {"error":{"code":"INVALID_REQUEST","issues":[{"message":"Malformed JSON","path":["body"]}],"message":"Invalid body"}}
+415 {"error":{"code":"UNSUPPORTED_MEDIA_TYPE","message":"Unsupported content type: send application/json"}}
 500 {"error":{"code":"INTERNAL_SERVER_ERROR","message":"Internal server error"}}
 ```
 
-<Callout type="warn">
-  For any other thrown error, the original message never reaches the client.
-  Voke logs the error once to `console.error` as one JSON line with `level`,
-  `message`, `name`, `stack`, and `code` when the error has one. Under `voke
-  dev` only, the response also carries `details.message`, so you can see the
-  cause locally. The stage does not turn this on.
+`functions.route(...)` does not write a response: it throws an `InvokeError` with `INVALID_PAYLOAD` for a request part, a malformed JSON body or an unsupported content type, and with `INVALID_RESULT` for the output, both with their full issues.
+
+<Callout type="warn" title="Thrown messages never reach the client">
+  For a server failure, the original message never reaches the client. Voke logs
+  the error once to `console.error` as one JSON line with `level`, `message`,
+  `name`, `stack`, `code` when the error has one, and `issues` when it has some.
+  Under `voke dev` only, the response also carries `details.message`, so you can
+  see the cause locally. The stage does not turn this on.
 </Callout>
 
-For a failure the client should see, handle it in the handler and return the response you want with `error()` from `@voke/http`. Do not rely on a thrown message. See [HTTP routes](/docs/guides/http-routes).
+For a failure the client should see, handle it in the handler and return the response you want with `error()` from `@vokejs/http`. Do not rely on a thrown message. See [HTTP routes](/docs/guides/http-routes).
 
 ## Next steps
 
-- [Schemas](/docs/guides/schemas): the schemas that produce `issues`.
-- [HTTP routes](/docs/guides/http-routes): return your own error responses.
-- [Troubleshooting](/docs/guides/troubleshooting): fix common errors.
-- [Config](/docs/reference/config): the settings that `VokeConfigError` checks.
+<Cards>
+  <Card icon={<ShieldCheck />} href="/docs/guides/schemas" title="Schemas">
+    The schemas that produce `issues`.
+  </Card>
+  <Card icon={<Route />} href="/docs/guides/http-routes" title="HTTP routes">
+    Return your own error responses.
+  </Card>
+  <Card
+    icon={<LifeBuoy />}
+    href="/docs/guides/troubleshooting"
+    title="Troubleshooting"
+  >
+    Fix common errors.
+  </Card>
+  <Card
+    icon={<SlidersHorizontal />}
+    href="/docs/reference/config"
+    title="Config"
+  >
+    The settings that `VokeConfigError` checks.
+  </Card>
+</Cards>

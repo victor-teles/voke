@@ -69,3 +69,29 @@ export const checkDurableInvoke = async (): Promise<void> => {
   const report: string = await functions.invoke("nightlyReport");
   void report;
 };
+
+// Resource Links: the handler reads only the resource keys the Function lists in `resources`.
+createFunctions({
+  linkedWorkflow: durable({
+    executionTimeout: { hours: 1 },
+    handler: (_payload, context) => {
+      const _table: string = context.resource("ordersTable");
+      // @ts-expect-error the Function does not link ordersQueue.
+      void context.resource("ordersQueue");
+
+      return "ok";
+    },
+    output: schema<string>(),
+    resources: ["ordersTable"],
+  }),
+  unlinkedWorkflow: durable({
+    executionTimeout: { hours: 1 },
+    handler: (_payload, context) => {
+      // @ts-expect-error a Function without resources links nothing.
+      void context.resource("ordersTable");
+
+      return "ok";
+    },
+    output: schema<string>(),
+  }),
+});

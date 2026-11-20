@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { createFunctions, fn } from "../src/invoke";
+import { route } from "../src/route-builder";
 import type {
   StandardSchemaInput,
   StandardSchemaOutput,
@@ -60,3 +61,29 @@ void [
   annotatedInput,
   annotatedOutput,
 ];
+
+// A route handler is checked against its `output` schema, whatever the validator.
+void route.post("/users", {
+  body: user,
+  handler: (request) => ({ id: request.body.id }),
+  output: user,
+});
+void route.get("/users/:id", {
+  // @ts-expect-error A route handler returns what its Zod output schema accepts.
+  handler: () => ({ id: 1 }),
+  output: user,
+});
+// A `Response` is always allowed; the `output` schema does not apply to it.
+void route.get("/users/:id/avatar", {
+  handler: (request) =>
+    request.params.id === "usr_1"
+      ? { id: "usr_1" }
+      : new Response(null, { status: 404 }),
+  output: user,
+});
+
+fn({
+  // @ts-expect-error An invokable handler returns what its Zod output schema accepts.
+  handler: () => ({ id: 1 }),
+  output: user,
+});

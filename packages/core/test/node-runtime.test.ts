@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdir, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
-import { aws } from "@voke/aws";
+import { aws } from "@vokejs/aws";
 
 import { defineConfig } from "../src/config";
 import { functions } from "./fixtures/node-runtime/index";

@@ -7,11 +7,11 @@ After reading this page you can protect HTTP routes with API Gateway HTTP API au
 
 ## Protect routes
 
-An authorizer decides whether API Gateway lets a request reach a route. You declare named authorizers with `createAuthorizers` from `@voke/aws`, pass them to `http(...)`, and pick a default and per-route overrides:
+An authorizer decides whether API Gateway lets a request reach a route. You declare named authorizers with `createAuthorizers` from `@vokejs/aws`, pass them to `http(...)`, and pick a default and per-route overrides:
 
-```ts twoslash
+```ts title="src/index.ts" twoslash
 // @filename: voke.config.ts
-import { aws } from "@voke/aws";
+import { aws } from "@vokejs/aws";
 import { defineConfig } from "voke";
 
 export default defineConfig({ name: "users-api", provider: aws() });
@@ -22,7 +22,7 @@ import {
   jwtAuthorizer,
   lambdaAuthorizer,
   requestAuthorizer,
-} from "@voke/aws";
+} from "@vokejs/aws";
 import { createFunctions, http, route, voke } from "voke";
 import config from "../voke.config";
 
@@ -67,11 +67,18 @@ export default voke(functions, { config });
 - `GET /me` overrides the default with `session`, a Lambda authorizer.
 - `GET /health` sets `authorizer: "none"`, so it is public.
 
-Registering an authorizer does not protect any route by itself. A route is protected only when its `http(...)` Function sets a default `authorizer`, or when the route names one. Without either, every route is public.
+<Callout
+  type="warn"
+  title="Registering an authorizer protects nothing by itself"
+>
+  A route is protected only when its `http(...)` Function sets a default
+  `authorizer`, or when the route names one. Without either, every route is
+  public.
+</Callout>
 
 A default applies only to the routes of the `http(...)` Function that declares it. A route can name only an authorizer from its own `http(...)` registry, or `"none"`. To share authorizers between several `http(...)` Functions, pass the same `createAuthorizers(...)` value to each one. Authorizer names are shared by the whole HTTP API, so two `http(...)` Functions cannot use one name for different definitions.
 
-Voke checks these names when it builds the deployment model (`voke synth`, `voke deploy`): a route that names an unknown authorizer fails with `Route GET /me references unknown HTTP Authorizer "..."`. The local Gateway does not check the name, and a route with an unknown name runs without authorization under `voke dev`.
+Voke checks these names when it builds the deployment model (`voke synth`, `voke deploy`): a route that names an unknown authorizer fails with `Route GET /me references unknown HTTP Authorizer "..."`. The local Gateway answers such a route with `500` and the same message, under `voke dev` and in tests.
 
 ## Authorizer kinds
 
@@ -83,13 +90,13 @@ Voke checks these names when it builds the deployment model (`voke synth`, `voke
 
 ### jwtAuthorizer
 
-| Option           | Default                         | Description                                       |
-| ---------------- | ------------------------------- | ------------------------------------------------- |
-| `issuer`         | required                        | The token issuer URL.                             |
-| `audience`       | required                        | One audience or a list of audiences.              |
-| `identitySource` | `$request.header.Authorization` | Where API Gateway reads the token. One or a list. |
+| Option           | Default                         | Description                                                                                                       |
+| ---------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `issuer`         | required                        | The token issuer URL.                                                                                             |
+| `audience`       | required                        | One audience or a list of audiences.                                                                              |
+| `identitySource` | `$request.header.Authorization` | One `$request.header.<name>` or `$request.querystring.<name>` expression. Anything else throws `VokeConfigError`. |
 
-On AWS, the route handler receives the verified token claims in `request.auth.context`, and `request.auth.source` is `"jwt"`.
+On AWS, the route handler receives the verified token claims in `request.auth.context`, and `request.auth.source` is `"jwt"`. Every claim value is a string, as API Gateway passes it: a number arrives as `"1700000000"`, and a list arrives as `"[admin editor]"`. The local Gateway passes claims in the same form.
 
 ### lambdaAuthorizer
 
@@ -106,8 +113,8 @@ Voke configures the authorizer with payload format version 2.0 and simple respon
 A Request Authorizer Function receives the request and returns `{ authorized, context }`. `authorized` must be a boolean. `context` is an object that the route handler reads from `request.auth.context`. Add a `context` schema to validate it:
 
 ```ts twoslash
-import { requestAuthorizer } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { requestAuthorizer } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 
 const authorizeSession = requestAuthorizer({
   context: schema.object({ userId: schema.string() }),
@@ -125,12 +132,12 @@ const authorizeSession = requestAuthorizer({
 
 The handler's second argument is the invoke context, with Runtime Variables (see [Runtime Variables](/docs/guides/runtime-variables)). A Request Authorizer Function also accepts `name`, `synthesis` and `variables`, like other Functions. Register it in `createFunctions(...)` and reference it by its registry key in `lambdaAuthorizer({ function })`.
 
-## External Lambda authorizers
+## Use an external Lambda authorizer
 
 A Lambda authorizer can call a Lambda that is not part of your project. Pass its ARN or its deployed name:
 
 ```ts twoslash
-import { createAuthorizers, lambdaAuthorizer } from "@voke/aws";
+import { createAuthorizers, lambdaAuthorizer } from "@vokejs/aws";
 
 const authorizers = createAuthorizers({
   shared: lambdaAuthorizer({
@@ -146,7 +153,7 @@ const authorizers = createAuthorizers({
 
 Prefer the ARN: it states the account and the region. A deployed name resolves in the stack's own account and region.
 
-<Callout type="warn">
+<Callout type="warn" title="Grant the invoke permission yourself">
   External authorizers are bring-your-own-permission. Voke adds the permission
   for API Gateway to call a Request Authorizer Function from your own project,
   but not for an external Lambda. Grant API Gateway permission to invoke that
@@ -157,21 +164,71 @@ Prefer the ARN: it states the account and the region. A deployed name resolves i
 
 `voke dev` and `gateway.request(...)` evaluate authorizers in the local Gateway:
 
-| Authorizer                                      | Local behavior                                                                                                                                     |
-| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Lambda authorizer → Request Authorizer Function | Runs the Function. Missing identity header: `401` `UNAUTHORIZED`. `authorized: false`: `403` `FORBIDDEN`. A thrown error or invalid result: `500`. |
-| Lambda authorizer → external ARN or name        | Returns `500` with `External authorizers are not available locally`.                                                                               |
-| JWT authorizer                                  | Not checked. The route runs, and `request.auth.context` is empty.                                                                                  |
+| Authorizer                                      | Local behavior                                                                                                                                                                                                                       |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Authorizer                                      | Local behavior                                                                                                                                                                                                                       |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Lambda authorizer → Request Authorizer Function | Runs the Function. Header, query string and `$context` identity sources work. A missing identity value: `401` `UNAUTHORIZED`. `authorized: false`: `403` `FORBIDDEN`. A thrown error or invalid result: `500`.                       |
+| Lambda authorizer → external ARN or name        | Returns `500` with `External authorizers are not available locally`.                                                                                                                                                                 |
+| JWT authorizer                                  | Requires a token from the identity source. Checks `iss`, `aud` or `client_id`, `exp`, `nbf`, `iat`. Missing or failing: `401` `UNAUTHORIZED`, with the reason in `www-authenticate`. The signature is not checked.                   |
 
-<Callout type="info">
-  JWTs are not validated locally, not even their presence. A route protected
-  only by a JWT authorizer is open under `voke dev`. Test JWT rules against a
-  deployed stage.
+<Callout type="warn" title="Local evaluation does not prove a token is genuine">
+  Any well-formed token with the right issuer, audience and times passes
+  locally. Only API Gateway checks the signature against the issuer's keys. A
+  passing local test does not prove that a real token works on a deployed stage.
 </Callout>
 
-```ts twoslash
+Mint a token for tests with `createTestJwt` from `@vokejs/testing`. It takes the authorizer, so the issuer and audience always match, and returns an unsigned token that only the local Gateway accepts:
+
+```ts title="test/profile.test.ts" twoslash
+import { createAuthorizers, jwtAuthorizer } from "@vokejs/aws";
+import { createTestJwt } from "@vokejs/testing";
+import { createFunctions, http, route, voke } from "voke";
+
+const authorizers = createAuthorizers({
+  userJwt: jwtAuthorizer({
+    issuer: "https://auth.example.com",
+    audience: "users-api",
+  }),
+});
+
+const gateway = voke(
+  createFunctions({
+    users: http({
+      authorizers,
+      authorizer: "userJwt",
+      routes: [
+        route.get("/profile", {
+          handler: (request) => ({ subject: request.auth.context.sub }),
+        }),
+      ],
+    }),
+  }),
+  { config: { name: "users-api" } }
+);
+
+const token = createTestJwt(authorizers.userJwt, { sub: "usr_1" });
+
+const allowed = await gateway.request("/profile", {
+  headers: { authorization: `Bearer ${token}` },
+});
+// 200 { data: { subject: "usr_1" } }
+
+const missing = await gateway.request("/profile");
+// 401 { error: { code: "UNAUTHORIZED", message: "Unauthorized" } }
+```
+
+To call a JWT route under `voke dev` by hand, send a real token from your issuer, or print a test token and pass it in the `authorization` header:
+
+```sh
+bun -e 'import { createTestJwt } from "@vokejs/testing"; console.log(createTestJwt({ issuer: "https://auth.example.com", audience: ["users-api"] }))'
+```
+
+The Lambda authorizer example below runs the Request Authorizer Function in process:
+
+```ts title="src/index.ts" twoslash
 // @filename: voke.config.ts
-import { aws } from "@voke/aws";
+import { aws } from "@vokejs/aws";
 import { defineConfig } from "voke";
 
 export default defineConfig({ name: "users-api", provider: aws() });
@@ -181,7 +238,7 @@ import {
   createAuthorizers,
   lambdaAuthorizer,
   requestAuthorizer,
-} from "@voke/aws";
+} from "@vokejs/aws";
 import { createFunctions, http, route, voke } from "voke";
 import config from "../voke.config";
 
@@ -225,7 +282,7 @@ On AWS, API Gateway runs the authorizer before it invokes your route Function. V
 `functions.route(...)` calls a route handler directly and skips authorizers. Pass `auth` to give the handler the Route Auth Context it expects. This works for routes behind any authorizer, including JWT:
 
 ```ts twoslash
-import { createAuthorizers, jwtAuthorizer } from "@voke/aws";
+import { createAuthorizers, jwtAuthorizer } from "@vokejs/aws";
 import { createFunctions, http, route } from "voke";
 
 const functions = createFunctions({
@@ -253,8 +310,18 @@ const profile = await functions.route("GET", "/profile", {
 
 `source` is `"jwt"` for JWT claims and `"lambda"` for a Lambda authorizer's context. Without `auth`, the handler gets `{ context: {}, source: "lambda" }`.
 
+A test that passes an API Gateway event to `createLambdaHandlers(...)` must include `requestContext.authorizer.jwt.claims` for a JWT route, as API Gateway does. Without it, the route answers `401`: a deployed Function never evaluates a JWT itself.
+
 ## Next steps
 
-- [HTTP routes](/docs/guides/http-routes)
-- [Testing](/docs/guides/testing)
-- [Deploy](/docs/guides/deploy)
+<Cards>
+  <Card icon={<Route />} href="/docs/guides/http-routes" title="HTTP routes">
+    Declare routes, validate requests and shape responses.
+  </Card>
+  <Card icon={<FlaskConical />} href="/docs/guides/testing" title="Testing">
+    Test Functions and the Gateway without AWS.
+  </Card>
+  <Card icon={<CloudUpload />} href="/docs/guides/deploy" title="Deploy">
+    Stages, outputs and removing a stack.
+  </Card>
+</Cards>

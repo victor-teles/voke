@@ -4,8 +4,8 @@ import {
   createAuthorizers,
   lambdaAuthorizer,
   requestAuthorizer,
-} from "@voke/aws";
-import { sqsQueue } from "@voke/aws/cloudformation";
+} from "@vokejs/aws";
+import { sqsQueue } from "@vokejs/aws/cloudformation";
 
 import { voke } from "../src/app";
 import { defineConfig } from "../src/config";

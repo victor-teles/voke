@@ -1,6 +1,6 @@
 {
-  "name": "@voke/aws",
-  "version": "0.0.0",
+  "name": "@vokejs/aws",
+  "version": "0.1.0",
   "description": "The AWS Provider for Voke: CloudFormation synthesis, Lambda handlers, deploy, local AWS and diagnostics.",
   "keywords": [
     "aws",
@@ -17,23 +17,51 @@
   },
   "files": [
     "src",
+    "dist",
     "README.md",
     "LICENSE"
   ],
   "type": "module",
-  "types": "./src/index.ts",
+  "types": "./dist/index.d.ts",
+  "imports": {
+    "#provider": {
+      "voke-runtime": "./src/provider-runtime.ts",
+      "@vokejs/source": "./src/provider.ts",
+      "types": "./dist/provider.d.ts",
+      "default": "./src/provider.ts"
+    }
+  },
   "exports": {
-    ".": "./src/index.ts",
-    "./cloudformation": "./src/cloudformation.ts",
-    "./local": "./src/local.ts",
-    "./testing": "./src/testing.ts"
+    ".": {
+      "@vokejs/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./src/index.ts"
+    },
+    "./cloudformation": {
+      "@vokejs/source": "./src/cloudformation.ts",
+      "types": "./dist/cloudformation.d.ts",
+      "default": "./src/cloudformation.ts"
+    },
+    "./local": {
+      "@vokejs/source": "./src/local.ts",
+      "types": "./dist/local.d.ts",
+      "default": "./src/local.ts"
+    },
+    "./testing": {
+      "@vokejs/source": "./src/testing.ts",
+      "types": "./dist/testing.d.ts",
+      "default": "./src/testing.ts"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
-    "build": "bun build ./src/index.ts --outdir ./dist --target bun",
+    "build": "rm -rf dist && bunx tsgo --project tsconfig.build.json",
     "test": "bun test",
     "typecheck": "bunx tsgo --project tsconfig.json --noEmit",
     "clean": "rm -rf dist coverage",
-    "prepack": "cp ../../LICENSE .",
+    "prepack": "bun run build && cp ../../LICENSE .",
     "postpack": "rm -f LICENSE"
   },
   "dependencies": {
@@ -44,17 +72,18 @@
     "@aws-sdk/client-ssm": "^3.1053.0",
     "@aws/durable-execution-sdk-js": "^3.0.0",
     "@aws/durable-execution-sdk-js-testing": "^1.3.2",
-    "@voke/build": "workspace:*",
-    "@voke/http": "workspace:*",
+    "@vokejs/build": "workspace:*",
+    "@vokejs/http": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "catalog:",
+    "@typescript/native-preview": "catalog:",
     "hono": "^4.0.0",
     "voke": "workspace:*"
   },
-  "devDependencies": {
-    "@types/bun": "latest",
-    "@typescript/native-preview": "catalog:"
-  },
   "peerDependencies": {
-    "hono": "^4.0.0"
+    "hono": "^4.0.0",
+    "voke": "workspace:*"
   },
   "engines": {
     "bun": ">=1.4.4"

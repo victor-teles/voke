@@ -1,11 +1,7 @@
 import { expect, spyOn, test } from "bun:test";
 import { rm } from "node:fs/promises";
 
-import {
-  bindResource,
-  createAwsClientConfig,
-  createLambdaHandlers,
-} from "@voke/aws";
+import { createAwsClientConfig, createLambdaHandlers } from "@vokejs/aws";
 import {
   dynamodbTable,
   s3Bucket,
@@ -14,13 +10,14 @@ import {
   sqsQueue,
   synthesizeCloudFormation,
   ssmParameter,
-} from "@voke/aws/cloudformation";
+} from "@vokejs/aws/cloudformation";
 import type {
   APIGatewayProxyResult,
   LambdaContext,
   LambdaEvent,
 } from "hono/aws-lambda";
 
+import corePackageJson from "../package.json";
 import { voke } from "../src/app";
 import type { Middleware } from "../src/app";
 import { createApiProject, runCli } from "../src/cli";
@@ -305,10 +302,10 @@ test("creates a starter API project", async () => {
 
   expect(packageJson.name).toBe("created-api");
   expect(packageJson.dependencies).toEqual({
-    "@voke/aws": "^0.0.0",
-    "@voke/testing": "^0.0.0",
+    "@vokejs/aws": `^${corePackageJson.version}`,
+    "@vokejs/testing": `^${corePackageJson.version}`,
     hono: "^4.0.0",
-    voke: "^0.0.0",
+    voke: `^${corePackageJson.version}`,
   });
   expect(packageJson.license).toBeUndefined();
   expect(packageJson.scripts.deploy).toBe("voke deploy --stage dev");
@@ -322,7 +319,7 @@ test("creates a starter API project", async () => {
   );
   expect(config).toContain('name: "created-api"');
   expect(config).toContain('entrypoint: "./src/index.ts"');
-  expect(config).toContain('import { aws } from "@voke/aws";');
+  expect(config).toContain('import { aws } from "@vokejs/aws";');
   expect(config).toContain("provider: aws()");
   expect(healthRoute).toContain(
     'route.get("/health", {\n  handler: () => ({ ok: true }),\n});'
@@ -350,8 +347,8 @@ test("generated starter test suite passes with local package links", async () =>
     name: "created-api-smoke",
   });
   const links: Record<string, string> = {
-    "@voke/aws": `${import.meta.dir}/../../aws`,
-    "@voke/testing": `${import.meta.dir}/../../testing`,
+    "@vokejs/aws": `${import.meta.dir}/../../aws`,
+    "@vokejs/testing": `${import.meta.dir}/../../testing`,
     hono: `${import.meta.dir}/../node_modules/hono`,
     voke: `${import.meta.dir}/..`,
   };
@@ -364,7 +361,7 @@ test("generated starter test suite passes with local package links", async () =>
     Object.keys(links).toSorted()
   );
 
-  await Bun.$`mkdir -p ${directory}/node_modules/@voke`;
+  await Bun.$`mkdir -p ${directory}/node_modules/@vokejs`;
 
   for (const [name, target] of Object.entries(links)) {
     await Bun.$`ln -s ${target} ${`${directory}/node_modules/${name}`}`;
@@ -442,7 +439,7 @@ test("normalizes project and CloudFormation settings through defineConfig", () =
   });
 });
 
-test("exposes AWS resource helpers from @voke/aws", () => {
+test("exposes AWS resource helpers from @vokejs/aws", () => {
   const template = synthesizeCloudFormation(
     defineConfig({
       name: "aws-subpath-api",
@@ -507,30 +504,22 @@ export default defineConfig({
 });
 
 // synth and build import the project entrypoint to discover its Functions.
-const writeHttpEntrypoint = async (path: string): Promise<void> => {
+const writeHttpEntrypoint = async (
+  path: string,
+  resources: readonly string[] = []
+): Promise<void> => {
   await Bun.write(
     path,
     `import { createFunctions, http, route } from "${import.meta.dir}/../src/index.ts";
 
 export const functions = createFunctions({
-  http: http({ routes: [route.get("/health", { handler: () => "ok" })] }),
+  http: http({
+    resources: ${JSON.stringify(resources)},
+    routes: [route.get("/health", { handler: () => "ok" })],
+  }),
 });
 `
   );
-};
-
-const withPwd = async <TResult>(
-  directory: string,
-  run: () => Promise<TResult>
-): Promise<TResult> => {
-  const previous = process.env.PWD;
-  process.env.PWD = directory;
-
-  try {
-    return await run();
-  } finally {
-    process.env.PWD = previous;
-  }
 };
 
 test("synth CLI reads voke.config.ts and writes the configured template path", async () => {
@@ -564,8 +553,8 @@ export default defineConfig({
 `
   );
 
-  await writeHttpEntrypoint(`${directory}/src/service.ts`);
-  await withPwd(directory, () => runCli(["synth", "--config", configPath]));
+  await writeHttpEntrypoint(`${directory}/src/service.ts`, ["jobsQueue"]);
+  await runCli(["synth", "--config", configPath], { cwd: directory });
 
   const template = await Bun.file(out).json();
 
@@ -604,6 +593,12 @@ export default defineConfig({ name: "cli-api", provider: aws() });
 `
   );
 
+  // The generated entry is written under the working directory, as in a real project, and
+  // imports @vokejs/aws. That import resolves from a workspace package, not from the repository
+  // root, so the build runs from packages/core whatever directory the test run started in.
+  const previousDirectory = process.cwd();
+  process.chdir(`${import.meta.dir}/..`);
+
   try {
     await runCli(["build", "--config", configPath, entrypoint, buildDirectory]);
 
@@ -615,8 +610,8 @@ export default defineConfig({ name: "cli-api", provider: aws() });
       await Bun.file(`${buildDirectory}/voke-manifest.json`).json()
     ).toMatchObject({ functions: { http: { handler: "index.http" } } });
   } finally {
-    // The generated entry lives under the working directory, as in a real project.
     await rm(".voke", { force: true, recursive: true });
+    process.chdir(previousDirectory);
   }
 });
 
@@ -645,7 +640,19 @@ test("synthesizes a CloudFormation template with API, Lambda, IAM, resources, bi
       },
       stage: "prod",
     }),
-    functions: healthFunctions(),
+    functions: createFunctions({
+      http: http({
+        resources: [
+          "eventsQueue",
+          "orderCreatedTopic",
+          "ordersTable",
+          "publicConfig",
+          "signingSecret",
+          "uploadsBucket",
+        ],
+        routes: [route.get("/health", { handler: () => "ok" })],
+      }),
+    }),
   });
   const resources = template.Resources;
   const outputs = template.Outputs;
@@ -694,6 +701,9 @@ test("synthesizes a CloudFormation template with API, Lambda, IAM, resources, bi
       "dynamodb:DeleteItem",
       "dynamodb:Query",
       "dynamodb:Scan",
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
     ],
     Effect: "Allow",
     Resource: { "Fn::GetAtt": ["OrdersTable", "Arn"] },
@@ -719,31 +729,20 @@ test("matches the CloudFormation snapshot for a minimal API stack", async () => 
   expect(template).toEqual(snapshot);
 });
 
-test("creates typed AWS resource bindings and client config from environment", () => {
-  const table = bindResource("ordersTable", "name");
-  const queue = bindResource("eventsQueue", "url");
+test("creates AWS client config from environment", () => {
   const previous = {
     endpoint: Bun.env.VOKE_AWS_ENDPOINT_URL,
-    queue: Bun.env.VOKE_RESOURCE_EVENTS_QUEUE_URL,
     region: Bun.env.AWS_REGION,
-    table: Bun.env.VOKE_RESOURCE_ORDERS_TABLE_NAME,
   };
 
-  Bun.env.VOKE_RESOURCE_ORDERS_TABLE_NAME = "orders-prod";
-  Bun.env.VOKE_RESOURCE_EVENTS_QUEUE_URL = "https://sqs.local/queue";
   Bun.env.AWS_REGION = "sa-east-1";
   Bun.env.VOKE_AWS_ENDPOINT_URL = "http://localhost:4566";
 
-  expect(table.envName).toBe("VOKE_RESOURCE_ORDERS_TABLE_NAME");
-  expect(table.value()).toBe("orders-prod");
-  expect(queue.value()).toBe("https://sqs.local/queue");
   expect(createAwsClientConfig()).toEqual({
     endpoint: "http://localhost:4566",
     region: "sa-east-1",
   });
 
-  setEnv("VOKE_RESOURCE_ORDERS_TABLE_NAME", previous.table);
-  setEnv("VOKE_RESOURCE_EVENTS_QUEUE_URL", previous.queue);
   setEnv("AWS_REGION", previous.region);
   setEnv("VOKE_AWS_ENDPOINT_URL", previous.endpoint);
 });

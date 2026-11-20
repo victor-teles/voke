@@ -1,6 +1,6 @@
 import type * as voke from "../src/index";
 
-// @ts-expect-error SQS batch schema types belong to @voke/aws, not root voke.
+// @ts-expect-error SQS batch schema types belong to @vokejs/aws, not root voke.
 type RootSqsMessageBatchSchema = voke.SqsMessageBatchSchema;
 // @ts-expect-error SQS event source model types are AWS-owned, not root voke.
 type RootVokeModelSqsEventSource = voke.VokeModelSqsEventSource;

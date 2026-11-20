@@ -1,26 +1,26 @@
 {
-  "name": "@voke/sqs-events",
+  "name": "@vokejs/sqs-events",
   "version": "0.0.0",
   "private": true,
   "license": "MIT",
   "type": "module",
   "scripts": {
     "build": "voke build",
-    "deploy": "voke deploy",
-    "remove": "voke remove",
+    "deploy": "voke deploy --stage dev",
+    "remove": "voke remove --stage dev",
     "test": "bun test",
     "typecheck": "bunx tsgo --project tsconfig.json --noEmit",
     "clean": "rm -rf dist coverage"
   },
   "dependencies": {
-    "@voke/aws": "workspace:*",
-    "@voke/idempotency": "workspace:*",
-    "@voke/schema": "workspace:*",
+    "@vokejs/aws": "workspace:*",
+    "@vokejs/idempotency": "workspace:*",
+    "@vokejs/schema": "workspace:*",
     "hono": "^4.0.0",
     "voke": "workspace:*"
   },
   "devDependencies": {
-    "@types/bun": "latest",
+    "@types/bun": "catalog:",
     "@typescript/native-preview": "^7.0.0-dev.20260516.1"
   }
 }

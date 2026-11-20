@@ -3,17 +3,17 @@ title: Idempotency
 description: Make a retried Function, route or SQS message run once with the idempotency Plugin, an Idempotency Key and a DynamoDB table the Plugin provisions.
 ---
 
-After reading this page you can make a handler that charges a card or sends an email run once, however often AWS or a client retries it, and test it without AWS.
+After this page you can make a handler that charges a card or sends an email run once, however often AWS or a client retries it, and test it without AWS.
 
-AWS delivers events at least once. SQS sends a message again when the Function times out or the batch partly fails, an HTTP client retries a `POST` after a network error, and Lambda retries an asynchronous invocation twice. `@voke/idempotency` records each operation in a DynamoDB table, so a retry returns the first result instead of running the handler again.
+AWS delivers events at least once. SQS sends a message again when the Function times out or the batch partly fails, an HTTP client retries a `POST` after a network error, and Lambda retries an asynchronous invocation twice. `@vokejs/idempotency` records each operation in a DynamoDB table, so a retry returns the first result instead of running the handler again.
 
 ## Add the Plugin
 
 Add `idempotency()` to `plugins` in `voke.config.ts`:
 
-```ts twoslash
-import { aws } from "@voke/aws";
-import { idempotency } from "@voke/idempotency";
+```ts title="voke.config.ts" twoslash
+import { aws } from "@vokejs/aws";
+import { idempotency } from "@vokejs/idempotency";
 import { defineConfig } from "voke";
 
 export default defineConfig({
@@ -23,7 +23,7 @@ export default defineConfig({
 });
 ```
 
-The Plugin contributes a DynamoDB table under the resource key `idempotencyTable`, with time to live on its `expiration` attribute. `voke synth` and `voke deploy` add it to the stack, and `voke local bootstrap` creates it locally. Like every resource, every Function can read and write it, and every Function gets its binding, `VOKE_RESOURCE_IDEMPOTENCY_TABLE_NAME`.
+The Plugin contributes a DynamoDB table under the resource key `idempotencyTable`, with time to live on its `expiration` attribute. `voke synth` and `voke deploy` add it to the stack, and `voke local bootstrap` creates it locally. A Function that uses `idempotent` or `idempotentBatch` links it like any resource, `resources: ["idempotencyTable"]`, which gives that Function's role access to the table and its binding, `VOKE_RESOURCE_IDEMPOTENCY_TABLE_NAME`. No other Function can read the stored results. See [Resource Links](/docs/guides/resources#read-a-resource-from-a-function). Like every table, it is kept with its data when it leaves the stack or the stage is removed; to delete it instead, exclude its key with `aws({ retainData })`. See [Data retention](/docs/guides/resources#data-retention).
 
 | Option                | Default              | What it does                                                                    |
 | --------------------- | -------------------- | ------------------------------------------------------------------------------- |
@@ -31,16 +31,20 @@ The Plugin contributes a DynamoDB table under the resource key `idempotencyTable
 | `expiresAfterSeconds` | `3600`               | How long a completed operation replays its result.                              |
 | `store`               | The DynamoDB table   | Another **Idempotency Store**, such as `memoryStore()` in tests. No table then. |
 
+<Callout type="info" title="The Plugin alone changes nothing">
+
 Nothing becomes idempotent because the Plugin is configured. You choose the handlers.
+
+</Callout>
 
 ## Wrap a Function
 
 Wrap the handler with `idempotent(handler, { key })`. `key` returns the **Idempotency Key**: the value that identifies one logical operation, here the order id:
 
-```ts twoslash
-import { schema } from "@voke/schema";
+```ts title="src/index.ts" twoslash
+import { schema } from "@vokejs/schema";
 import { createFunctions, fn } from "voke";
-import { idempotent } from "@voke/idempotency";
+import { idempotent } from "@vokejs/idempotency";
 
 const chargeCard = async (orderId: string, amount: number) => ({
   chargeId: `ch_${orderId}_${amount}`,
@@ -50,6 +54,7 @@ export const functions = createFunctions({
   charge: fn({
     input: schema.object({ orderId: schema.string(), amount: schema.number() }),
     output: schema.object({ chargeId: schema.string() }),
+    resources: ["idempotencyTable"],
     handler: idempotent(
       async (payload) => await chargeCard(payload.orderId, payload.amount),
       { key: (payload) => payload.orderId }
@@ -60,19 +65,27 @@ export const functions = createFunctions({
 
 The first `functions.invoke("charge", { orderId: "ord_1", amount: 10 })` runs the handler and stores its result. A second call with `orderId: "ord_1"` returns the stored `{ chargeId }` without running it. The types of `payload` and of the result are the same as without `idempotent`.
 
+Without `resources: ["idempotencyTable"]`, every call rejects before the handler runs, in `voke dev` and in tests as on AWS:
+
+```txt
+VokeResourceBindingError: Function "charge" does not link resource "idempotencyTable". Add it to the Function: resources: ["idempotencyTable"]
+```
+
+With `idempotency({ store })` there is no table, so no link is needed.
+
 ## Wrap a route
 
 Read the key from a request header. A client sends the same `idempotency-key` with every retry of one request:
 
-```ts twoslash
-import { error } from "@voke/http";
-import { IdempotencyError, idempotent } from "@voke/idempotency";
-import { schema } from "@voke/schema";
+```ts title="src/index.ts" twoslash
+import { error } from "@vokejs/http";
+import { IdempotencyError, idempotent } from "@vokejs/idempotency";
+import { schema } from "@vokejs/schema";
 import { createFunctions, http, route } from "voke";
 
 interface CreateOrderRequest {
   readonly body: { item: string };
-  readonly headers: Headers;
+  readonly headers: Record<string, string | undefined>;
 }
 
 const createOrder = idempotent(
@@ -80,13 +93,14 @@ const createOrder = idempotent(
     orderId: `ord_${request.body.item}`,
   }),
   {
-    key: (request) => request.headers.get("idempotency-key") ?? undefined,
+    key: (request) => request.headers["idempotency-key"],
     validate: (request) => request.body,
   }
 );
 
 export const functions = createFunctions({
   orders: http({
+    resources: ["idempotencyTable"],
     routes: [
       route.post("/orders", {
         body: schema.object({ item: schema.string() }),
@@ -110,7 +124,7 @@ export const functions = createFunctions({
 });
 ```
 
-- `validate` selects the part of the input that must be equal on a retry. For a route, use the body: the default, the whole request, also includes `auth` and `params`.
+- `validate` selects the part of the input that must be equal on a retry. For a route request it defaults to the body, so a retry that differs only in a per-request header, such as `x-amzn-trace-id`, replays. Return more, such as `(request) => ({ body: request.body, params: request.params })`, when a retry must also match other parts.
 - The handler returns a plain value; the Gateway wraps the stored and the replayed result in `{ data }` the same way. A handler that returns a `Response` cannot be stored (`IDEMPOTENCY_RESULT_NOT_SERIALIZABLE`).
 - An uncaught `IdempotencyError` becomes the Gateway's generic 500. Catch `IDEMPOTENCY_IN_PROGRESS` to answer 409, as above.
 
@@ -119,9 +133,9 @@ export const functions = createFunctions({
 `idempotentBatch(processMessage, { key })` returns a whole SQS handler. Each message runs on its own, one after another:
 
 ```ts twoslash
-import { sqs } from "@voke/aws";
-import { idempotentBatch } from "@voke/idempotency";
-import { schema } from "@voke/schema";
+import { sqs } from "@vokejs/aws";
+import { idempotentBatch } from "@vokejs/idempotency";
+import { schema } from "@vokejs/schema";
 
 const settlePayment = async (paymentId: string): Promise<void> => {
   // Record the payment in the ledger.
@@ -130,6 +144,7 @@ const settlePayment = async (paymentId: string): Promise<void> => {
 // ---cut---
 export const settle = sqs({
   queue: "paymentsQueue",
+  resources: ["idempotencyTable"],
   message: schema.object({
     paymentId: schema.string(),
     amount: schema.number(),
@@ -141,31 +156,42 @@ export const settle = sqs({
 });
 ```
 
-- A message whose function throws, or whose key is in progress in another invocation, is reported in `batchItemFailures`, so SQS delivers it again.
+- A message fails on its own, in `batchItemFailures`, when its function throws, its key is in progress in another invocation, its payload differs from the first delivery, or its key is missing with `onMissingKey: "throw"`. SQS delivers it again, and after 5 receives moves it to the queue's [dead-letter queue](/docs/guides/dead-letter-queues).
+- A failed message is logged with `console.error`, with its message id and the error, except an in-progress duplicate, which is the expected outcome.
+- Any other error fails the whole invocation, so Lambda logs it and SQS delivers the batch again: a table the Function cannot reach, a missing link or Plugin, or a completion write that failed. Messages that already completed count as successes on that delivery.
 - A message that was already processed counts as a success and is not processed again.
+- The value the function returns is not stored, so it can be anything.
 - `validate` defaults to the message body: the message id and receive count change on every delivery.
 
 ## Choose a key
 
-The key is a business decision, so `key` is required. Use the id of the thing the handler changes: an order id, a payment id, a client-generated request id. Do not use the SQS message id or a request id: a producer that sends the same event twice gives it a new message id.
+The key is a business decision, so `key` is required. Use the id of the thing the handler changes: an order id, a payment id, a client-generated request id.
+
+<Callout type="warn" title="Do not use a message id or a request id">
+
+Do not use the SQS message id or a request id: a producer that sends the same event twice gives it a new message id.
+
+</Callout>
 
 - One record exists per Function and key, so two Functions can use the same order id without sharing a record.
 - When one Function runs several operations, give each `idempotent` call a `name` to keep their records apart.
 - When `key` returns `undefined` or `""`, the handler runs without a record. Pass `onMissingKey: "throw"` to reject such inputs with `IDEMPOTENCY_KEY_MISSING`.
 
-The key and the payload are stored only as SHA-256 hashes, and Voke never logs them. The result is stored as JSON.
+The key and the payload are stored only as SHA-256 hashes, and Voke never logs them. The result is stored as JSON. `idempotentBatch` logs the error a message's function throws, which is your own error object.
 
 ## What happens on a retry
 
-| Situation                                                  | Result                                                                              |
-| ---------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| First call                                                 | The handler runs; its result is stored.                                             |
-| Same key, same payload, after the first call completed     | The stored result, without running the handler.                                     |
-| Same key, different payload                                | `IdempotencyError` `IDEMPOTENCY_PAYLOAD_MISMATCH`.                                  |
-| Same key while the first call is still running             | `IdempotencyError` `IDEMPOTENCY_IN_PROGRESS`. The caller's normal retry handles it. |
-| The handler threw                                          | The record is deleted and the error is rethrown, so the next retry runs again.      |
-| The first call timed out (its Function timeout has passed) | The next call takes the record over and runs the handler.                           |
-| The record has expired (`expiresAfterSeconds`)             | The handler runs again.                                                             |
+| Situation                                                  | Result                                                                                                                                                                                                                                                          |
+| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| First call                                                 | The handler runs; its result is stored.                                                                                                                                                                                                                         |
+| Same key, same payload, after the first call completed     | The stored result, without running the handler.                                                                                                                                                                                                                 |
+| Same key, different payload                                | `IdempotencyError` `IDEMPOTENCY_PAYLOAD_MISMATCH`.                                                                                                                                                                                                              |
+| Same key while the first call is still running             | `IdempotencyError` `IDEMPOTENCY_IN_PROGRESS`. The caller's normal retry handles it.                                                                                                                                                                             |
+| The handler threw                                          | The record is deleted and the handler's own error is rethrown, so the next retry runs again. If the delete fails too, it is logged, the handler's error is still the one rethrown, and retries get `IDEMPOTENCY_IN_PROGRESS` until the Function timeout passes. |
+| The result is larger than 350 KB of JSON                   | `IdempotencyError` `IDEMPOTENCY_RESULT_TOO_LARGE` on the first call and on every retry until the record expires. The handler does not run again.                                                                                                                |
+| The record could not be marked completed                   | `IdempotencyError` `IDEMPOTENCY_COMPLETE_FAILED`, with the store's error as `cause`. Retries get `IDEMPOTENCY_IN_PROGRESS` until the Function timeout passes, then the handler runs again.                                                                      |
+| The first call timed out (its Function timeout has passed) | The next call takes the record over and runs the handler.                                                                                                                                                                                                       |
+| The record has expired (`expiresAfterSeconds`)             | The handler runs again.                                                                                                                                                                                                                                         |
 
 The first call returns the stored JSON value, so the first call and every replay return the same thing: a `Date` in the result becomes a string both times.
 
@@ -178,7 +204,7 @@ Each step is one DynamoDB request. The first call writes an `INPROGRESS` record 
 A completed record replays its result for `expiresAfterSeconds`, one hour by default. Set it per Plugin or per handler:
 
 ```ts twoslash
-import { idempotency, idempotent } from "@voke/idempotency";
+import { idempotency, idempotent } from "@vokejs/idempotency";
 
 const plugin = idempotency({ expiresAfterSeconds: 24 * 60 * 60 });
 
@@ -188,6 +214,8 @@ const handler = idempotent((input: { id: string }) => input, {
 });
 ```
 
+`expiresAfterSeconds` may be shorter than the Function timeout. A running call still blocks duplicates for the whole timeout: its record expires no earlier than that.
+
 DynamoDB deletes expired items in the background, usually within a few days. An expired record no longer blocks a new call even while it is still in the table.
 
 ## Test with memoryStore()
@@ -196,8 +224,8 @@ DynamoDB deletes expired items in the background, usually within a few days. An 
 
 ```ts twoslash
 import { expect, test } from "bun:test";
-import { idempotency, idempotent, memoryStore } from "@voke/idempotency";
-import { schema } from "@voke/schema";
+import { idempotency, idempotent, memoryStore } from "@vokejs/idempotency";
+import { schema } from "@vokejs/schema";
 import { createFunctions, fn, voke } from "voke";
 
 test("a retried charge runs once", async () => {
@@ -239,8 +267,8 @@ To test the handler alone, without a Gateway, pass the store to `idempotent` its
 Do not wrap a [Durable Function](/docs/guides/durable-functions) with `idempotent`. Lambda replays a Durable Function's handler after each wait and retry, and its steps are already checkpointed, so it needs no record. To start one execution per operation, name the execution:
 
 ```ts twoslash
-import { durable } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { durable } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 import { createFunctions, voke } from "voke";
 
 const functions = createFunctions({
@@ -261,19 +289,39 @@ await functions.invoke(
 );
 ```
 
-A second start with the same `executionName` returns the existing execution. `@voke/idempotency` writes no record for it.
+A second start with the same `executionName` returns the existing execution. `@vokejs/idempotency` writes no record for it.
 
 ## Limits
 
 - Results must be JSON. A `Response`, a function or a value with a `BigInt` cannot be stored.
-- A DynamoDB item holds at most 400 KB, so a stored result must be smaller.
-- Every Function can read and write the table, as with every resource today.
+- A stored result holds at most 350 KB of JSON (UTF-8 bytes), which leaves room under DynamoDB's 400 KB item limit. A larger result fails with `IDEMPOTENCY_RESULT_TOO_LARGE` after the handler ran once; return a smaller value, such as an id.
+- "Run once" has one exception: if the completion write fails (`IDEMPOTENCY_COMPLETE_FAILED`), a retry after the Function timeout runs the handler again.
+- `voke dev` and tests do not enforce the Function timeout, so a handler paused longer than its timeout can be run again by a duplicate.
+- Only the Functions that link the table can read and write it.
 - The messages of one SQS batch run one after another.
 - `idempotentBatch` works with SQS. Other Event Sources can wrap their handler with `idempotent`.
 
 ## Next steps
 
-- [Plugins](/docs/guides/plugins): how a Plugin wraps every Function.
-- [SQS events](/docs/guides/sqs-events): batches and partial batch failures.
-- [Errors](/docs/reference/errors#idempotency-errors): the `IdempotencyError` codes.
-- [Durable Functions](/docs/guides/durable-functions): `executionName`.
+<Cards>
+  <Card icon={<Plug />} href="/docs/guides/plugins" title="Plugins">
+    How a Plugin wraps every Function.
+  </Card>
+  <Card icon={<Mail />} href="/docs/guides/sqs-events" title="SQS events">
+    Batches and partial batch failures.
+  </Card>
+  <Card
+    icon={<TriangleAlert />}
+    href="/docs/reference/errors#idempotency-errors"
+    title="Errors"
+  >
+    The `IdempotencyError` codes.
+  </Card>
+  <Card
+    icon={<Workflow />}
+    href="/docs/guides/durable-functions"
+    title="Durable Functions"
+  >
+    Start one execution per operation with `executionName`.
+  </Card>
+</Cards>

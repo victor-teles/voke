@@ -34,3 +34,25 @@ jobs:
 
       - name: Test
         run: bun run test
+
+      - name: Test in one process
+        run: bun test
+
+  pack-smoke:
+    name: Pack, install and build a fresh project
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Release tooling tests
+        run: bun test ./scripts
+
+      # Packs the nine packages, installs them from the tarballs into a project made by the packed
+      # CLI, then type-checks (Project Starter and stricter tsconfig), tests and builds it.
+      - name: Pack and install smoke test
+        run: bun run smoke:pack

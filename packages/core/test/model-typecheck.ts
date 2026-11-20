@@ -1,6 +1,6 @@
-import { sqs } from "@voke/aws";
-import type { SqsMessageBatch } from "@voke/aws";
-import { sqsQueue } from "@voke/aws/cloudformation";
+import { sqs } from "@vokejs/aws";
+import type { SqsMessageBatch } from "@vokejs/aws";
+import { sqsQueue } from "@vokejs/aws/cloudformation";
 
 import { fn, createFunctions } from "../src/invoke";
 import type { StandardSchemaV1 } from "../src/invoke";

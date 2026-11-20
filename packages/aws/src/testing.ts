@@ -244,7 +244,7 @@ export const runDurable = async <TResult = unknown>(
 
   if (run === undefined) {
     throw new VokeConfigError(
-      `runDurable: Function "${key}" is not a durable Function; declare it with durable() from "@voke/aws".`
+      `runDurable: Function "${key}" is not a durable Function; declare it with durable() from "@vokejs/aws".`
     );
   }
 

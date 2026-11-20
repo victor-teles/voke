@@ -153,7 +153,7 @@ const durableRecordIssues = (durable: unknown, path: string): VokeIssue[] => {
   ) {
     return [
       {
-        message: `expected { executionTimeoutSeconds, retentionDays? } (declare the Function with durable() from "@voke/aws"); received ${JSON.stringify(durable)}`,
+        message: `expected { executionTimeoutSeconds, retentionDays? } (declare the Function with durable() from "@vokejs/aws"); received ${JSON.stringify(durable)}`,
         path,
       },
     ];
@@ -194,7 +194,7 @@ const functionRecordIssues = (
   if (record.type !== lambdaFunctionRecordType) {
     return [
       {
-        message: `expected "${lambdaFunctionRecordType}" (use awsLambda() from "@voke/aws"); received ${JSON.stringify(record.type)}`,
+        message: `expected "${lambdaFunctionRecordType}" (use awsLambda() from "@vokejs/aws"); received ${JSON.stringify(record.type)}`,
         path: `${path}.type`,
       },
     ];

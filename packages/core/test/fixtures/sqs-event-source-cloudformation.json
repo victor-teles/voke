@@ -30,7 +30,13 @@
         }
       },
       "Properties": {
-        "VisibilityTimeout": 90
+        "VisibilityTimeout": 90,
+        "RedrivePolicy": {
+          "deadLetterTargetArn": {
+            "Fn::GetAtt": ["OrdersQueueDeadLetterQueue", "Arn"]
+          },
+          "maxReceiveCount": 5
+        }
       },
       "Type": "AWS::SQS::Queue"
     },
@@ -42,7 +48,13 @@
         }
       },
       "Properties": {
-        "VisibilityTimeout": 120
+        "VisibilityTimeout": 120,
+        "RedrivePolicy": {
+          "deadLetterTargetArn": {
+            "Fn::GetAtt": ["PriorityQueueDeadLetterQueue", "Arn"]
+          },
+          "maxReceiveCount": 5
+        }
       },
       "Type": "AWS::SQS::Queue"
     },
@@ -69,7 +81,6 @@
               "Statement": [
                 {
                   "Action": [
-                    "sqs:SendMessage",
                     "sqs:ReceiveMessage",
                     "sqs:DeleteMessage",
                     "sqs:GetQueueAttributes"
@@ -81,7 +92,6 @@
                 },
                 {
                   "Action": [
-                    "sqs:SendMessage",
                     "sqs:ReceiveMessage",
                     "sqs:DeleteMessage",
                     "sqs:GetQueueAttributes"
@@ -109,22 +119,15 @@
         "VokeRoutes": []
       },
       "Properties": {
+        "Architectures": ["arm64"],
         "Code": {
           "ZipFile": "exports.handler = async () => ({ statusCode: 501, body: \"Build and upload this Voke function before deploying.\" });"
         },
         "Environment": {
-          "Variables": {
-            "VOKE_RESOURCE_ORDERS_QUEUE_URL": {
-              "Ref": "OrdersQueue"
-            },
-            "VOKE_RESOURCE_PRIORITY_QUEUE_URL": {
-              "Ref": "PriorityQueue"
-            }
-          }
+          "Variables": {}
         },
         "FunctionName": "orders-worker-prod-processOrders",
         "Handler": "process-orders.handler",
-        "Architectures": ["arm64"],
         "LoggingConfig": {
           "LogGroup": {
             "Ref": "ProcessOrdersFunctionLogGroup"
@@ -146,6 +149,12 @@
       },
       "Type": "AWS::Logs::LogGroup"
     },
+    "OrdersQueueDeadLetterQueue": {
+      "Properties": {
+        "MessageRetentionPeriod": 1209600
+      },
+      "Type": "AWS::SQS::Queue"
+    },
     "ProcessOrdersFunctionOrdersQueueEventSourceMapping": {
       "Properties": {
         "BatchSize": 10,
@@ -160,6 +169,12 @@
         "MaximumBatchingWindowInSeconds": 0
       },
       "Type": "AWS::Lambda::EventSourceMapping"
+    },
+    "PriorityQueueDeadLetterQueue": {
+      "Properties": {
+        "MessageRetentionPeriod": 1209600
+      },
+      "Type": "AWS::SQS::Queue"
     },
     "ProcessOrdersFunctionPriorityQueueEventSourceMapping": {
       "Properties": {

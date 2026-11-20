@@ -145,7 +145,7 @@ const providerChecks = async (
     return [
       warn(
         "Provider",
-        'not configured; add provider: aws() from "@voke/aws" to voke.config.ts'
+        'not configured; add provider: aws() from "@vokejs/aws" to voke.config.ts'
       ),
     ];
   }

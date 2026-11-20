@@ -20,6 +20,8 @@ import type {
 
 import { resourceProvider, toLogicalId } from "./cloudformation-template";
 import type { CloudFormationValue } from "./cloudformation-template";
+import { functionDeadLetterQueueStatements } from "./dead-letter-queue";
+import type { AwsEventSourceRuntimeAdapter } from "./event-source-runtime";
 import type {
   AwsEventSourceAdapter,
   AwsEventSourceContext,
@@ -27,7 +29,7 @@ import type {
 } from "./event-sources";
 import {
   collectStreamRecords,
-  streamEventSourceMappingProperties,
+  streamEventSourceResources,
   streamEventSourceProperties,
   streamOptionIssues,
 } from "./stream-batch";
@@ -147,12 +149,13 @@ export interface KinesisFunctionDefinitionInput<
   TRecordSchema extends AnyStandardSchema,
   TInvalidRecord extends StreamInvalidRecordMode = "fail",
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+  TResources extends readonly string[] = readonly string[],
 > extends StreamEventSourceOptions {
   readonly handler: (
     batch: StandardSchemaOutput<
       KinesisRecordBatchSchema<TRecordSchema, TInvalidRecord>
     >,
-    context: InvokeContext<TVariables>
+    context: InvokeContext<TVariables, TResources[number]>
   ) => StreamBatchResult | Promise<StreamBatchResult>;
   /** Default `"fail"`: a record that cannot be decoded or validated is failed and not delivered. */
   readonly invalidRecord?: TInvalidRecord;
@@ -162,6 +165,8 @@ export interface KinesisFunctionDefinitionInput<
   /** The key of a `kinesisStream()` resource. */
   readonly stream: string;
   readonly synthesis?: FunctionSynthesisConfig;
+  /** Resource Links: the resource keys this Function reads through `context.resource`. */
+  readonly resources?: TResources;
   readonly variables?: TVariables;
 }
 
@@ -289,11 +294,13 @@ export const kinesis = <
   const TRecordSchema extends AnyStandardSchema,
   const TInvalidRecord extends StreamInvalidRecordMode = "fail",
   const TVariables extends RuntimeVariableCatalog = Record<never, never>,
+  const TResources extends readonly string[] = readonly [],
 >(
   definition: KinesisFunctionDefinitionInput<
     TRecordSchema,
     TInvalidRecord,
-    TVariables
+    TVariables,
+    TResources
   >
 ): EventFunctionDefinition<
   string,
@@ -323,6 +330,7 @@ export const kinesis = <
     key: "",
     kind: "event",
     name: definition.name,
+    resources: definition.resources,
     routes: [],
     synthesis: definition.synthesis,
     variables: definition.variables,
@@ -384,6 +392,14 @@ const streamArn = (context: AwsEventSourceContext): CloudFormationValue => ({
 });
 
 /** How a Kinesis Event Source runs on Lambda and synthesizes to an event source mapping. */
+export const kinesisEventRuntimeAdapter: AwsEventSourceRuntimeAdapter = {
+  source: "kinesis",
+  toInvocation: (event) =>
+    kinesisInvocationFromAwsEvent(event as KinesisAwsEvent),
+  // The handler already returns Lambda's stream batch response shape.
+  toResponse: (result) => result,
+};
+
 export const kinesisEventSourceAdapter: AwsEventSourceAdapter = {
   // The actions Lambda's poller needs on a shared-throughput (standard iterator) mapping, scoped
   // to this stream. `ListStreams` is console-only and `SubscribeToShard` is for enhanced fan-out
@@ -400,6 +416,7 @@ export const kinesisEventSourceAdapter: AwsEventSourceAdapter = {
       Effect: "Allow",
       Resource: streamArn(context),
     },
+    ...functionDeadLetterQueueStatements(context),
   ],
   source: "kinesis",
   synthesize: (context) => {
@@ -412,22 +429,13 @@ export const kinesisEventSourceAdapter: AwsEventSourceAdapter = {
     const { eventSource, lambdaLogicalId } = context;
 
     return {
-      resources: {
-        [`${lambdaLogicalId}${toLogicalId(eventSource.resource ?? "")}EventSourceMapping`]:
-          {
-            Properties: streamEventSourceMappingProperties({
-              eventSourceArn: streamArn(context),
-              lambdaLogicalId,
-              properties: eventSource.properties,
-            }),
-            Type: "AWS::Lambda::EventSourceMapping",
-          },
-      },
+      resources: streamEventSourceResources({
+        eventSource,
+        eventSourceArn: streamArn(context),
+        lambdaLogicalId,
+        mappingLogicalId: `${lambdaLogicalId}${toLogicalId(eventSource.resource ?? "")}EventSourceMapping`,
+      }),
     };
   },
-  toInvocation: (event) =>
-    kinesisInvocationFromAwsEvent(event as KinesisAwsEvent),
-  // The handler already returns Lambda's stream batch response shape.
-  toResponse: (result) => result,
   validate: kinesisIssues,
 };

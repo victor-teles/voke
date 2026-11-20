@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { floci, LocalProviderError } from "@voke/aws/local";
+import { floci, LocalProviderError } from "@vokejs/aws/local";
 
 import { CliUsageError, runCli, runCommand } from "../src/cli";
 import { tempPath } from "./support/temp";

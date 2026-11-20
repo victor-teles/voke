@@ -70,6 +70,7 @@ export {
   createVariableProvider,
   createVariableSource,
   type RuntimeVariableCatalog,
+  type RuntimeVariableDescriptor,
   type RuntimeVariableOptions,
   type RuntimeVariableProvider,
   type RuntimeVariableSource,
@@ -130,11 +131,16 @@ export {
   type VokeProvider,
   type VokeProviderCapability,
 } from "./provider";
-// A package building block: @voke/remote narrows contract JSON Schema the same way.
-export { toContractJsonSchema } from "./remote";
+// The Function Contract Artifact format: core serves it, @vokejs/remote reads it.
+export type {
+  FunctionContractArtifact,
+  FunctionContractMetadata,
+  JsonSchema as ContractJsonSchema,
+} from "./remote";
 export { route } from "./route-builder";
 export {
   projectFunctionEntries,
+  type CliPositionalSpec,
   type FunctionExecution,
   type FunctionExecutionKind,
   type FunctionWrap,

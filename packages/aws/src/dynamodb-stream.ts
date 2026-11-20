@@ -18,11 +18,13 @@ import type {
 
 import { resourceProvider, toLogicalId } from "./cloudformation-template";
 import type { CloudFormationValue } from "./cloudformation-template";
+import { functionDeadLetterQueueStatements } from "./dead-letter-queue";
 import {
   fromAttributeValueMap,
   toAttributeValueMap,
 } from "./dynamodb-attribute-values";
 import type { AttributeValueMap } from "./dynamodb-attribute-values";
+import type { AwsEventSourceRuntimeAdapter } from "./event-source-runtime";
 import type {
   AwsEventSourceAdapter,
   AwsEventSourceContext,
@@ -30,7 +32,7 @@ import type {
 } from "./event-sources";
 import {
   collectStreamRecords,
-  streamEventSourceMappingProperties,
+  streamEventSourceResources,
   streamEventSourceProperties,
   streamOptionIssues,
 } from "./stream-batch";
@@ -175,12 +177,13 @@ export interface DynamodbStreamFunctionDefinitionInput<
   TItemSchema extends AnyStandardSchema | undefined = undefined,
   TInvalidRecord extends StreamInvalidRecordMode = "fail",
   TVariables extends RuntimeVariableCatalog = RuntimeVariableCatalog,
+  TResources extends readonly string[] = readonly string[],
 > extends StreamEventSourceOptions {
   readonly handler: (
     batch: StandardSchemaOutput<
       DynamodbStreamRecordBatchSchema<TItemSchema, TInvalidRecord>
     >,
-    context: InvokeContext<TVariables>
+    context: InvokeContext<TVariables, TResources[number]>
   ) => StreamBatchResult | Promise<StreamBatchResult>;
   /** Default `"fail"`: a record that cannot be converted or validated is failed and not delivered. */
   readonly invalidRecord?: TInvalidRecord;
@@ -190,6 +193,8 @@ export interface DynamodbStreamFunctionDefinitionInput<
   readonly synthesis?: FunctionSynthesisConfig;
   /** The key of a `dynamodbTable({ stream })` resource. */
   readonly table: string;
+  /** Resource Links: the resource keys this Function reads through `context.resource`. */
+  readonly resources?: TResources;
   readonly variables?: TVariables;
 }
 
@@ -343,11 +348,13 @@ export const dynamodbStream = <
   const TItemSchema extends AnyStandardSchema | undefined = undefined,
   const TInvalidRecord extends StreamInvalidRecordMode = "fail",
   const TVariables extends RuntimeVariableCatalog = Record<never, never>,
+  const TResources extends readonly string[] = readonly [],
 >(
   definition: DynamodbStreamFunctionDefinitionInput<
     TItemSchema,
     TInvalidRecord,
-    TVariables
+    TVariables,
+    TResources
   >
 ): EventFunctionDefinition<
   string,
@@ -380,6 +387,7 @@ export const dynamodbStream = <
     key: "",
     kind: "event",
     name: definition.name,
+    resources: definition.resources,
     routes: [],
     synthesis: definition.synthesis,
     variables: definition.variables,
@@ -474,6 +482,14 @@ const tableStreamArn = (
 });
 
 /** How a DynamoDB Stream Event Source runs on Lambda and synthesizes to an event source mapping. */
+export const dynamodbStreamEventRuntimeAdapter: AwsEventSourceRuntimeAdapter = {
+  source: "dynamodbStream",
+  toInvocation: (event) =>
+    dynamodbStreamInvocationFromAwsEvent(event as DynamodbStreamAwsEvent),
+  // The handler already returns Lambda's stream batch response shape.
+  toResponse: (result) => result,
+};
+
 export const dynamodbStreamEventSourceAdapter: AwsEventSourceAdapter = {
   // The AWSLambdaDynamoDBExecutionRole actions, the reads scoped to this table's stream.
   // ListStreams only lists stream ARNs and is not tied to one stream, so it alone is on "*".
@@ -492,6 +508,7 @@ export const dynamodbStreamEventSourceAdapter: AwsEventSourceAdapter = {
       Effect: "Allow",
       Resource: "*",
     },
+    ...functionDeadLetterQueueStatements(context),
   ],
   source: "dynamodbStream",
   synthesize: (context) => {
@@ -504,22 +521,13 @@ export const dynamodbStreamEventSourceAdapter: AwsEventSourceAdapter = {
     const { eventSource, lambdaLogicalId } = context;
 
     return {
-      resources: {
-        [`${lambdaLogicalId}${toLogicalId(eventSource.resource ?? "")}EventSourceMapping`]:
-          {
-            Properties: streamEventSourceMappingProperties({
-              eventSourceArn: tableStreamArn(context),
-              lambdaLogicalId,
-              properties: eventSource.properties,
-            }),
-            Type: "AWS::Lambda::EventSourceMapping",
-          },
-      },
+      resources: streamEventSourceResources({
+        eventSource,
+        eventSourceArn: tableStreamArn(context),
+        lambdaLogicalId,
+        mappingLogicalId: `${lambdaLogicalId}${toLogicalId(eventSource.resource ?? "")}EventSourceMapping`,
+      }),
     };
   },
-  toInvocation: (event) =>
-    dynamodbStreamInvocationFromAwsEvent(event as DynamodbStreamAwsEvent),
-  // The handler already returns Lambda's stream batch response shape.
-  toResponse: (result) => result,
   validate: dynamodbStreamIssues,
 };

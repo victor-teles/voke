@@ -17,7 +17,7 @@ const schema = <TValue>(): StandardSchemaV1<TValue, TValue> => ({
 });
 
 // A generic helper that builds an SQS handler from a per-message function, like
-// idempotentBatch() in @voke/idempotency.
+// idempotentBatch() in @vokejs/idempotency.
 const perMessage =
   <TBody>(
     processMessage: (message: SqsValidMessage<TBody>) => void
@@ -55,4 +55,61 @@ sqs({
   invalidMessageBody: "include",
   message: schema<{ orderId: string }>(),
   queue: "ordersQueue",
+});
+
+// Resource Links: the handler reads only the resource keys the Function lists in `resources`,
+// and the message body is still inferred through a generic helper.
+sqs({
+  handler: (batch, context) => {
+    const _table: string = context.resource("ordersTable");
+    // @ts-expect-error the Function does not link ordersQueue.
+    void context.resource("ordersQueue");
+
+    return batch.ok();
+  },
+  message: schema<{ orderId: string }>(),
+  queue: "ordersQueue",
+  resources: ["ordersTable"],
+});
+
+sqs({
+  handler: perMessage((message) => {
+    const _orderId: string = message.body.orderId;
+    // @ts-expect-error the body has only the schema's fields.
+    void message.body.missing;
+  }),
+  message: schema<{ orderId: string }>(),
+  queue: "ordersQueue",
+  resources: ["ordersTable"],
+});
+
+sqs({
+  handler: (batch, context) => {
+    // @ts-expect-error a Function without resources links nothing.
+    void context.resource("ordersQueue");
+
+    return batch.ok();
+  },
+  message: schema<{ orderId: string }>(),
+  queue: "ordersQueue",
+});
+
+sqs({
+  handler: (batch, context) => {
+    const _table: string = context.resource("ordersTable");
+    // @ts-expect-error the Function does not link ordersQueue.
+    void context.resource("ordersQueue");
+
+    for (const message of batch.messages) {
+      const _body: string | undefined = message.valid
+        ? message.body.orderId
+        : message.rawBody;
+    }
+
+    return batch.ok();
+  },
+  invalidMessageBody: "include",
+  message: schema<{ orderId: string }>(),
+  queue: "ordersQueue",
+  resources: ["ordersTable"],
 });

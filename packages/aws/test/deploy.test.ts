@@ -38,6 +38,13 @@ interface Scenario {
   credentialFailure?: boolean;
   /** Stacks whose change set plans these changes instead of adding the HTTP Function. */
   changes?: Map<string, ChangeSetChange[]>;
+  /** Resources CloudFormation skips (DeletionPolicy Retain) when it deletes these stacks. */
+  skippedOnDelete?: Map<
+    string,
+    { logicalId: string; physicalId: string; resourceType: string }[]
+  >;
+  /** A deleted stack's events can be read by its id only, as in CloudFormation. */
+  deletedEventsById?: boolean;
 }
 
 const outputsFor = (stack: string): Record<string, string> =>
@@ -54,6 +61,9 @@ const createFakeClients = (scenario: Scenario = {}) => {
   const changeSets = new Map<string, FakeChangeSet>();
   const objects = new Map<string, Uint8Array>();
   const calls: string[] = [];
+  const executeOptions: { retainExceptOnCreate: boolean }[] = [];
+  /** Stack id → stack name, kept after the stack is deleted. */
+  const stackIds = new Map<string, string>();
   let eventCounter = 0;
 
   const pushEvent = (
@@ -61,13 +71,15 @@ const createFakeClients = (scenario: Scenario = {}) => {
     logicalId: string,
     resourceType: string,
     status: string,
-    reason?: string
+    reason?: string,
+    physicalId?: string
   ) => {
     eventCounter += 1;
     const list = events.get(stack) ?? [];
     list.unshift({
       id: `e${eventCounter}`,
       logicalId,
+      ...(physicalId === undefined ? {} : { physicalId }),
       reason,
       resourceType,
       status,
@@ -110,7 +122,24 @@ const createFakeClients = (scenario: Scenario = {}) => {
       const failure = scenario.deleteFailsOn?.get(name);
 
       if (failure === undefined) {
+        for (const skipped of scenario.skippedOnDelete?.get(name) ?? []) {
+          pushEvent(
+            name,
+            skipped.logicalId,
+            skipped.resourceType,
+            "DELETE_SKIPPED",
+            undefined,
+            skipped.physicalId
+          );
+        }
+
         pushEvent(name, name, "AWS::CloudFormation::Stack", "DELETE_COMPLETE");
+        const id = stacks.get(name)?.id;
+
+        if (id !== undefined) {
+          stackIds.set(id, name);
+        }
+
         stacks.delete(name);
       } else {
         pushEvent(
@@ -158,9 +187,23 @@ const createFakeClients = (scenario: Scenario = {}) => {
 
       return await Promise.resolve(stacks.get(name));
     },
-    describeStackEvents: async (name) =>
-      await Promise.resolve([...(events.get(name) ?? [])]),
-    executeChangeSet: async (id) => {
+    describeStackEvents: async (nameOrId) => {
+      const nameForId =
+        stackIds.get(nameOrId) ??
+        [...stacks.entries()].find(([, stack]) => stack.id === nameOrId)?.[0];
+
+      if (nameForId !== undefined) {
+        return await Promise.resolve([...(events.get(nameForId) ?? [])]);
+      }
+
+      if (scenario.deletedEventsById === true && !stacks.has(nameOrId)) {
+        return await Promise.resolve([]);
+      }
+
+      return await Promise.resolve([...(events.get(nameOrId) ?? [])]);
+    },
+    executeChangeSet: async (id, options) => {
+      executeOptions.push(options);
       const changeSet = changeSets.get(id);
 
       if (changeSet === undefined) {
@@ -219,7 +262,15 @@ const createFakeClients = (scenario: Scenario = {}) => {
     },
   };
 
-  return { calls, changeSets, clients, events, objects, stacks };
+  return {
+    calls,
+    changeSets,
+    clients,
+    events,
+    executeOptions,
+    objects,
+    stacks,
+  };
 };
 
 const project = () => {
@@ -245,12 +296,17 @@ const files: Record<string, string> = {
 
 const deploy = async (
   fake: ReturnType<typeof createFakeClients>,
-  overrides: { dryRun?: boolean; artifactFiles?: string[] } = {}
+  overrides: {
+    acceptDataLoss?: boolean;
+    artifactFiles?: string[];
+    dryRun?: boolean;
+  } = {}
 ) => {
   const lines: string[] = [];
   const { config, model } = project();
   const result = await deployAwsStack(
     {
+      acceptDataLoss: overrides.acceptDataLoss ?? false,
       artifactDirectory: "dist",
       artifactFiles: overrides.artifactFiles ?? [
         "index.js",
@@ -544,4 +600,318 @@ test("a dry run warns about a named Lambda replacement instead of failing", asyn
     )
   ).toBe(true);
   expect(fake.calls).not.toContain("executeChangeSet:shop-dev");
+});
+
+test("every change set runs with RetainExceptOnCreate, so a failed create leaves no retained resource", async () => {
+  const fake = createFakeClients();
+
+  await deploy(fake);
+
+  expect(
+    fake.calls.filter((call) => call.startsWith("executeChangeSet"))
+  ).toEqual([
+    `executeChangeSet:${bootstrapStackName}`,
+    "executeChangeSet:shop-dev",
+  ]);
+  expect(fake.executeOptions).toEqual([
+    { retainExceptOnCreate: true },
+    { retainExceptOnCreate: true },
+  ]);
+});
+
+const usersTableChange = (
+  change: Partial<ChangeSetChange>
+): ChangeSetChange => ({
+  action: "Remove",
+  logicalId: "UsersTable",
+  physicalId: "shop-dev-UsersTable-1ABC",
+  resourceType: "AWS::DynamoDB::Table",
+  ...change,
+});
+
+const deployedStackWith = (changes: ChangeSetChange[]) => {
+  const fake = createFakeClients({ changes: new Map([["shop-dev", changes]]) });
+  fake.stacks.set(bootstrapStackName, {
+    outputs: { ArtifactBucketName: "voke-artifacts" },
+    status: "CREATE_COMPLETE",
+  });
+  fake.stacks.set("shop-dev", { outputs: {}, status: "UPDATE_COMPLETE" });
+
+  return fake;
+};
+
+const refusal = async (changes: ChangeSetChange[]) => {
+  const fake = deployedStackWith(changes);
+  const failure = await deploy(fake).catch((error: unknown) => error);
+
+  expect(failure).toBeInstanceOf(VokeDeployError);
+  expect(fake.calls).toContain("deleteChangeSet:shop-dev");
+  expect(fake.calls).not.toContain("executeChangeSet:shop-dev");
+
+  return (failure as Error).message;
+};
+
+test("a deploy that removes a retained table is refused, names it, and deletes the change set", async () => {
+  const message = await refusal([usersTableChange({ policyAction: "Retain" })]);
+
+  expect(message).toStartWith(
+    "Deploying shop-dev would remove or replace 1 resource(s) that hold data:"
+  );
+  expect(message).toContain(
+    "UsersTable (AWS::DynamoDB::Table, shop-dev-UsersTable-1ABC) would leave the stack. It is kept with its data, but no Function is bound to it afterwards."
+  );
+  expect(message).toContain(
+    "Nothing was changed. A resource key, and a table's partitionKey and sortKey, identify the resource: undo the rename or key change to keep using it."
+  );
+  expect(message).toContain(
+    "To go ahead anyway, run voke deploy again with --accept-data-loss."
+  );
+});
+
+test("a removal that CloudFormation would delete, or reports no policy for, says DELETED", async () => {
+  for (const policyAction of ["Delete", undefined]) {
+    const message = await refusal([
+      usersTableChange(policyAction === undefined ? {} : { policyAction }),
+    ]);
+
+    expect(message).toContain(
+      "UsersTable (AWS::DynamoDB::Table, shop-dev-UsersTable-1ABC) would be DELETED with its data."
+    );
+  }
+});
+
+test("a replacement of a data-bearing resource is refused, kept or deleted", async () => {
+  for (const replacement of ["True", "Conditional"]) {
+    const kept = await refusal([
+      usersTableChange({
+        action: "Modify",
+        policyAction: "ReplaceAndRetain",
+        replacement,
+      }),
+    ]);
+    const deleted = await refusal([
+      usersTableChange({
+        action: "Modify",
+        policyAction: "ReplaceAndDelete",
+        replacement,
+      }),
+    ]);
+
+    expect(kept).toContain(
+      "would be replaced by a new, empty resource. The old one is kept with its data, outside the stack."
+    );
+    expect(deleted).toContain(
+      "would be replaced by a new, empty resource. The old one is DELETED with its data."
+    );
+  }
+});
+
+test("an in-place table update and a removed queue deploy without refusal", async () => {
+  const fake = deployedStackWith([
+    usersTableChange({ action: "Modify", replacement: "False" }),
+    {
+      action: "Remove",
+      logicalId: "EventsQueue",
+      physicalId: "https://sqs.us-east-1.amazonaws.com/1/shop-dev-EventsQueue",
+      resourceType: "AWS::SQS::Queue",
+    },
+  ]);
+
+  const { lines, result } = await deploy(fake);
+
+  expect(result.status).toBe("deployed");
+  expect(fake.calls).toContain("executeChangeSet:shop-dev");
+  expect(lines.some((line) => line.startsWith("Kept "))).toBe(false);
+});
+
+test("two data changes are refused in one error that lists both", async () => {
+  const message = await refusal([
+    usersTableChange({ policyAction: "Retain" }),
+    {
+      action: "Remove",
+      logicalId: "UploadsBucket",
+      physicalId: "shop-dev-uploadsbucket-9xyz",
+      policyAction: "Delete",
+      resourceType: "AWS::S3::Bucket",
+    },
+  ]);
+
+  expect(message).toStartWith(
+    "Deploying shop-dev would remove or replace 2 resource(s) that hold data:"
+  );
+  expect(message).toContain("UsersTable (AWS::DynamoDB::Table");
+  expect(message).toContain(
+    "UploadsBucket (AWS::S3::Bucket, shop-dev-uploadsbucket-9xyz) would be DELETED with its data."
+  );
+});
+
+test("--accept-data-loss applies the change set and lists the kept resources with their delete commands", async () => {
+  const fake = deployedStackWith([
+    usersTableChange({ policyAction: "Retain" }),
+    {
+      action: "Modify",
+      logicalId: "AppSecret",
+      physicalId:
+        "arn:aws:secretsmanager:us-east-1:123456789012:secret:AppSecret-abc",
+      policyAction: "ReplaceAndRetain",
+      replacement: "True",
+      resourceType: "AWS::SecretsManager::Secret",
+    },
+    {
+      action: "Remove",
+      logicalId: "UploadsBucket",
+      physicalId: "shop-dev-uploadsbucket-9xyz",
+      policyAction: "Delete",
+      resourceType: "AWS::S3::Bucket",
+    },
+  ]);
+
+  const { lines, result } = await deploy(fake, { acceptDataLoss: true });
+
+  expect(result.status).toBe("deployed");
+  expect(fake.calls).toContain("executeChangeSet:shop-dev");
+
+  const kept = lines.slice(lines.findIndex((line) => line.startsWith("Kept ")));
+
+  expect(kept.slice(0, 5)).toEqual([
+    "Kept 2 resource(s) that hold data. No stack manages them and AWS still bills them:",
+    "  AWS::DynamoDB::Table  shop-dev-UsersTable-1ABC",
+    "    delete with: aws dynamodb delete-table --table-name shop-dev-UsersTable-1ABC --region us-east-1",
+    "  AWS::SecretsManager::Secret  arn:aws:secretsmanager:us-east-1:123456789012:secret:AppSecret-abc",
+    "    delete with: aws secretsmanager delete-secret --secret-id arn:aws:secretsmanager:us-east-1:123456789012:secret:AppSecret-abc --region us-east-1",
+  ]);
+  expect(lines.join("\n")).not.toContain("shop-dev-uploadsbucket-9xyz");
+});
+
+test("a dry run warns about data changes instead of refusing", async () => {
+  const fake = deployedStackWith([
+    usersTableChange({ policyAction: "Retain" }),
+  ]);
+
+  const { lines, result } = await deploy(fake, { dryRun: true });
+
+  expect(result.status).toBe("dry-run");
+  expect(lines).toContain(
+    "Warning: UsersTable (AWS::DynamoDB::Table, shop-dev-UsersTable-1ABC) would leave the stack. It is kept with its data, but no Function is bound to it afterwards."
+  );
+  expect(fake.calls).not.toContain("executeChangeSet:shop-dev");
+});
+
+test("a Lambda replacement is reported before a data change", async () => {
+  const message = await refusal([
+    ...(replacingFunction().get("shop-dev") ?? []),
+    usersTableChange({ policyAction: "Retain" }),
+  ]);
+
+  expect(message).toContain("Function FulfilOrderFunction must be replaced");
+  expect(message).not.toContain("--accept-data-loss");
+});
+
+const deployedStack: StackDescription = {
+  id: "arn:aws:cloudformation:us-east-1:123456789012:stack/shop-dev/1",
+  outputs: {},
+  status: "UPDATE_COMPLETE",
+};
+
+const removeWith = async (
+  scenario: Scenario,
+  stack: StackDescription = deployedStack,
+  before?: (fake: ReturnType<typeof createFakeClients>) => void
+) => {
+  const { config } = project();
+  const fake = createFakeClients(scenario);
+  const lines: string[] = [];
+  fake.stacks.set("shop-dev", { ...stack });
+  before?.(fake);
+
+  const result = await removeAwsStack(
+    {
+      config,
+      output: (line) => {
+        lines.push(line);
+      },
+      stage: "dev",
+    },
+    { clients: fake.clients, sleep: async () => await Promise.resolve() }
+  );
+
+  return { lines, result };
+};
+
+const skipped = (
+  ...resources: {
+    logicalId: string;
+    physicalId: string;
+    resourceType: string;
+  }[]
+): Scenario["skippedOnDelete"] => new Map([["shop-dev", resources]]);
+
+const retainedTable = {
+  logicalId: "UsersTable",
+  physicalId: "shop-dev-UsersTable-1ABC",
+  resourceType: "AWS::DynamoDB::Table",
+};
+const retainedBucket = {
+  logicalId: "UploadsBucket",
+  physicalId: "shop-dev-uploadsbucket-9xyz",
+  resourceType: "AWS::S3::Bucket",
+};
+
+test("remove lists the retained table and bucket with their delete commands", async () => {
+  const { lines, result } = await removeWith({
+    deletedEventsById: true,
+    skippedOnDelete: skipped(retainedTable, retainedBucket),
+  });
+
+  expect(result).toEqual({ status: "removed" });
+  expect(
+    lines.slice(lines.findIndex((line) => line.startsWith("Kept ")))
+  ).toEqual([
+    "Kept 2 resource(s) that hold data. No stack manages them and AWS still bills them:",
+    "  AWS::DynamoDB::Table  shop-dev-UsersTable-1ABC",
+    "    delete with: aws dynamodb delete-table --table-name shop-dev-UsersTable-1ABC --region us-east-1",
+    "  AWS::S3::Bucket  shop-dev-uploadsbucket-9xyz",
+    "    delete with: aws s3 rb s3://shop-dev-uploadsbucket-9xyz --force --region us-east-1",
+  ]);
+});
+
+test("remove does not list a skipped Lambda version", async () => {
+  const { lines } = await removeWith({
+    skippedOnDelete: skipped({
+      logicalId: "WorkflowFunctionVersion",
+      physicalId: "arn:aws:lambda:us-east-1:1:function:shop-dev-workflow:3",
+      resourceType: "AWS::Lambda::Version",
+    }),
+  });
+
+  expect(lines.some((line) => line.startsWith("Kept "))).toBe(false);
+});
+
+test("remove ignores a DELETE_SKIPPED event from before the delete", async () => {
+  const { lines } = await removeWith({}, undefined, (fake) => {
+    fake.events.set("shop-dev", [
+      {
+        id: "old-skip",
+        logicalId: "OldTable",
+        physicalId: "shop-dev-OldTable-0OLD",
+        resourceType: "AWS::DynamoDB::Table",
+        status: "DELETE_SKIPPED",
+        timestamp: 0,
+      },
+    ]);
+  });
+
+  expect(lines.join("\n")).not.toContain("shop-dev-OldTable-0OLD");
+  expect(lines.some((line) => line.startsWith("Kept "))).toBe(false);
+});
+
+test("remove without a stack id lists what it saw while following the delete", async () => {
+  const { lines } = await removeWith(
+    { skippedOnDelete: skipped(retainedTable) },
+    { outputs: {}, status: "UPDATE_COMPLETE" }
+  );
+
+  expect(lines).toContain(
+    "    delete with: aws dynamodb delete-table --table-name shop-dev-UsersTable-1ABC --region us-east-1"
+  );
 });

@@ -31,7 +31,12 @@ export const findBrokenLinks = async (): Promise<ValidateResult[]> => {
   });
   const results = await validateFiles(await files(), {
     checkRelativePaths: "as-url",
-    markdown: { components: { Card: { attributes: ["href"] } } },
+    markdown: {
+      components: {
+        Card: { attributes: ["href"] },
+        PlateCard: { attributes: ["href"] },
+      },
+    },
     scanned,
   });
 

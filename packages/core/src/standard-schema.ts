@@ -1,5 +1,5 @@
 // Standard Schema (https://standardschema.dev), the validator interface shared by Zod, Valibot,
-// ArkType and `@voke/schema`. These declarations are structurally identical to the specification,
+// ArkType and `@vokejs/schema`. These declarations are structurally identical to the specification,
 // so any compliant validator is assignable without a dependency on `@standard-schema/spec`.
 
 /** A path segment object; the specification allows it alongside plain keys. */
@@ -157,7 +157,7 @@ const convertedJsonSchema = (
     return isJsonObject(converted) ? converted : undefined;
   } catch {
     // The specification lets a converter throw for a schema JSON Schema cannot represent
-    // (a Zod date, `@voke/schema`'s `undefined`); that schema then has no JSON Schema.
+    // (a Zod date, `@vokejs/schema`'s `undefined`); that schema then has no JSON Schema.
     return undefined;
   }
 };

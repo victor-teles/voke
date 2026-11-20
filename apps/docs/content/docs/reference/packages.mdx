@@ -7,15 +7,55 @@ Voke is split into a provider-neutral core, `voke`, and smaller packages for the
 
 <Callout type="info">
   The packages are not published yet, and the published names are not final. All
-  packages share one version (now `0.0.0`) and are released together.
+  packages share one version (`0.1.0`) and are released together.
 </Callout>
+
+## Install and versions
+
+- Create a new project with `bunx voke create my-api`. It lists `voke`, `@vokejs/aws` and `@vokejs/testing`.
+- Add another package with `bun add @vokejs/<name>`, for example `bun add @vokejs/schema`.
+- Every `@vokejs/*` package needs the same version of `voke`, so update them together: `bun update voke @vokejs/aws @vokejs/testing`, plus any other `@vokejs/*` package the project lists.
+- The project's `tsconfig.json` must use `"moduleResolution": "bundler"`. Voke ships declaration files, so stricter compiler flags apply to your code only.
+- The CLI and the packages run on Bun. The Lambda bundle that `voke build` writes runs on Node.
+
+<Cards>
+  <Card icon={<Package />} href="#voke" title="voke">
+    Functions, the Gateway, the config, the error classes and the CLI.
+  </Card>
+  <Card icon={<CloudUpload />} href="#vokeaws" title="@vokejs/aws">
+    The AWS Provider and the AWS-specific authoring helpers.
+  </Card>
+  <Card icon={<Repeat />} href="#vokeidempotency" title="@vokejs/idempotency">
+    A Plugin that makes a retried handler run once.
+  </Card>
+  <Card icon={<ShieldCheck />} href="#vokeschema" title="@vokejs/schema">
+    Builders for Function Contracts.
+  </Card>
+  <Card icon={<Globe />} href="#vokehttp" title="@vokejs/http">
+    Response helpers for route handlers.
+  </Card>
+  <Card icon={<FlaskConical />} href="#voketesting" title="@vokejs/testing">
+    Provider-neutral test clients.
+  </Card>
+  <Card icon={<Network />} href="#vokeremote" title="@vokejs/remote">
+    Typed Remote Function Registries.
+  </Card>
+  <Card icon={<ScrollText />} href="#vokeopenapi" title="@vokejs/openapi">
+    The OpenAPI Document and the API Reference Page.
+  </Card>
+  <Card icon={<Boxes />} href="#vokebuild" title="@vokejs/build">
+    Lambda bundle planning for Provider packages.
+  </Card>
+</Cards>
+
+## A typical project
 
 A typical project imports from these packages:
 
 ```ts twoslash
 // voke.config.ts
-import { aws } from "@voke/aws";
-import { sqsQueue } from "@voke/aws/cloudformation";
+import { aws } from "@vokejs/aws";
+import { sqsQueue } from "@vokejs/aws/cloudformation";
 import { defineConfig } from "voke";
 
 export default defineConfig({
@@ -27,8 +67,8 @@ export default defineConfig({
 
 ```ts twoslash
 // src/index.ts
-import { created } from "@voke/http";
-import { schema } from "@voke/schema";
+import { created } from "@vokejs/http";
+import { schema } from "@vokejs/schema";
 import { createFunctions, http, route, voke } from "voke";
 
 const functions = createFunctions({
@@ -58,36 +98,37 @@ The core package: Functions, the Gateway, the config, and the error classes. It 
 | `VokeError`, `VokeConfigError`, `VokeModelError`, `VokeDeployError`, `VokeResourceBindingError`, `VokeRuntimeVariableError`, `InvokeError` | Error classes. See [Errors](/docs/reference/errors).                                                                              |
 | `createVariableSource`, `createVariableProvider`                                                                                           | Build provider-neutral Runtime Variable sources and providers.                                                                    |
 | `StandardSchemaV1`, `VokeConfig`, `VokeConfigInput`, `VokeProvider` (types)                                                                | Types for schemas, config and Providers.                                                                                          |
+| `FunctionContractArtifact`, `FunctionContractMetadata`, `ContractJsonSchema` (types)                                                       | The **Function Contract Artifact** that `GET /_voke/contract` serves and `@vokejs/remote` reads.                                  |
 | `VokePlugin`, `FunctionWrap`, `FunctionExecution`, `PluginContributions`, `PluginCommand` and the other `Plugin*` types                    | Write a [Plugin](/docs/guides/plugins).                                                                                           |
 
 `voke` also exports building blocks for Provider packages, such as `functionRegistryEntries`, `projectFunctionEntries`, `createHandlerExportName`, `runRequestAuthorizer`, `readStandardResult` and `formatValidationIssue`. Application code does not need them.
 
-`readJsonSchema` reads a schema's JSON Schema through Standard JSON Schema, and `toContractJsonSchema` narrows it to the subset of the Function Contract Artifact. `@voke/openapi` and `@voke/remote` use them.
+`readJsonSchema` reads a schema's JSON Schema through Standard JSON Schema. `@vokejs/openapi` uses it.
 
 Learn it in [Functions](/docs/guides/functions), [HTTP routes](/docs/guides/http-routes) and [Concepts](/docs/concepts).
 
-## @voke/aws
+## @vokejs/aws
 
 The AWS Provider and the AWS-specific authoring helpers.
 
-| Export                                                                           | Use                                                                                                   |
-| -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `aws`                                                                            | The Provider for `voke.config.ts`: `provider: aws({ lambda, local })`.                                |
-| `awsLambda`                                                                      | Per-Function Lambda runtime and architecture, for `synthesis.provider`.                               |
-| `sqs`, `createSqsEventHandler`                                                   | SQS **Event Sources**.                                                                                |
-| `sns`, `eventBridge`, `schedule`                                                 | SNS, EventBridge and schedule **Event Sources**.                                                      |
-| `kinesis`, `dynamodbStream`                                                      | Kinesis and DynamoDB stream **Event Sources**, with the `StreamBatchResult` type.                     |
-| `s3`                                                                             | S3 **Event Sources**: object created and deleted events from a bucket.                                |
-| `durable`                                                                        | **Durable Functions**, with the `DurableContext` and `DurableInvokeContext` types.                    |
-| `secret`, `parameter`                                                            | **Runtime Variables** from Secrets Manager and SSM Parameter Store.                                   |
-| `createAuthorizers`, `jwtAuthorizer`, `lambdaAuthorizer`, `requestAuthorizer`    | API Gateway authorizers.                                                                              |
-| `bindResource`, `createAwsClientConfig`, `createResourceBindingName`, `toEnvKey` | Read resource bindings and configure AWS SDK clients at runtime.                                      |
-| `createLambdaHandlers`, `createAwsLambdaInvokeTransport`                         | Lambda handlers for the generated entry, and the Lambda Invoke transport for `functions.invoke(...)`. |
-| `awsPolicy`                                                                      | IAM statements a [Plugin](/docs/guides/plugins) adds to every Function role.                          |
+| Export                                                                        | Use                                                                                                   |
+| ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `aws`                                                                         | The Provider for `voke.config.ts`: `provider: aws({ lambda, local })`.                                |
+| `awsLambda`                                                                   | Per-Function Lambda runtime and architecture, for `synthesis.provider`.                               |
+| `sqs`, `createSqsEventHandler`                                                | SQS **Event Sources**.                                                                                |
+| `sns`, `eventBridge`, `schedule`                                              | SNS, EventBridge and schedule **Event Sources**.                                                      |
+| `kinesis`, `dynamodbStream`                                                   | Kinesis and DynamoDB stream **Event Sources**, with the `StreamBatchResult` type.                     |
+| `s3`                                                                          | S3 **Event Sources**: object created and deleted events from a bucket.                                |
+| `durable`                                                                     | **Durable Functions**, with the `DurableContext` and `DurableInvokeContext` types.                    |
+| `secret`, `parameter`                                                         | **Runtime Variables** from Secrets Manager and SSM Parameter Store.                                   |
+| `createAuthorizers`, `jwtAuthorizer`, `lambdaAuthorizer`, `requestAuthorizer` | API Gateway authorizers.                                                                              |
+| `createAwsClientConfig`, `createResourceBindingName`, `toEnvKey`              | Configure AWS SDK clients and name resource bindings at runtime.                                      |
+| `createLambdaHandlers`, `createAwsLambdaInvokeTransport`                      | Lambda handlers for the generated entry, and the Lambda Invoke transport for `functions.invoke(...)`. |
+| `awsPolicy`                                                                   | IAM statements a [Plugin](/docs/guides/plugins) adds to every Function role.                          |
 
 Learn it in [Deploy](/docs/guides/deploy), [SQS events](/docs/guides/sqs-events), [SNS events](/docs/guides/sns-events), [EventBridge events](/docs/guides/eventbridge-events), [S3 events](/docs/guides/s3-events), [Scheduled Functions](/docs/guides/scheduled-functions), [Durable Functions](/docs/guides/durable-functions), [Runtime Variables](/docs/guides/runtime-variables) and [Authorizers](/docs/guides/authorizers). See [Config](/docs/reference/config#aws-provider-options) for the `aws()` options.
 
-### @voke/aws/cloudformation
+### @vokejs/aws/cloudformation
 
 CloudFormation resource builders for `resources` in `voke.config.ts`, and the template synthesizer.
 
@@ -99,7 +140,7 @@ CloudFormation resource builders for `resources` in `voke.config.ts`, and the te
 
 Learn it in [Resources](/docs/guides/resources).
 
-### @voke/aws/local
+### @vokejs/aws/local
 
 The **Local AWS Providers** for `aws({ local })`, and the helpers behind `voke local`.
 
@@ -111,7 +152,9 @@ The **Local AWS Providers** for `aws({ local })`, and the helpers behind `voke l
 
 Learn it in [Local AWS](/docs/guides/local-aws).
 
-### @voke/aws/testing
+### @vokejs/aws/testing
+
+Test helpers for projects that use the AWS Provider.
 
 | Export                                                    | Use                                                                                                                                 |
 | --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
@@ -120,22 +163,22 @@ Learn it in [Local AWS](/docs/guides/local-aws).
 
 Learn it in [Testing](/docs/guides/testing).
 
-## @voke/idempotency
+## @vokejs/idempotency
 
-A [Plugin](/docs/guides/plugins) that makes a retried handler run once. It provisions a DynamoDB table and depends on `@voke/aws`.
+A [Plugin](/docs/guides/plugins) that makes a retried handler run once. It provisions a DynamoDB table and depends on `@vokejs/aws`.
 
-| Export                                                                | Use                                                                                                          |
-| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `idempotency`                                                         | The Plugin for `voke.config.ts`: `plugins: [idempotency()]`. It contributes the `idempotencyTable` resource. |
-| `idempotent`                                                          | Wrap a Function or route handler so it runs once per **Idempotency Key**.                                    |
-| `idempotentBatch`                                                     | Build an SQS handler that runs each message once.                                                            |
-| `memoryStore`, `dynamoDbStore`                                        | **Idempotency Stores**: in memory for tests, and the DynamoDB store the Plugin uses.                         |
-| `IdempotencyError`                                                    | Thrown when a call is in progress, its payload differs, its key is missing or its result is not JSON.        |
-| `IdempotencyOptions`, `IdempotencyStore`, `IdempotencyRecord` (types) | Options of `idempotent`, and the store contract.                                                             |
+| Export                                                                | Use                                                                                                                                                                |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `idempotency`                                                         | The Plugin for `voke.config.ts`: `plugins: [idempotency()]`. It contributes the `idempotencyTable` resource.                                                       |
+| `idempotent`                                                          | Wrap a Function or route handler so it runs once per **Idempotency Key**.                                                                                          |
+| `idempotentBatch`                                                     | Build an SQS handler that runs each message once.                                                                                                                  |
+| `memoryStore`, `dynamoDbStore`                                        | **Idempotency Stores**: in memory for tests, and the DynamoDB store the Plugin uses.                                                                               |
+| `IdempotencyError`                                                    | Thrown when a call is in progress, its payload differs, its key is missing, its result is not JSON, its result is too large, or its record could not be completed. |
+| `IdempotencyOptions`, `IdempotencyStore`, `IdempotencyRecord` (types) | Options of `idempotent`, and the store contract.                                                                                                                   |
 
 Learn it in [Idempotency](/docs/guides/idempotency).
 
-## @voke/schema
+## @vokejs/schema
 
 Builders for **Function Contracts** that follow the Standard Schema interface.
 
@@ -145,7 +188,7 @@ Builders for **Function Contracts** that follow the Standard Schema interface.
 
 Zod and other Standard Schema validators work in the same places. Learn it in [Schemas](/docs/guides/schemas).
 
-## @voke/http
+## @vokejs/http
 
 Response helpers for route handlers. Each returns a `Response` with a JSON body.
 
@@ -157,7 +200,7 @@ Response helpers for route handlers. Each returns a `Response` with a JSON body.
 
 Learn it in [HTTP routes](/docs/guides/http-routes).
 
-## @voke/testing
+## @vokejs/testing
 
 Provider-neutral test clients.
 
@@ -165,23 +208,24 @@ Provider-neutral test clients.
 | ------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
 | `createTestClient`       | A plain `fetch` client over `{ fetch }` (such as the Gateway) or `{ baseUrl }`. It does not simulate Lambda or API Gateway. |
 | `createInvokeTestClient` | Call `invoke(...)` on a Function Registry in a test, without creating a Gateway first.                                      |
+| `createTestJwt`          | An unsigned JWT for a route behind a JWT authorizer, accepted by the local Gateway only.                                    |
 
 Learn it in [Testing](/docs/guides/testing).
 
-## @voke/remote
+## @vokejs/remote
 
 Typed **Remote Function Registries**, to call the Functions of another Voke Project.
 
-| Export                                                        | Use                                                                                    |
-| ------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `createRemoteFunctions`                                       | Create a Remote Function Registry from a contract artifact. Generated modules call it. |
-| `generateRemoteModules`, `renderRemoteModule`                 | Fetch contract metadata and write the modules. `voke remote generate` does this.       |
-| `createFunctionContractArtifact`, `mountDevFunctionEndpoints` | Publish contract metadata and the invoke endpoints from the remote project.            |
-| `defineRemoteConfig`, `remoteEnvironment`                     | Resolve `remotes` settings and the environment variables they produce.                 |
+| Export                                                  | Use                                                                                    |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `createRemoteFunctions`                                 | Create a Remote Function Registry from a contract artifact. Generated modules call it. |
+| `RemoteFunctionRegistry`, `RemoteInvokeOptions` (types) | The registry and the invoke options it accepts (`trace`, `timeoutMs`, `retries`).      |
+
+`voke remote generate`, the `remotes` setting and the endpoints that `voke dev` serves are part of `voke`, not of this package.
 
 Learn it in [Remote Functions](/docs/guides/remote-functions).
 
-## @voke/openapi
+## @vokejs/openapi
 
 The **OpenAPI Document** of a Gateway's HTTP API, generated from route contracts, and the **API Reference Page** that renders it with Scalar.
 
@@ -192,9 +236,9 @@ The **OpenAPI Document** of a Gateway's HTTP API, generated from route contracts
 
 Learn it in [OpenAPI and API reference](/docs/guides/openapi).
 
-## @voke/build
+## @vokejs/build
 
-Lambda bundle planning for Provider packages. `@voke/aws` uses it; application code does not import it.
+Lambda bundle planning for Provider packages. `@vokejs/aws` uses it; application code does not import it.
 
 | Export            | Use                                                                                                                           |
 | ----------------- | ----------------------------------------------------------------------------------------------------------------------------- |
@@ -205,6 +249,18 @@ See [Config](/docs/reference/config#build) for the build settings.
 
 ## Next steps
 
-- [Getting started](/docs/getting-started): create a project that uses these packages.
-- [Concepts](/docs/concepts): the terms used on this page.
-- [Config](/docs/reference/config): every setting in `voke.config.ts`.
+<Cards>
+  <Card icon={<Rocket />} href="/docs/getting-started" title="Getting started">
+    Create a project that uses these packages.
+  </Card>
+  <Card icon={<BookOpen />} href="/docs/concepts" title="Concepts">
+    The terms used on this page.
+  </Card>
+  <Card
+    icon={<SlidersHorizontal />}
+    href="/docs/reference/config"
+    title="Config"
+  >
+    Every setting in `voke.config.ts`.
+  </Card>
+</Cards>

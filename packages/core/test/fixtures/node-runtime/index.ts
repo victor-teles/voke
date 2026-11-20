@@ -1,6 +1,7 @@
-import { aws, bindResource, sqs } from "@voke/aws";
+import { aws, sqs } from "@vokejs/aws";
+import { dynamodbTable } from "@vokejs/aws/cloudformation";
 
-import { createFunctions, fn, http, route, voke } from "../../../src/index";
+import { createFunctions, fn, http, voke } from "../../../src/index";
 import type { StandardSchemaV1 } from "../../../src/index";
 
 const greetingSchema: StandardSchemaV1<{ name: string }, { name: string }> = {
@@ -24,8 +25,6 @@ const messageSchema: StandardSchemaV1<
   },
 };
 
-const usersTable = bindResource("usersTable", "name");
-
 export const processedOrders: string[] = [];
 
 export const functions = createFunctions({
@@ -35,7 +34,8 @@ export const functions = createFunctions({
     output: messageSchema,
   }),
   http: http({
-    routes: [
+    resources: ["usersTable"],
+    routes: (route) => [
       route.get("/health", {
         handler: () => ({ ok: true, runtime: "node" }),
       }),
@@ -44,7 +44,9 @@ export const functions = createFunctions({
           await functions.invoke("greet", { name: "Node" }),
       }),
       route.get("/table", {
-        handler: () => ({ table: usersTable.value() }),
+        handler: (_request, context) => ({
+          table: context.resource("usersTable"),
+        }),
       }),
     ],
   }),
@@ -62,7 +64,11 @@ export const functions = createFunctions({
 });
 
 const gateway = voke(functions, {
-  config: { name: "node-runtime", provider: aws() },
+  config: {
+    name: "node-runtime",
+    provider: aws(),
+    resources: { usersTable: dynamodbTable() },
+  },
 });
 
 export default gateway;

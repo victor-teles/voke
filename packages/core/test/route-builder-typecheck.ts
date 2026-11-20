@@ -22,7 +22,7 @@ const getUserRoute = app.get("/users/:id", {
     includePosts: req.query.includePosts,
     requestId: req.headers["x-request-id"],
   }),
-  headers: schema<Headers, { "x-request-id": string }>(),
+  headers: schema<Record<string, string>, { "x-request-id": string }>(),
   params: schema<{ id: string }>(),
   query: schema<Record<string, string>, { includePosts: boolean }>(),
 });
@@ -36,6 +36,18 @@ const healthRoute = app.get("/health", {
   output: schema<{ ok: boolean }>(),
 });
 
+// Without query and headers schemas, both are plain records of optional strings.
+const plainRoute = app.get("/plain", {
+  handler: (req) => {
+    const { page } = req.query;
+    const requestId: string | undefined = req.headers["x-request-id"];
+    // @ts-expect-error a query value may be missing.
+    const _required: string = req.query.page;
+
+    return { page, requestId };
+  },
+});
+
 const functions = createFunctions({
   health: fn({
     handler: () => ({ ok: true }),
@@ -47,7 +59,7 @@ const functions = createFunctions({
     output: schema<{ id: string; name: string }>(),
   }),
   users: fn({
-    routes: [getUserRoute, createUserRoute, healthRoute],
+    routes: [getUserRoute, createUserRoute, healthRoute, plainRoute],
   }),
 });
 
@@ -58,7 +70,7 @@ const _getUser: Promise<{
   includePosts: boolean;
   requestId: string;
 }> = functions.route("GET", "/users/:id", {
-  headers: new Headers({ "x-request-id": "req_1" }),
+  headers: { "x-request-id": "req_1" },
   params: { id: "usr_1" },
   query: { includePosts: "true" },
 });
@@ -85,6 +97,9 @@ void functions.route("GET", "/users/:id", { params: { userId: "usr_1" } });
 // @ts-expect-error route body is inferred from the body schema input.
 void functions.route("POST", "/users", { body: { fullName: "Victor" } });
 
+// @ts-expect-error functions.route takes plain header records, not Headers instances.
+void functions.route("GET", "/plain", { headers: new Headers() });
+
 // @ts-expect-error route-only functions are not accepted by functions.invoke.
 void functions.invoke("users");
 
@@ -106,3 +121,31 @@ void app.get("/undocumented", {
   // @ts-expect-error meta accepts only the documented keys.
   meta: { title: "Unknown" },
 });
+
+// With an `output` schema the handler returns what that schema accepts, or a `Response`.
+void app.get("/typed-output", {
+  handler: () => Promise.resolve({ id: "usr_1" }),
+  output: schema<{ id: string }>(),
+});
+void app.get("/typed-output/response", {
+  handler: () => new Response(null, { status: 404 }),
+  output: schema<{ id: string }>(),
+});
+void app.get("/typed-output/wrong", {
+  // @ts-expect-error the handler result is checked against the output schema input.
+  handler: () => ({ id: 1 }),
+  output: schema<{ id: string }>(),
+});
+
+// A schema that accepts `unknown` and returns a typed value is read as declared.
+const acceptAnything = createFunctions({
+  skus: fn({
+    routes: [
+      app.post("/skus", {
+        body: schema<unknown, { sku: string }>(),
+        handler: (req) => ({ sku: req.body.sku }),
+      }),
+    ],
+  }),
+});
+void acceptAnything.route("POST", "/skus", { body: { anything: 1 } });

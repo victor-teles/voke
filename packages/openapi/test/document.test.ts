@@ -1,7 +1,11 @@
 import { expect, test } from "bun:test";
 
-import { createAuthorizers, jwtAuthorizer, lambdaAuthorizer } from "@voke/aws";
-import { schema } from "@voke/schema";
+import {
+  createAuthorizers,
+  jwtAuthorizer,
+  lambdaAuthorizer,
+} from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 import { createFunctions, functionRegistryEntries, http, route } from "voke";
 import type { AnyFunctionDefinition, VokeConfigError } from "voke";
 import { z } from "zod";
@@ -94,7 +98,7 @@ test("rejects a path parameter API Gateway cannot route", () => {
   ).toThrow('Route "GET /files/*/raw" of Function "http"');
 });
 
-test("reads params, query and headers from @voke/schema", () => {
+test("reads params, query and headers from @vokejs/schema", () => {
   const document = documentFor(
     createFunctions({
       http: http({
@@ -222,6 +226,10 @@ test("documents a body and wraps the output in the { data } envelope", () => {
   expect(operation?.responses["400"]).toEqual({
     ...errorRef,
     description: "Invalid request",
+  });
+  expect(operation?.responses["415"]).toEqual({
+    ...errorRef,
+    description: "Unsupported content type",
   });
 });
 
@@ -431,7 +439,7 @@ test("removes $schema from embedded schemas", () => {
           routes: [
             route.post("/users", {
               body: z.object({ name: z.string() }),
-              handler: ok,
+              handler: () => ({ id: "usr_1" }),
               output: z.object({ id: z.string() }),
               query: z.object({ dryRun: z.string().optional() }),
             }),
@@ -570,6 +578,7 @@ test("builds the whole document for a three-route registry", () => {
           responses: {
             "200": envelope(userSchema),
             "400": badRequest,
+            "415": { ...errorRef, description: "Unsupported content type" },
             "500": serverError,
           },
           security: [],

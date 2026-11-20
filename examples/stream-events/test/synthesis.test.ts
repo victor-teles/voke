@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import {
   dynamodbTable,
   synthesizeCloudFormation,
-} from "@voke/aws/cloudformation";
+} from "@vokejs/aws/cloudformation";
 import { createVokeModel } from "voke";
 
 import { functions } from "../src/functions";
@@ -25,6 +25,21 @@ test("each consumer gets a stream mapping with partial batch failure reporting",
     EventSourceArn: { "Fn::GetAtt": ["OrdersTable", "StreamArn"] },
     FunctionResponseTypes: ["ReportBatchItemFailures"],
   });
+
+  for (const [mapping, queue] of [
+    [
+      "ClicksFunctionClicksStreamEventSourceMapping",
+      "ClicksFunctionDeadLetterQueue",
+    ],
+    [
+      "OrdersFunctionOrdersTableEventSourceMapping",
+      "OrdersFunctionDeadLetterQueue",
+    ],
+  ] as const) {
+    expect(template.Resources[mapping]?.Properties.DestinationConfig).toEqual({
+      OnFailure: { Destination: { "Fn::GetAtt": [queue, "Arn"] } },
+    });
+  }
 });
 
 test("the AWS Provider rejects the orders consumer when the table has no stream", () => {

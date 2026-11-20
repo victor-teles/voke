@@ -18,7 +18,7 @@ This project should be developed with test-driven development and high engineeri
 ## Quality Gates
 
 - Run the smallest useful verification while iterating, then run the broader relevant checks before finishing.
-- At minimum, run `bun test` for behavior changes and `bun run typecheck` for TypeScript changes when those scripts are available.
+- At minimum, run `bun test` (inside the package you changed, or from the repository root for every package and example in one process) for behavior changes, and `bun run typecheck` for TypeScript changes. Before finishing, run `bun run test`, which also builds and tests the docs site.
 - For package-scoped work, prefer the closest package command first, then the root command if the change can affect multiple workspaces.
 - Do not leave failing tests, type errors, skipped tests, or TODO-only implementations unless the user explicitly asks for a checkpoint.
 - Add regression tests for bug fixes and edge-case tests for parsing, validation, routing, serialization, and error handling.

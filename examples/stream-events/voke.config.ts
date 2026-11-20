@@ -1,5 +1,5 @@
-import { aws } from "@voke/aws";
-import { dynamodbTable, kinesisStream } from "@voke/aws/cloudformation";
+import { aws } from "@vokejs/aws";
+import { dynamodbTable, kinesisStream } from "@vokejs/aws/cloudformation";
 import { defineConfig } from "voke";
 
 export default defineConfig({

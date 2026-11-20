@@ -1,6 +1,6 @@
-import { sqs } from "@voke/aws";
-import { idempotentBatch } from "@voke/idempotency";
-import { schema } from "@voke/schema";
+import { sqs } from "@vokejs/aws";
+import { idempotentBatch } from "@vokejs/idempotency";
+import { schema } from "@vokejs/schema";
 import { createFunctions } from "voke";
 
 const orderMessageSchema = schema.object({
@@ -38,6 +38,8 @@ export const settlePayment = sqs({
   ),
   message: paymentMessageSchema,
   queue: "paymentsQueue",
+  // The idempotency Plugin's table is linked like any resource.
+  resources: ["idempotencyTable"],
 });
 
 export const functions = createFunctions({ processOrder, settlePayment });

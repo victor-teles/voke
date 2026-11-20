@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { createSqsEventHandler, sqs } from "@voke/aws";
+import { createSqsEventHandler, sqs } from "@vokejs/aws";
 
 import { voke } from "../src/app";
 import type { VokeOptions } from "../src/app";

@@ -1,6 +1,6 @@
 # Deploy through a Provider Capability
 
-`voke deploy` and `voke remove` are top-level commands that work through the configured **Provider**. Core adds a provider-neutral `ProviderDeployCapability { deploy, remove }` to the Provider contract; `@voke/aws` implements it with the AWS SDK (CloudFormation and S3), so core stays free of AWS concepts and a second Provider would implement the same capability.
+`voke deploy` and `voke remove` are top-level commands that work through the configured **Provider**. Core adds a provider-neutral `ProviderDeployCapability { deploy, remove }` to the Provider contract; `@vokejs/aws` implements it with the AWS SDK (CloudFormation and S3), so core stays free of AWS concepts and a second Provider would implement the same capability.
 
 The CLI owns what is the same for every Provider: resolving the stage (`--stage`, then `VOKE_STAGE`, then config), refusing the `local` stage unless a local endpoint is configured, running the Provider build plan, asking for confirmation before `remove`, printing outputs with `ApiUrl` first, and writing `.voke/outputs/<stage>.json`. The Provider owns packaging, uploads, stack changes and their progress. A neutral `VokeDeployError` (code `DEPLOY_ERROR`) carries Provider failures, and `VokeError` is exported so Providers can throw typed errors.
 

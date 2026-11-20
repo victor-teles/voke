@@ -1,6 +1,6 @@
 ---
 title: Schemas and validation
-description: Validate Function payloads, results and HTTP request parts with @voke/schema, Zod, or any Standard Schema validator.
+description: Validate Function payloads, results and HTTP request parts with @vokejs/schema, Zod, or any Standard Schema validator.
 ---
 
 After reading this page you can write the schemas of a Function Contract, choose a validator, and handle validation failures in code and over HTTP.
@@ -13,21 +13,21 @@ Voke validates data at every boundary with a schema:
 - `params`, `body` and `output` of an HTTP route. See [HTTP routes](/docs/guides/http-routes).
 - The message body of an SQS Function. See [SQS events](/docs/guides/sqs-events).
 
-A schema is any validator that implements [Standard Schema](https://standardschema.dev), a shared interface that Zod, Valibot, ArkType and `@voke/schema` implement. Voke reads the TypeScript types from the schema, so the handler's payload and the caller's arguments are typed without extra annotations.
+A schema is any validator that implements [Standard Schema](https://standardschema.dev), a shared interface that Zod, Valibot, ArkType and `@vokejs/schema` implement. Voke reads the TypeScript types from the schema, so the handler's payload and the caller's arguments are typed without extra annotations.
 
-## Use @voke/schema
+## Use @vokejs/schema
 
-`@voke/schema` is a small validator with no dependencies. Import `schema` and compose builders:
+`@vokejs/schema` is a small validator with no dependencies. Import `schema` and compose builders:
 
-```ts twoslash
+```ts title="src/index.ts" twoslash
 // @filename: voke.config.ts
-import { aws } from "@voke/aws";
+import { aws } from "@vokejs/aws";
 import { defineConfig } from "voke";
 
 export default defineConfig({ name: "shop-api", provider: aws() });
 // @filename: src/index.ts
 // ---cut---
-import { schema } from "@voke/schema";
+import { schema } from "@vokejs/schema";
 import { createFunctions, fn, voke } from "voke";
 import config from "../voke.config";
 
@@ -76,6 +76,14 @@ await functions.invoke("createOrder", {
 | `schema.null()`            | `null`.                                                                                                           |
 | `schema.undefined()`       | `undefined`.                                                                                                      |
 
+Each builder declares both sides of the schema: what a caller passes and what the handler receives.
+`functions.invoke(...)`, `functions.route(...)` and `functions.sendEvent(...)` reject a wrong argument
+at compile time, and a handler that returns the wrong shape for its `output` schema does not compile.
+`schema.coerce.number()` accepts `number | string` and returns `number`.
+
+A child schema from another library may validate asynchronously, for example a Zod schema with an
+async refinement. `schema.object` and `schema.array` wait for it.
+
 ### Modifiers
 
 Modifiers return a new schema, so you can chain them.
@@ -91,7 +99,7 @@ Modifiers return a new schema, so you can chain them.
 Path parameters always arrive as strings. Use `schema.coerce.number()` to receive a number:
 
 ```ts twoslash
-import { schema } from "@voke/schema";
+import { schema } from "@vokejs/schema";
 import { createFunctions, http, route } from "voke";
 
 const functions = createFunctions({
@@ -108,20 +116,20 @@ const functions = createFunctions({
 
 ## Use Zod or another validator
 
-Zod schemas work wherever a `@voke/schema` schema does. Both tabs define the same Function:
+Zod schemas work wherever a `@vokejs/schema` schema does. Both tabs define the same Function:
 
-<Tabs items={["@voke/schema", "Zod"]}>
-<Tab value="@voke/schema">
+<Tabs items={["@vokejs/schema", "Zod"]}>
+<Tab value="@vokejs/schema">
 
-```ts twoslash
+```ts title="src/index.ts" twoslash
 // @filename: voke.config.ts
-import { aws } from "@voke/aws";
+import { aws } from "@vokejs/aws";
 import { defineConfig } from "voke";
 
 export default defineConfig({ name: "users-api", provider: aws() });
 // @filename: src/index.ts
 // ---cut---
-import { schema } from "@voke/schema";
+import { schema } from "@vokejs/schema";
 import { createFunctions, fn, voke } from "voke";
 import config from "../voke.config";
 
@@ -144,9 +152,9 @@ voke(functions, { config });
 </Tab>
 <Tab value="Zod">
 
-```ts twoslash
+```ts title="src/index.ts" twoslash
 // @filename: voke.config.ts
-import { aws } from "@voke/aws";
+import { aws } from "@vokejs/aws";
 import { defineConfig } from "voke";
 
 export default defineConfig({ name: "users-api", provider: aws() });
@@ -177,21 +185,21 @@ voke(functions, { config });
 
 Any other validator that implements Standard Schema works the same way, for example Valibot or ArkType. Install it in your project and pass its schemas to `input`, `output`, `params` or `body`. You can mix validators in one project.
 
-## Validation failures
+## Handle validation failures
 
 ### In functions.invoke
 
 When the payload fails the `input` schema, `functions.invoke(...)` rejects with an `InvokeError` with code `INVALID_PAYLOAD`. When the handler's result fails the `output` schema, the code is `INVALID_RESULT`. `error.issues` lists each problem with a `message` and a `path`:
 
-```ts twoslash
+```ts title="src/index.ts" twoslash
 // @filename: voke.config.ts
-import { aws } from "@voke/aws";
+import { aws } from "@vokejs/aws";
 import { defineConfig } from "voke";
 
 export default defineConfig({ name: "users-api", provider: aws() });
 // @filename: src/index.ts
 // ---cut---
-import { schema } from "@voke/schema";
+import { schema } from "@vokejs/schema";
 import { createFunctions, fn, InvokeError, voke } from "voke";
 import config from "../voke.config";
 
@@ -221,7 +229,7 @@ The message starts with `Invalid payload for` and the Function's deployed name, 
 
 ### Over HTTP
 
-When a route's `params` or `body` fails its schema, the client gets status `400`. The message names the request part, and each issue path starts with that part:
+When a route's `body`, `params`, `query` or `headers` fails its schema, the client gets status `400` with the code `INVALID_REQUEST`. The message names the request part, and each issue path starts with that part. `query` and `headers` reach their schemas as plain objects of strings:
 
 ```txt
 HTTP/1.1 400 Bad Request
@@ -229,19 +237,20 @@ content-type: application/json
 
 {
   "error": {
+    "code": "INVALID_REQUEST",
     "message": "Invalid body",
     "issues": [{ "message": "Expected string", "path": ["body", "name"] }]
   }
 }
 ```
 
-The handler does not run. When the handler's return value fails the route's `output` schema, the status is `500` and the message is `Invalid result`. See [HTTP routes](/docs/guides/http-routes#errors) for every error response.
+The handler does not run. When the handler's return value fails the route's `output` schema, the client gets the generic `500` with the code `INTERNAL_SERVER_ERROR`, and the issues go to the server log only. See [HTTP routes](/docs/guides/http-routes#errors) for every error response.
 
 ## JSON Schema
 
 Voke describes contracts as JSON Schema in two places: the [OpenAPI document](/docs/guides/openapi) of your routes, and the contract metadata of [Remote Functions](/docs/guides/remote-functions). It reads the JSON Schema through [Standard JSON Schema](https://standardschema.dev/json-schema), the companion of Standard Schema, and asks for draft 2020-12.
 
-`@voke/schema` and Zod implement it. Each `@voke/schema` builder produces this JSON Schema:
+`@vokejs/schema` and Zod implement it. Each `@vokejs/schema` builder produces this JSON Schema:
 
 | Builder                                    | JSON Schema                                                                                  |
 | ------------------------------------------ | -------------------------------------------------------------------------------------------- |
@@ -256,7 +265,14 @@ Voke describes contracts as JSON Schema in two places: the [OpenAPI document](/d
 | `schema.optional(inner)`                   | The inner schema; the object leaves the key out of `required`                                |
 | `schema.undefined()`                       | None: JSON has no `undefined`, so the schema has no JSON Schema                              |
 
-`@voke/schema` supports the targets `draft-2020-12` and `draft-07` and throws for any other. A validator without Standard JSON Schema still validates; only the generated descriptions treat its values as "any value". Valibot and ArkType can work if their schemas expose Standard JSON Schema; Voke tests Zod and `@voke/schema`.
+`@vokejs/schema` supports the targets `draft-2020-12` and `draft-07` and throws for any other.
+
+<Callout type="info" title="Validators without Standard JSON Schema">
+  A validator without Standard JSON Schema still validates; only the generated
+  descriptions treat its values as "any value". Valibot and ArkType can work if
+  their schemas expose Standard JSON Schema; Voke tests Zod and
+  `@vokejs/schema`.
+</Callout>
 
 ## Write your own validator
 
@@ -268,9 +284,9 @@ You can write a validator by hand when no library fits. A Standard Schema valida
 
 Each issue has a `message` and an optional `path`, a list of keys from the root of the value to the failing field. Type the schema with `StandardSchemaV1<Input, Output>` from `voke` so Voke can infer the payload type:
 
-```ts twoslash
+```ts title="src/index.ts" twoslash
 // @filename: voke.config.ts
-import { aws } from "@voke/aws";
+import { aws } from "@vokejs/aws";
 import { defineConfig } from "voke";
 
 export default defineConfig({ name: "orders-api", provider: aws() });
@@ -309,10 +325,26 @@ const functions = createFunctions({
 voke(functions, { config });
 ```
 
-Prefer `@voke/schema` or a library for everyday schemas. Write your own only for rules that a library cannot express.
+Prefer `@vokejs/schema` or a library for everyday schemas. Write your own only for rules that a library cannot express.
 
 ## Next steps
 
-- [Functions](/docs/guides/functions)
-- [HTTP routes](/docs/guides/http-routes)
-- [Errors reference](/docs/reference/errors)
+<Cards>
+  <Card
+    icon={<SquareFunction />}
+    href="/docs/guides/functions"
+    title="Functions"
+  >
+    Invokable Functions and the Function Registry.
+  </Card>
+  <Card icon={<Route />} href="/docs/guides/http-routes" title="HTTP routes">
+    Validate `params` and `body`, and shape the response.
+  </Card>
+  <Card
+    icon={<TriangleAlert />}
+    href="/docs/reference/errors"
+    title="Errors reference"
+  >
+    Identify a Voke error by its class and code.
+  </Card>
+</Cards>

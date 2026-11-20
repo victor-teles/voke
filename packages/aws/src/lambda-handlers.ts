@@ -18,7 +18,7 @@ import type {
 } from "voke";
 
 import { createDurableLambdaHandler, isDurableFunction } from "./durable";
-import { requireAwsEventSourceAdapter } from "./event-sources";
+import { requireAwsEventSourceRuntimeAdapter } from "./event-source-runtime";
 import { createAwsLambdaHandler } from "./lambda";
 import type {
   AwsLambdaContext,
@@ -241,7 +241,7 @@ const handlerFor = (
     }
     case "event": {
       // createFunctions guarantees every Event Source of a Function shares one source.
-      const adapter = requireAwsEventSourceAdapter(
+      const adapter = requireAwsEventSourceRuntimeAdapter(
         definition.events?.[0]?.source ?? "",
         key
       );

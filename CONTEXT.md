@@ -9,7 +9,7 @@ A source-controlled application whose framework workflows are driven by `voke.co
 _Avoid_: Generated app, scaffold
 
 **Project Starter**:
-The initial files created by `voke create api` for a new **Voke Project**.
+The initial files created by `voke create <name>` for a new **Voke Project**.
 _Avoid_: Template output, boilerplate
 
 **Route Module**:
@@ -57,7 +57,7 @@ The explicit workflow where a consuming **Voke Project** fetches a provider's **
 _Avoid_: Runtime-only contract fetching, implicit boot-time type discovery
 
 **Remote Helper**:
-A specialized utility for generating, constructing, and invoking **Remote Function Registries** from **Function Contract Artifacts**.
+The specialized utility that constructs and invokes a **Remote Function Registry** from a **Function Contract Artifact**.
 _Avoid_: Function Contract, provider package, root Function authoring
 
 **Build Helper**:
@@ -84,9 +84,21 @@ _Avoid_: Core resource kind, CloudFormation metadata, untyped plugin state
 The **Provider** that adapts a **Gateway** to AWS runtime, deployment, synthesis, and local workflow behavior.
 _Avoid_: CloudFormation only, Lambda handler helper
 
+**Lambda Bundle**:
+The file `voke build` writes for deployed **Functions**. It holds run-time code only: a package's deploy-time code is left out through the `voke-runtime` condition.
+_Avoid_: artifact, dist, deployment package
+
 **Local AWS Provider**:
 A local development implementation that emulates AWS services for a **Voke Project**.
 _Avoid_: Provider, Gateway provider, local runtime
+
+**Data-Bearing Resource**:
+A resource whose stored state exists nowhere else and cannot be recreated by a redeploy: a table, a bucket or a generated secret.
+_Avoid_: stateful resource, persistent resource
+
+**Retained Resource**:
+A **Data-Bearing Resource** that a deploy or a remove left in the account, outside any stack.
+_Avoid_: orphan, leftover
 
 **HTTP API**:
 The AWS API Gateway HTTP API v2 resource synthesized from route-backed **Functions** in a **Gateway**.
@@ -128,6 +140,14 @@ _Avoid_: Session duration, JWT expiration
 The normalized authorizer data available to a route-backed **Function** after an **HTTP Authorizer** allows the request.
 _Avoid_: Raw API Gateway request context, parsed auth header
 
+**Route Request**:
+The object a route handler receives: the validated `params`, `query`, `headers` and `body`, the **Route Auth Context**, and the original `Request` as `raw`. `query` and `headers` are plain objects.
+_Avoid_: Hono context, event, req object
+
+**Error Envelope**:
+The JSON body `{ error: { code, message, issues?, details? } }` the **Gateway** writes for a failed HTTP request.
+_Avoid_: error payload, problem details
+
 **Authorizer Context Schema**:
 An optional schema for the context returned by a **Request Authorizer Function**.
 _Avoid_: JWT claims schema, route body schema
@@ -139,6 +159,10 @@ _Avoid_: Production identity provider emulation, handler-only auth test
 **Authorizer Registry**:
 The named catalog of **HTTP Authorizers** available to an **HTTP API**.
 _Avoid_: Inline authorizer list, auth middleware stack
+
+**Blocking Migration Task**:
+A manual task in a Serverless migration report that must be done before traffic moves, because the generated project differs from the Serverless service in who can call a route.
+_Avoid_: warning, unsupported feature
 
 **Default HTTP Authorizer**:
 The **HTTP Authorizer** applied to route-backed **Functions** unless a route chooses a different authorizer behavior.
@@ -208,6 +232,10 @@ _Avoid_: Raw stream event as primary contract, shard batch
 The handler result that tells a stream Event Source the first record to deliver again.
 _Avoid_: SQS Batch Result for streams, checkpoint response
 
+**Dead-Letter Queue**:
+The SQS queue Voke creates to keep an event that a **Function** could not process after its **Event Source**'s retries. A consumed queue owns one; for every other **Event Source** the **Function** owns one.
+_Avoid_: DLQ as a user-declared resource, error queue, failure topic
+
 **Event Invocation**:
 The local test/runtime path that delivers an event-shaped payload to an Event Source Function.
 _Avoid_: Function invocation, route invocation
@@ -232,6 +260,10 @@ _Avoid_: Resource declaration, CloudFormation secret, environment variable bindi
 The app-facing name a **Function** uses to read a **Runtime Variable** from runtime context.
 _Avoid_: AWS secret name, parameter path, resource key
 
+**Resource Link**:
+A **Function**'s declaration, by resource key, that it uses one of the project's resources. The link gives the Function the resource's binding and gives its role the resource's access.
+_Avoid_: Grant, permission, attachment, resource binding (the binding is the value a link provides)
+
 **Plugin**:
 A named unit declared in `voke.config.ts` that extends a **Voke Project** at run time and at deploy time without being a **Provider**.
 _Avoid_: Middleware, extension, Provider plugin
@@ -253,7 +285,7 @@ The application value that identifies one logical operation, chosen by the handl
 _Avoid_: request id, message id as a default
 
 **Idempotency Record**:
-What an **Idempotency Store** keeps for one **Function** and **Idempotency Key**: the status (`INPROGRESS` or `COMPLETED`), the expiry, a hash of the validated input and the stored result.
+What an **Idempotency Store** keeps for one **Function** and **Idempotency Key**: the status (`INPROGRESS`, `COMPLETED` or `RESULT_TOO_LARGE`), the expiry, a hash of the validated input and the stored result.
 _Avoid_: lock, cache entry
 
 **Idempotency Store**:
@@ -301,6 +333,8 @@ _Avoid_: idempotency cache, persistence layer
 - A **Remote Function Registry** is created from a **Function Contract Artifact** plus a runtime target for the provider project.
 - A **Remote Function Registry** preserves Function-key invocation without requiring provider source imports.
 - A **Remote Function Registry** sends its expected contract fingerprint during remote invocation when the provider can validate it.
+- The root `voke` package produces the **Function Contract Artifact**, runs **Remote Code Generation** and serves the **Dev Function Invoke Endpoint**.
+- A **Remote Function Registry** rejects a failed call with an `InvokeError`, and rejects invoke options it does not support.
 - A consuming **Voke Project** defines runtime targets for its **Remote Function Registries** in `voke.config.ts`.
 - Remote runtime targets are keyed by provider project name, not repeated at each invocation callsite.
 - Remote runtime targets are selected by stage, with environment overrides available as escape hatches.
@@ -353,12 +387,17 @@ _Avoid_: idempotency cache, persistence layer
 - The root project model validates provider-neutral structure, while each **Provider** validates its own **Provider Extension Records**.
 - Runtime source code can pass a **Provider** to a **Gateway** when it needs provider behavior or an explicit override.
 - The **AWS Provider** supplies AWS-specific runtime, deployment, synthesis, and local workflow behavior for a **Gateway**.
+- The **AWS Provider** gives a **Lambda Bundle** only its runtime and invocation **Provider Capabilities**.
 - A **Local AWS Provider** is distinct from a **Provider** because it emulates local AWS services rather than defining the Gateway's deployment target.
 - A **Gateway** is the runtime source of truth for dev-visible **Function** and **Event Source** details.
 - A **Gateway** can synthesize an **HTTP API** when it contains route-backed **Functions**.
 - A **Function** can load **Runtime Variables** without making those values part of its **Function Contract**.
 - A **Runtime Variable** is declared on the **Function** that loads it.
 - A **Function** declares **Runtime Variables** through one per-Function variable catalog.
+- A **Data-Bearing Resource** declared with an **AWS Provider** builder is retained by default on every stage; `voke deploy` refuses to remove or replace one unless the run passes `--accept-data-loss`.
+- `aws({ retainData })` is the one opt-out from retention, decided per resource with the resolved stage; a **Local AWS Provider** never retains.
+- Raw resource definitions in `voke.config.ts` are never retained by Voke, whatever their type.
+- `voke remove` lists each **Retained Resource** it left behind with the command that deletes it.
 - A **Runtime Variable** can reference either an external AWS name or a Voke-managed resource key.
 - External AWS names and Voke-managed resource keys use visually distinct authoring forms for **Runtime Variables**.
 - A **Runtime Variable Key** is independent from the **Runtime Variable** source name.
@@ -427,7 +466,10 @@ _Avoid_: idempotency cache, persistence layer
 - A route-backed **Function** can read **Route Auth Context** when its route uses an **HTTP Authorizer**.
 - **Local Authorizer Evaluation** runs **Request Authorizer Functions** locally.
 - **Local Authorizer Evaluation** can inject **Route Auth Context** for tests.
-- **Local Authorizer Evaluation** does not fully validate **JWT Authorizers** by default.
+- **Local Authorizer Evaluation** requires a token from the **Authorizer Identity Source** of a **JWT Authorizer** and checks its issuer, audience and time claims.
+- **Local Authorizer Evaluation** never verifies a token signature.
+- **Local Authorizer Evaluation** gives a route-backed **Function** the same **Route Auth Context** shape the **HTTP API** provides.
+- **Local Authorizer Evaluation** of a **JWT Authorizer** does not run for a request the platform delivered to a deployed **Function**.
 - **Local Authorizer Evaluation** returns Unauthorized when an authorizer identity value is missing.
 - **Local Authorizer Evaluation** returns Forbidden when a **Request Authorizer Function** denies a request.
 - **Local Authorizer Evaluation** treats invalid or failed **Request Authorizer Function** execution as an internal route failure.
@@ -453,6 +495,11 @@ _Avoid_: idempotency cache, persistence layer
 - An **Idempotency Record** belongs to one **Function** and one **Idempotency Key**; two **Functions** with the same key value do not share a record.
 - An **SQS Message Batch** handled with `idempotentBatch(...)` has one **Idempotency Record** per message.
 - A **Durable Function** start uses `executionName` as its idempotency, not an **Idempotency Record**.
+- A **Function** reads only the resources it has a **Resource Link** to, through `context.resource(key)`; its role and environment hold those resources and no others.
+- An **Event Source** gives its **Function** trigger access to the source resource and no **Resource Link**.
+- A **Runtime Variable** built with `fromResource(key)` gives its **Function** that resource's read access and binding, but no **Resource Link**.
+- A **Plugin Contribution** resource is linked like any other resource; `awsPolicy()` statements reach every **Function** role.
+- An in-process invocation runs with the **Resource Links** of the **Function** that was entered first; an invocation that leaves the process starts with its own.
 
 ## Flagged ambiguities
 
@@ -526,10 +573,10 @@ _Avoid_: idempotency cache, persistence layer
 > **Domain expert:** "No, an SQS Function can list multiple **SQS Event Sources** as long as they are the same entrypoint kind."
 >
 > **Dev:** "Does an SQS Event Source configure queue redrive behavior?"
-> **Domain expert:** "No, an SQS Event Source configures Lambda trigger behavior; queue redrive belongs to the queue resource."
+> **Domain expert:** "No, an SQS Event Source configures Lambda trigger behavior; queue redrive belongs to the queue resource. A queue that a Function consumes gets a **Dead-Letter Queue** and a redrive policy by default, and `sqsQueue({ deadLetterQueue: false })` turns it off."
 >
-> **Dev:** "Is DLQ/redrive part of SQS Event Source v1?"
-> **Domain expert:** "No, DLQ/redrive is deferred from SQS Event Source v1 because it belongs to queue resource lifecycle design."
+> **Dev:** "Where do failed events of the other Event Sources go?"
+> **Domain expert:** "To the **Function**'s own **Dead-Letter Queue**, on by default; `deadLetterQueue: false` on the Event Source Function turns it off. Sending events back from it stays manual."
 >
 > **Dev:** "Does an invalid SQS message body fail the whole batch?"
 > **Domain expert:** "No, invalid message bodies are automatic per-message failures by default, and only valid parsed messages reach the handler unless that behavior is disabled."
@@ -653,7 +700,7 @@ _Avoid_: idempotency cache, persistence layer
 
 ## Flagged ambiguities
 
-- "Project creation" means creating a **Project Starter** through `voke create api`, not migrating an existing Serverless project.
+- "Project creation" means creating a **Project Starter** through `voke create <name>`, not migrating an existing Serverless project.
 - "function" can mean a generic TypeScript function or a Voke **Function**; use **Function** only for the named serverless compute unit.
 - In `fn`, `http`, and `sqs`, "name" means an optional deployed AWS Lambda name, not the local registry key.
 - A **Function Registry** key is the stable project identity used for type-safe invocation.
@@ -693,7 +740,7 @@ _Avoid_: idempotency cache, persistence layer
 - Event Source Functions do not mix with HTTP routes or invokable handlers in v1.
 - SQS Functions use plural `events` and may attach multiple **SQS Event Sources**.
 - SQS Event Source v1 options are limited to batch size, maximum batching window, and enabled state.
-- DLQ/redrive configuration is deferred from SQS Event Source v1.
+- Every **Event Source** has a **Dead-Letter Queue** by default: `deadLetterQueue: false` on `sqsQueue()` turns it off for SQS, and on the Event Source Function for every other source. Redrive stays manual.
 - Invalid SQS message bodies are automatic per-message failures by default, with an explicit opt-out for handlers that need to inspect invalid messages.
 - `sqs()` uses `invalidMessageBody: "fail" | "include"` to control invalid body handling.
 - `sqs()` treats SQS message bodies as JSON in v1, validated with its `message` schema.

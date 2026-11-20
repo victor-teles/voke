@@ -4,6 +4,12 @@ import type { ReactNode } from "react";
 
 import { siteDescription, siteName, siteUrl } from "@/lib/site";
 
+// Self-hosted variable fonts: display, text and mono. No request leaves the site for them.
+import "@fontsource-variable/bricolage-grotesque/wdth.css";
+import "@fontsource-variable/instrument-sans";
+
+import "@fontsource/ibm-plex-mono/400.css";
+import "@fontsource/ibm-plex-mono/500.css";
 import "./global.css";
 
 export const metadata: Metadata = {

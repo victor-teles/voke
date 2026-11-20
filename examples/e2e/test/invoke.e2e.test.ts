@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { createInvokeTestClient } from "@voke/testing";
+import { createInvokeTestClient } from "@vokejs/testing";
 import { createFunctions } from "voke";
 
 import { sendWelcomeEmail } from "../src/functions";

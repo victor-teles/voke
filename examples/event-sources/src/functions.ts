@@ -1,5 +1,5 @@
-import { eventBridge, s3, schedule, sns } from "@voke/aws";
-import { schema } from "@voke/schema";
+import { eventBridge, s3, schedule, sns } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
 import { createFunctions } from "voke";
 
 const orderSchema = schema.object({

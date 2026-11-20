@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 
+import corePackageJson from "../package.json";
 import { CliUsageError, createApiProject, runCli, synth } from "../src/cli";
-import { commandSpecs } from "../src/cli-spec";
+import { commandSpecs, formatCommandHelp, formatHelp } from "../src/cli-spec";
 import { defineConfig } from "../src/config";
 import { reservedPluginCommandNames } from "../src/plugin";
 import { tempPath } from "./support/temp";
@@ -68,7 +69,7 @@ test("prints useful run details for real CLI execution", async () => {
 
   expect(output).toEqual([
     [
-      "Voke v0.0.0",
+      `Voke v${corePackageJson.version}`,
       "Command: synth",
       `Run: voke synth --config=${configPath} --name=details-api --stage=qa --out=${templatePath}`,
       `Runtime: Bun ${Bun.version}`,
@@ -133,9 +134,9 @@ test("generated API starter responds through the public test client", async () =
 
   await createApiProject({ directory, name: "smoke-api" });
   await Bun.$`mkdir -p ${directory}/node_modules`;
-  await Bun.$`mkdir -p ${directory}/node_modules/@voke`;
+  await Bun.$`mkdir -p ${directory}/node_modules/@vokejs`;
   await Bun.$`ln -s ${import.meta.dir}/.. ${directory}/node_modules/voke`;
-  await Bun.$`ln -s ${import.meta.dir}/../../aws ${directory}/node_modules/@voke/aws`;
+  await Bun.$`ln -s ${import.meta.dir}/../../aws ${directory}/node_modules/@vokejs/aws`;
   await Bun.$`ln -s ${import.meta.dir}/../node_modules/hono ${directory}/node_modules/hono`;
 
   const { default: service } = (await import(
@@ -143,7 +144,7 @@ test("generated API starter responds through the public test client", async () =
   )) as {
     default: { fetch: typeof fetch };
   };
-  const { createTestClient } = await import("@voke/testing");
+  const { createTestClient } = await import("@vokejs/testing");
   const client = createTestClient(service);
   const response = await client.get("/health");
 
@@ -199,7 +200,7 @@ test("prints the version with --version and -v", async () => {
 
     await runCli([flag], { output: out.output });
 
-    expect(out.lines).toEqual(["voke 0.0.0"]);
+    expect(out.lines).toEqual([`voke ${corePackageJson.version}`]);
   }
 });
 
@@ -241,6 +242,17 @@ test("prints per-command help with usage, description and flags", async () => {
   expect(synthHelp.text()).toContain("--stage");
   await expect(runCli(["help", "nope"])).rejects.toThrow(
     "Unknown command: nope"
+  );
+});
+
+test("deploy help lists --accept-data-loss", async () => {
+  const out = capture();
+
+  await runCli(["deploy", "--help"], { output: out.output });
+
+  expect(out.text()).toContain("[--accept-data-loss]");
+  expect(out.text()).toMatch(
+    /--accept-data-loss +Apply changes that remove or replace a resource that holds data/u
   );
 });
 
@@ -313,8 +325,6 @@ test("migrate serverless reports the skeleton directory", async () => {
 
 test("zero-config names the project from package.json and asks for a provider", async () => {
   const directory = tempPath(`voke-zero-config-${crypto.randomUUID()}`);
-  const previous = process.cwd();
-
   await Bun.write(
     `${directory}/package.json`,
     JSON.stringify({ name: "@acme/orders" })
@@ -328,21 +338,15 @@ export const functions = createFunctions({
 });
 `
   );
-  process.chdir(directory);
+  const synthesis = runCli(["synth"], { cwd: directory });
 
-  try {
-    const synthesis = runCli(["synth"]);
+  await expect(synthesis).rejects.toThrow(CliUsageError);
+  await expect(runCli(["synth"], { cwd: directory })).rejects.toThrow(
+    `No provider configured. Add a provider to voke.config.ts, for example:
 
-    await expect(synthesis).rejects.toThrow(CliUsageError);
-    await expect(runCli(["synth"])).rejects.toThrow(
-      `No provider configured. Add a provider to voke.config.ts, for example:
-
-  import { aws } from "@voke/aws";
+  import { aws } from "@vokejs/aws";
   export default defineConfig({ name: "orders", provider: aws() });`
-    );
-  } finally {
-    process.chdir(previous);
-  }
+  );
 });
 
 test("local reports one confirmation line after the provider workflow succeeds", async () => {
@@ -423,11 +427,13 @@ test("create writes the starter, installs through the runner, and prints next st
   const vokeVersions = Object.entries(
     manifest.dependencies as Record<string, string>
   )
-    .filter(([name]) => name === "voke" || name.startsWith("@voke/"))
+    .filter(([name]) => name === "voke" || name.startsWith("@vokejs/"))
     .map(([, version]) => version);
 
   expect(manifest.name).toBe("orders-api");
-  expect(vokeVersions).toEqual(["^0.0.0", "^0.0.0", "^0.0.0"]);
+  expect(vokeVersions).toEqual(
+    Array.from({ length: 3 }, () => `^${corePackageJson.version}`)
+  );
   expect(runner.calls).toEqual([
     { command: ["bun", "install"], cwd: directory },
   ]);
@@ -550,6 +556,7 @@ export default defineConfig({
           export: {
             description: "Write the API description.",
             usage: "voke docs export [file] [--format json] [--pretty]",
+            positionals: [{ name: "file" }],
             flags: {
               format: { description: "Output format" },
               pretty: { boolean: true, description: "Indent the output" },
@@ -599,6 +606,17 @@ test("runs a Plugin command with its parsed flags, positionals and Functions", a
     name: "plugin-cli",
     positional: ["openapi.json"],
   });
+});
+
+test("a Plugin command rejects an argument beyond its declared positionals", async () => {
+  const directory = tempPath(`voke-plugin-cli-${crypto.randomUUID()}`);
+  const configPath = await writePluginProject(directory);
+
+  await expect(
+    runCli(["docs", "export", "a.json", "b.json", "--config", configPath])
+  ).rejects.toThrow(
+    'Invalid CLI usage: Unexpected argument "b.json" for "docs export".\nUsage: voke docs export [file] [--format json] [--pretty]'
+  );
 });
 
 test("a Plugin command rejects an unknown flag with a suggestion", async () => {
@@ -655,14 +673,11 @@ test("voke --help lists Plugin commands when ./voke.config.ts loads", async () =
   const directory = tempPath(`voke-plugin-cli-${crypto.randomUUID()}`);
   await writePluginProject(directory);
   const lines: string[] = [];
-  const previousPwd = process.env.PWD;
 
-  try {
-    process.env.PWD = directory;
-    await runCli(["--help"], { output: (line) => lines.push(line) });
-  } finally {
-    process.env.PWD = previousPwd;
-  }
+  await runCli(["--help"], {
+    cwd: directory,
+    output: (line) => lines.push(line),
+  });
 
   expect(lines[0]).toContain(
     "Plugin commands:\n  voke docs export  Write the API description."
@@ -676,14 +691,11 @@ test("voke --help still lists built-in commands when the config fails to load", 
     "throw new Error('broken');\n"
   );
   const lines: string[] = [];
-  const previousPwd = process.env.PWD;
 
-  try {
-    process.env.PWD = directory;
-    await runCli(["--help"], { output: (line) => lines.push(line) });
-  } finally {
-    process.env.PWD = previousPwd;
-  }
+  await runCli(["--help"], {
+    cwd: directory,
+    output: (line) => lines.push(line),
+  });
 
   expect(lines[0]).toContain("voke synth");
   expect(lines[0]).not.toContain("Plugin commands:");
@@ -768,4 +780,46 @@ test("create rejects invalid names and the removed create api form", async () =>
   await expect(runCli(["create", "api", "orders"])).rejects.toThrow(
     'Invalid CLI usage: "voke create api" was replaced by: voke create <name> [directory]'
   );
+});
+
+test("every example deploys and removes the dev stage, as the scaffold does", async () => {
+  const examples = `${import.meta.dir}/../../../examples`;
+  const scripts: Record<string, Record<string, string>> = {};
+
+  for await (const path of new Bun.Glob("*/package.json").scan(examples)) {
+    const packageJson = (await Bun.file(`${examples}/${path}`).json()) as {
+      scripts?: Record<string, string>;
+    };
+    const { deploy, remove } = packageJson.scripts ?? {};
+
+    scripts[path] = {
+      ...(deploy === undefined ? {} : { deploy }),
+      ...(remove === undefined ? {} : { remove }),
+    };
+  }
+
+  expect(Object.keys(scripts).length).toBeGreaterThan(0);
+
+  for (const [path, { deploy, remove }] of Object.entries(scripts)) {
+    expect({ deploy, path, remove }).toEqual({
+      deploy: deploy === undefined ? undefined : "voke deploy --stage dev",
+      path,
+      remove: remove === undefined ? undefined : "voke remove --stage dev",
+    });
+  }
+});
+
+test("the CLI reference page shows the real help output", async () => {
+  const page = await Bun.file(
+    new URL(
+      "../../../apps/docs/content/docs/reference/cli.mdx",
+      import.meta.url
+    )
+  ).text();
+
+  expect(page).toContain(formatHelp());
+
+  for (const name of Object.keys(commandSpecs)) {
+    expect(page).toContain(formatCommandHelp(name));
+  }
 });

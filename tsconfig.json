@@ -11,6 +11,9 @@
 
     // Bundler mode
     "moduleResolution": "bundler",
+    // Workspace packages resolve each other's source; a published package's consumers get the
+    // "types" condition (declaration files) instead. See docs/adr/0026-published-package-shape.md.
+    "customConditions": ["@vokejs/source"],
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "noEmit": true,

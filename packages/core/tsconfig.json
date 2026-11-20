@@ -3,19 +3,19 @@
   "include": ["src/**/*.ts", "test/**/*.ts"],
   "compilerOptions": {
     "strictNullChecks": true,
-    // Core tests exercise the split @voke/* packages, which depend on core.
+    // Core tests exercise the split @vokejs/* packages, which depend on core.
     // Declaring them as dependencies would create a workspace cycle, so tests
     // resolve them from source instead (Bun honors these paths at runtime).
     "paths": {
-      "@voke/aws": ["../aws/src/index.ts"],
-      "@voke/aws/*": ["../aws/src/*.ts"],
-      "@voke/build": ["../build/src/index.ts"],
-      "@voke/http": ["../http/src/index.ts"],
-      "@voke/openapi": ["../openapi/src/index.ts"],
-      "@voke/idempotency": ["../idempotency/src/index.ts"],
-      "@voke/remote": ["../remote/src/index.ts"],
-      "@voke/schema": ["../schema/src/index.ts"],
-      "@voke/testing": ["../testing/src/index.ts"]
+      "@vokejs/aws": ["../aws/src/index.ts"],
+      "@vokejs/aws/*": ["../aws/src/*.ts"],
+      "@vokejs/build": ["../build/src/index.ts"],
+      "@vokejs/http": ["../http/src/index.ts"],
+      "@vokejs/openapi": ["../openapi/src/index.ts"],
+      "@vokejs/idempotency": ["../idempotency/src/index.ts"],
+      "@vokejs/remote": ["../remote/src/index.ts"],
+      "@vokejs/schema": ["../schema/src/index.ts"],
+      "@vokejs/testing": ["../testing/src/index.ts"]
     }
   }
 }

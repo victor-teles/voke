@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { runCli } from "../src/cli";
+import { CliUsageError, createApiProject, runCli } from "../src/cli";
 import {
   createServerlessMigration,
   parseServerlessYaml,
@@ -166,6 +166,17 @@ const deploymentBucketVariable = `\${self:service}-deployments`;
 const functionTableVariable = `\${self:provider.environment.SHARED_TABLE}`;
 const providerRegionVariable = `\${self:custom.region}`;
 const providerStageVariable = `\${opt:stage, 'dev'}`;
+// A generated voke.config.ts holds only literal values: no Serverless variable, no CloudFormation
+// tag, no stringified object and no block scalar indicator left over from parsing.
+const expectCleanConfig = (config: string | undefined): void => {
+  expect(config).toBeString();
+  expect(config).not.toContain("${");
+  expect(config).not.toContain("!Ref");
+  expect(config).not.toContain("[object Object]");
+  expect(config).not.toContain(': ">"');
+  expect(config).not.toContain(': "|"');
+};
+
 const readServerlessMigrationFixture = (name: string): Promise<string> =>
   Bun.file(
     `${import.meta.dir}/../../../examples/serverless-migration/${name}/serverless.yml`
@@ -356,8 +367,8 @@ test("parses Phase 17 Serverless Framework coverage fixtures", () => {
   expect(service.provider).toMatchObject({
     deploymentBucket: { name: deploymentBucketVariable },
     environment: {
-      INLINE_LIST: "alpha,beta",
-      SHARED_TABLE: "[object Object]",
+      INLINE_LIST: ["alpha", "beta"],
+      SHARED_TABLE: { Ref: "UsersTable" },
     },
     iamRoleStatements: [
       {
@@ -658,8 +669,6 @@ test("creates a measurable migration report and Voke skeleton files", () => {
     "provider stage",
     "provider region",
     "provider environment",
-    "provider IAM statements",
-    "package patterns",
     "plugins inventory",
     "HTTP API event: listOrders GET /orders",
     "REST API event: listOrders POST /orders",
@@ -669,10 +678,20 @@ test("creates a measurable migration report and Voke skeleton files", () => {
   expect(migration.report.unsupported).toEqual([
     "plugin serverless-webpack maps to Voke Bun build but requires bundler option review",
     "sqs event on fulfillOrder requires manual implementation. Queue source cannot be resolved to a migrated Voke SQS queue resource.",
-    "schedule event on scheduledReport requires manual implementation. Rewrite it with `schedule()` from `@voke/aws`; review the expression and time zone.",
+    "schedule event on scheduledReport requires manual implementation. Rewrite it with `schedule()` from `@vokejs/aws`; review the expression and time zone.",
   ]);
   expect(migration.report.manualSteps).toContain(
     "Move one Serverless function at a time by routing migrated HTTP paths to Voke while the original service keeps the remaining functions."
+  );
+  expectCleanConfig(migration.files["./voke-orders/voke.config.ts"]);
+  expect(migration.files["./voke-orders/voke.config.ts"]).toContain(
+    'stage: "prod",'
+  );
+  expect(migration.files["./voke-orders/voke.config.ts"]).toContain(
+    'region: "sa-east-1",'
+  );
+  expect(migration.files["./voke-orders/voke.config.ts"]).toContain(
+    '"LOG_LEVEL": "info"'
   );
 });
 
@@ -704,20 +723,12 @@ test("reports expanded event coverage and unknown fields deterministically", () 
 
   expect(migration.report.supported).toEqual([
     "service name",
-    "provider stage",
-    "provider region",
-    "provider environment",
-    "provider IAM statements",
-    "provider deployment bucket",
-    "package patterns",
-    "package individually flag",
     "plugins inventory",
     "layers inventory",
     "custom fields inventory",
     "resources inventory",
     "CloudFormation resource: UsersTable AWS::DynamoDB::Table",
     "HTTP API event: apiHandler GET /profiles/{id}",
-    "REST API event: apiHandler POST /profiles",
     "SNS event inventory: apiHandler",
     "EventBridge event: apiHandler",
     "S3 event inventory: apiHandler",
@@ -727,13 +738,14 @@ test("reports expanded event coverage and unknown fields deterministically", () 
   ]);
   expect(migration.report.unsupported).toEqual([
     "plugin serverless-esbuild maps to Voke Bun build but requires bundler option review",
-    "sns event on apiHandler requires manual implementation. Rewrite it with `sns()` from `@voke/aws` and declare the topic with `snsTopic()`; review the filter policy.",
+    "REST API event: apiHandler POST /profiles is generated behind migrationBlocked. REST API authorizers and API keys are not converted.",
+    "sns event on apiHandler requires manual implementation. Rewrite it with `sns()` from `@vokejs/aws` and declare the topic with `snsTopic()`; review the filter policy.",
     "sqs event on apiHandler requires manual implementation. Queue source OrdersQueue is not generated as a Voke SQS queue resource.",
-    "s3 event on apiHandler requires manual implementation. Rewrite it with `s3()` from `@voke/aws`; the bucket must be a Voke resource declared with `s3Bucket()`.",
-    "schedule event on apiHandler requires manual implementation. Rewrite it with `schedule()` from `@voke/aws`; review the expression and time zone.",
-    "stream event on apiHandler requires manual implementation. Rewrite it with kinesis() or dynamodbStream() from @voke/aws, then review the starting position, batching and retry settings.",
+    "s3 event on apiHandler requires manual implementation. Rewrite it with `s3()` from `@vokejs/aws`; the bucket must be a Voke resource declared with `s3Bucket()`.",
+    "schedule event on apiHandler requires manual implementation. Rewrite it with `schedule()` from `@vokejs/aws`; review the expression and time zone.",
+    "stream event on apiHandler requires manual implementation. Rewrite it with kinesis() or dynamodbStream() from @vokejs/aws, then review the starting position, batching and retry settings.",
     "Unsupported Serverless event kafka on function apiHandler: kafka is not an automatic Voke migration target. Recreate the trigger, permissions, batching, and failure behavior manually before cutting over.",
-    "stream event on kinesisWorker requires manual implementation. Rewrite it with kinesis() or dynamodbStream() from @voke/aws, then review the starting position, batching and retry settings.",
+    "stream event on kinesisWorker requires manual implementation. Rewrite it with kinesis() or dynamodbStream() from @vokejs/aws, then review the starting position, batching and retry settings.",
   ]);
   expect(migration.report.unknownFields).toEqual([
     {
@@ -768,7 +780,7 @@ test("reports expanded event coverage and unknown fields deterministically", () 
     migration.files["./voke-advanced/SERVERLESS_COMPATIBILITY.md"]
   ).toContain("Inventory only");
   expect(migration.files["./voke-advanced/voke.config.ts"]).toContain(
-    'import { dynamodbTable } from "@voke/aws/cloudformation";'
+    'import { dynamodbTable } from "@vokejs/aws/cloudformation";'
   );
   expect(migration.files["./voke-advanced/voke.config.ts"]).toContain(
     '"UsersTable": dynamodbTable()'
@@ -781,7 +793,7 @@ test("reports expanded event coverage and unknown fields deterministically", () 
   ).toContain('provider: awsLambda({ runtime: "nodejs24.x" })');
   expect(
     migration.files["./voke-advanced/src/functions/api-handler.ts"]
-  ).toContain('import { awsLambda } from "@voke/aws";');
+  ).toContain('import { awsLambda } from "@vokejs/aws";');
   expect(migration.files["./voke-advanced/voke.config.ts"]).toContain(
     'provider: aws({ lambda: { runtime: "nodejs22.x" } }),'
   );
@@ -792,6 +804,7 @@ test("reports expanded event coverage and unknown fields deterministically", () 
     '"Fn::GetAtt": ['
   );
   expect(migration.files["./voke-advanced/src/stack.ts"]).toBeUndefined();
+  expectCleanConfig(migration.files["./voke-advanced/voke.config.ts"]);
 });
 
 test("generates config-first resources and preserves unsafe resources as manual work", () => {
@@ -804,7 +817,7 @@ test("generates config-first resources and preserves unsafe resources as manual 
   const report = migration.files["./voke-resources/MIGRATION_REPORT.md"];
 
   expect(config).toContain(
-    'import { dynamodbTable, eventBus, s3Bucket, secret, sqsQueue, ssmParameter } from "@voke/aws/cloudformation";'
+    'import { dynamodbTable, eventBus, s3Bucket, secret, sqsQueue, ssmParameter } from "@vokejs/aws/cloudformation";'
   );
   expect(config).toContain(
     '"OrdersTable": dynamodbTable({ partitionKey: "tenantId", sortKey: "orderId", billingMode: "PAY_PER_REQUEST" })'
@@ -829,6 +842,7 @@ test("generates config-first resources and preserves unsafe resources as manual 
     "CloudFormation resource AuditLog (AWS::Logs::LogGroup) requires manual migration because Voke cannot safely generate an equivalent config helper."
   );
   expect(migration.files["./voke-resources/src/stack.ts"]).toBeUndefined();
+  expectCleanConfig(config);
 });
 
 test("generates first-class SQS Event Sources for resolvable queues and reports manual queue gaps", () => {
@@ -846,7 +860,7 @@ test("generates first-class SQS Event Sources for resolvable queues and reports 
   const compatibility =
     migration.files["./voke-sqs-events/SERVERLESS_COMPATIBILITY.md"];
 
-  expect(processOrder).toContain('import { sqs } from "@voke/aws";');
+  expect(processOrder).toContain('import { sqs } from "@vokejs/aws";');
   expect(processOrder).toContain(
     'queue: { queue: "OrdersQueue", batchSize: 10, enabled: false, maxBatchingWindowSeconds: 20 },'
   );
@@ -928,6 +942,23 @@ test("generates skeletons from example Serverless migration fixtures", async () 
   expect(
     eventBridgeWorker.files["./voke-eventbridge-worker/src/stack.ts"]
   ).toBeUndefined();
+
+  for (const migration of [httpApi, restApi, sqsWorker, eventBridgeWorker]) {
+    const configPath = Object.keys(migration.files).find((path) =>
+      path.endsWith("/voke.config.ts")
+    );
+
+    expectCleanConfig(configPath && migration.files[configPath]);
+    // None of these fixtures has an authorizer, so the entrypoint stays as before.
+    expect(
+      Object.keys(migration.files).some((path) =>
+        path.endsWith("/src/authorizers.ts")
+      )
+    ).toBe(false);
+  }
+  expect(httpApi.files["./voke-http-api/src/index.ts"]).not.toContain(
+    "authorizers"
+  );
 });
 
 test("reports Serverless Framework plugin compatibility deterministically", () => {
@@ -1023,7 +1054,7 @@ test("reports Serverless Framework plugin compatibility deterministically", () =
       ],
       name: "serverless-iam-roles-per-function",
       notes: [
-        "Voke generates one function role policy surface today; per-function IAM isolation is not converted automatically.",
+        "Voke scopes each Function role to the resources that Function links; per-function IAM statements are still not converted automatically.",
       ],
       status: "manual",
       summary: "Per-function IAM behavior requires explicit security review.",
@@ -1086,7 +1117,7 @@ test("reports Serverless Framework plugin compatibility deterministically", () =
     },
     {
       manualSteps: [
-        "Rewrite Lambda-centric workflows as durable() Functions from @voke/aws: steps, waits and callbacks become TypeScript in the Function's handler.",
+        "Rewrite Lambda-centric workflows as durable() Functions from @vokejs/aws: steps, waits and callbacks become TypeScript in the Function's handler.",
         "Declare state machines you keep as raw CloudFormation resources in voke.config.ts, with their IAM roles and permissions.",
       ],
       name: "serverless-step-functions",
@@ -1156,13 +1187,15 @@ test("runs serverless migration through the CLI parser", async () => {
   await Bun.$`mkdir -p ${directory}`;
   await Bun.write(serverlessPath, serverlessYaml);
 
-  await runCli([
-    "migrate",
-    "serverless",
-    serverlessPath,
-    "--out",
-    outDirectory,
-  ]);
+  const lines: string[] = [];
+
+  await runCli(
+    ["migrate", "serverless", serverlessPath, "--out", outDirectory],
+    { output: (message) => lines.push(message) }
+  );
+
+  // Without blocking tasks the CLI prints only where it wrote the skeleton.
+  expect(lines).toEqual([`Wrote migration skeleton to ${outDirectory}`]);
 
   expect(await Bun.file(`${outDirectory}/voke.config.ts`).exists()).toBe(true);
   expect(await Bun.file(`${outDirectory}/src/index.ts`).exists()).toBe(true);
@@ -1173,4 +1206,709 @@ test("runs serverless migration through the CLI parser", async () => {
   expect(
     await Bun.file(`${outDirectory}/SERVERLESS_COMPATIBILITY.md`).exists()
   ).toBe(true);
+});
+
+const minimalService = (body: string): string => `service: probe-api
+
+provider:
+  name: aws
+${body}`;
+
+const migrate = (source: string, outDirectory = "./out") =>
+  createServerlessMigration({ outDirectory, source });
+
+const expectUsageError = (run: () => unknown, ...fragments: string[]): void => {
+  let caught: unknown;
+
+  try {
+    run();
+  } catch (error) {
+    caught = error;
+  }
+
+  expect(caught).toBeInstanceOf(CliUsageError);
+
+  for (const fragment of fragments) {
+    expect((caught as Error).message).toContain(fragment);
+  }
+};
+
+test("reads YAML merge keys into the merged mapping", () => {
+  const service = parseServerlessYaml(`service: merge-api
+custom:
+  common: &common
+    runtime: nodejs22.x
+    memorySize: 256
+    timeout: 6
+  network: &network
+    timeout: 9
+  tracing: &tracing
+    memorySize: 1024
+functions:
+  listPayments:
+    <<: *common
+    handler: src/list.handler
+  createPayment:
+    <<: [*network, *tracing]
+    handler: src/create.handler
+`);
+
+  expect(service.functions.listPayments).toMatchObject({
+    memorySize: 256,
+    runtime: "nodejs22.x",
+    timeout: 6,
+  });
+  expect(service.functions.listPayments?.unknownFields).toEqual([]);
+  expect(service.functions.createPayment).toMatchObject({
+    memorySize: 1024,
+    timeout: 9,
+  });
+});
+
+test("reads YAML block scalars as their text", () => {
+  const service = parseServerlessYaml(
+    minimalService(`  environment:
+    DESCRIPTION: >
+      Payments
+      service
+    SCRIPT: |
+      echo one
+      - !Ref NotATag
+`)
+  );
+
+  expect(service.provider.environment).toEqual({
+    DESCRIPTION: "Payments service\n",
+    SCRIPT: "echo one\n- !Ref NotATag\n",
+  });
+});
+
+test("reads CloudFormation short-form tags as their long form", () => {
+  const service = parseServerlessYaml(`service: tags-api
+custom:
+  queue: !Ref PaymentsQueue
+  table: !GetAtt PaymentsTable.Arn
+  sub: !Sub "arn:\${AWS::Region}: x"
+  join: !Join ['-', [a, !Ref B]]
+  refs:
+    - !Ref X
+    - plain
+  equals: !Equals []
+  select: !Select { Index: 0 }
+`);
+
+  expect(service.custom).toEqual({
+    equals: { "Fn::Equals": [] },
+    join: { "Fn::Join": ["-", ["a", { Ref: "B" }]] },
+    queue: { Ref: "PaymentsQueue" },
+    refs: [{ Ref: "X" }, "plain"],
+    select: { "Fn::Select": { Index: 0 } },
+    sub: { "Fn::Sub": `arn:\${AWS::Region}: x` },
+    table: { "Fn::GetAtt": ["PaymentsTable", "Arn"] },
+  });
+});
+
+test("leaves an exclamation mark in quotes, comments and block scalars alone", () => {
+  const service = parseServerlessYaml(`service: quoted-api # !Ref InComment
+package:
+  patterns: ["!test/**", '!docs/**']
+  individually: true
+custom:
+  # - !Ref Commented
+  script: |
+    - !Ref x
+  note: "it says !Ref here"
+`);
+
+  expect(service.package?.patterns).toEqual(["!test/**", "!docs/**"]);
+  expect(service.custom).toEqual({
+    note: "it says !Ref here",
+    script: "- !Ref x\n",
+  });
+});
+
+test("stops on a tag followed by a block value and lists every such line", () => {
+  expectUsageError(
+    () =>
+      parseServerlessYaml(`service: block-tags
+custom:
+  value: !Join
+    - "-"
+    - [a, b]
+  script: !Sub |
+    echo \${AWS::Region}
+`),
+    "line 3",
+    "line 6",
+    "long form",
+    "Fn::Join:"
+  );
+});
+
+test("stops on a YAML syntax error", () => {
+  expectUsageError(
+    () => parseServerlessYaml("service: broken\nprovider:\n\tname: aws\n"),
+    "Cannot read serverless.yml"
+  );
+});
+
+test("stops on a file that is not one YAML mapping", () => {
+  expectUsageError(() => parseServerlessYaml(""), "empty");
+  expectUsageError(() => parseServerlessYaml("- one\n- two\n"), "list");
+  expectUsageError(
+    () => parseServerlessYaml("service: one\n---\nservice: two\n"),
+    "documents"
+  );
+});
+
+test("stops on a self-referencing alias", () => {
+  expectUsageError(
+    () => parseServerlessYaml("service: loop\ncustom: &loop\n  self: *loop\n"),
+    "refers to itself"
+  );
+});
+
+test("omits a stage that is not a literal and reports it", () => {
+  const migration = migrate(
+    minimalService(`  stage: \${opt:stage, 'dev'}
+  region: us-east-1
+`)
+  );
+  const config = migration.files["./out/voke.config.ts"];
+
+  expectCleanConfig(config);
+  expect(config).not.toContain("stage:");
+  expect(config).toContain('region: "us-east-1",');
+  expect(migration.report.supported).not.toContain("provider stage");
+  expect(migration.report.supported).toContain("provider region");
+  expect(migration.report.manualTasks).toContainEqual(
+    expect.objectContaining({
+      message: expect.stringContaining(providerStageVariable),
+      risk: "medium",
+    })
+  );
+});
+
+test("omits a region that is not a literal and reports it as high risk", () => {
+  const migration = migrate(
+    minimalService(`  stage: prod
+  region: \${env:AWS_REGION, 'us-east-1'}
+`)
+  );
+  const config = migration.files["./out/voke.config.ts"];
+
+  expectCleanConfig(config);
+  expect(config).not.toContain("region:");
+  expect(config).toContain('stage: "prod",');
+  expect(migration.report.supported).not.toContain("provider region");
+  expect(migration.report.manualTasks).toContainEqual(
+    expect.objectContaining({
+      message: expect.stringContaining(`\${env:AWS_REGION, 'us-east-1'}`),
+      risk: "high",
+    })
+  );
+});
+
+test("copies only literal environment values into the config", () => {
+  const migration = migrate(
+    minimalService(`  environment:
+    LOG_LEVEL: info
+    RETRIES: 3
+    STAGE_NAME: \${self:provider.stage}
+    DB_PASSWORD: \${ssm:/payments/db-password}
+    QUEUE_URL: !Ref PaymentsQueue
+    TOPIC_ARN:
+      Ref: PaymentsTopic
+    TABLE_ARN:
+      Fn::GetAtt: [PaymentsTable, Arn]
+    REGIONS: [us-east-1, sa-east-1]
+`)
+  );
+  const config = migration.files["./out/voke.config.ts"] ?? "";
+  const environmentTasks = migration.report.manualTasks.filter((task) =>
+    task.message.startsWith("Environment variable ")
+  );
+
+  expectCleanConfig(config);
+  expect(config).toContain('"LOG_LEVEL": "info"');
+  expect(config).toContain('"RETRIES": "3"');
+
+  for (const key of [
+    "STAGE_NAME",
+    "DB_PASSWORD",
+    "QUEUE_URL",
+    "TOPIC_ARN",
+    "TABLE_ARN",
+    "REGIONS",
+  ]) {
+    expect(config).not.toContain(key);
+  }
+
+  expect(environmentTasks.map((task) => task.risk)).toEqual([
+    "high",
+    "high",
+    "high",
+    "high",
+    "high",
+    "high",
+  ]);
+  expect(environmentTasks.map((task) => task.message).join("\n")).toContain(
+    `\${ssm:/payments/db-password}`
+  );
+  expect(
+    environmentTasks.find((task) => task.message.includes("DB_PASSWORD"))
+      ?.reason
+  ).toContain("Runtime Variables");
+  expect(
+    environmentTasks.find((task) => task.message.includes("QUEUE_URL"))?.reason
+  ).toContain("Resources");
+});
+
+test("marks the compatibility rows of omitted provider values as manual work", () => {
+  const migration = migrate(
+    minimalService(`  stage: \${opt:stage}
+  environment:
+    SECRET: \${ssm:/secret}
+`)
+  );
+  const compatibility = migration.files["./out/SERVERLESS_COMPATIBILITY.md"];
+
+  expect(compatibility).toMatch(
+    /\| Provider stage and region +\| Manual work +\|[^\n]*Provider stage \$\{opt:stage\} is not copied/u
+  );
+  expect(compatibility).toMatch(
+    /\| Provider environment +\| Manual work +\|[^\n]*Environment variable SECRET/u
+  );
+});
+
+test("renders the blocking level first and counts it in the summary", () => {
+  const migration = migrate(serverlessYaml);
+  const report = migration.files["./out/MIGRATION_REPORT.md"] ?? "";
+
+  expect(report).toContain(
+    "### Blocking\n\n- No blocking manual work.\n\n### High risk"
+  );
+  expect(report).toMatch(/\| Blocking tasks +\| 0 +\|/u);
+});
+
+const readAuthorizerFixture = async () =>
+  migrate(
+    await readServerlessMigrationFixture("http-api-authorizers"),
+    "./voke-auth"
+  );
+
+test("generates the HTTP Authorizer Registry for converted authorizers", async () => {
+  const migration = await readAuthorizerFixture();
+  const authorizers = migration.files["./voke-auth/src/authorizers.ts"] ?? "";
+
+  expect(authorizers).toContain("createAuthorizers(");
+  expect(authorizers).toContain(
+    'issuer: "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_example"'
+  );
+  expect(authorizers).toContain('audience: ["example-client-id"]');
+  expect(authorizers).toContain(
+    'lambdaAuthorizer({\n    function: "authorizerFn"'
+  );
+  expect(authorizers).toContain("cacheTtlSeconds: 300");
+  expect(authorizers).toContain(
+    'function: { arn: "arn:aws:lambda:us-east-1:123456789012:function:external-authorizer" }'
+  );
+  expect(authorizers).not.toContain("policy-authorizer");
+  expect(authorizers).toContain(
+    '"migrationBlocked": lambdaAuthorizer({ function: "migrationBlocked" })'
+  );
+  expect(authorizers.match(/requestAuthorizer\(/gu)).toHaveLength(2);
+  expect(
+    authorizers.match(/\(\) => \(\{ authorized: false \}\)/gu)
+  ).toHaveLength(2);
+  expect(migration.report.generatedFiles).toContainEqual(
+    expect.objectContaining({ path: "./voke-auth/src/authorizers.ts" })
+  );
+});
+
+test("names the authorizer on every migrated route that had one", async () => {
+  const migration = await readAuthorizerFixture();
+  const orders = migration.files["./voke-auth/src/routes/list-orders.ts"] ?? "";
+  const sessions = migration.files["./voke-auth/src/routes/sessions.ts"] ?? "";
+  const admin = migration.files["./voke-auth/src/routes/admin.ts"] ?? "";
+
+  expect(orders).toContain(
+    'route.get("/orders", {\n    authorizer: "cognitoJwt",'
+  );
+  expect(orders).toContain(
+    'route.delete("/orders/:id", {\n    authorizer: "cognitoJwt",'
+  );
+  expect(orders).toContain('route.get("/health", {\n    handler');
+  expect(sessions).toContain(
+    'route.get("/sessions", {\n    authorizer: "customLambda",'
+  );
+  expect(sessions).toContain(
+    'route.get("/partners", {\n    authorizer: "externalSimple",'
+  );
+  expect(sessions).toContain(
+    'route.get("/legacy", {\n    authorizer: "migrationBlocked",'
+  );
+  expect(admin.match(/authorizer: "migrationBlocked"/gu)).toHaveLength(3);
+});
+
+test("registers authorizers and Request Authorizer Functions in the entrypoint", async () => {
+  const migration = await readAuthorizerFixture();
+  const index = migration.files["./voke-auth/src/index.ts"] ?? "";
+
+  expect(index).toContain(
+    'import { authorizerFn, authorizers, migrationBlocked } from "./authorizers";'
+  );
+  expect(index).toContain("http: http({\n    authorizers,\n");
+  expect(index).toContain('"authorizerFn": authorizerFn,');
+  expect(index).toContain('"migrationBlocked": migrationBlocked,');
+});
+
+test("never generates a route of a protected event without an authorizer", async () => {
+  const migration = await readAuthorizerFixture();
+  let protectedEvents = 0;
+
+  for (const fn of Object.values(migration.service.functions)) {
+    const routeFile =
+      migration.files[
+        `./voke-auth/src/routes/${fn.name
+          .replaceAll(/([a-z0-9])([A-Z])/gu, "$1-$2")
+          .toLowerCase()}.ts`
+      ] ?? "";
+
+    for (const event of fn.events) {
+      if (event.type !== "http" && event.type !== "httpApi") {
+        continue;
+      }
+
+      const raw =
+        typeof event.raw === "object" && event.raw !== null ? event.raw : {};
+      const isProtected = "authorizer" in raw || "private" in raw;
+      const path = event.path.replaceAll(/\{([A-Za-z0-9_]+)\}/gu, ":$1");
+      const start = routeFile.indexOf(
+        `route.${event.method.toLowerCase()}(${JSON.stringify(path)}, {`
+      );
+      const block = routeFile.slice(start, routeFile.indexOf("handler", start));
+
+      expect(start).toBeGreaterThanOrEqual(0);
+
+      if (isProtected) {
+        protectedEvents += 1;
+        expect(block).toContain("authorizer: ");
+      } else {
+        expect(block).not.toContain("authorizer: ");
+      }
+    }
+  }
+
+  expect(protectedEvents).toBe(8);
+});
+
+test("reports every non-equivalent authorizer as a blocking task", async () => {
+  const migration = await readAuthorizerFixture();
+  const blocking = migration.report.manualTasks
+    .filter((task) => task.risk === "blocking")
+    .map((task) => task.message)
+    .join("\n");
+  const high = migration.report.manualTasks
+    .filter((task) => task.risk === "high")
+    .map((task) => task.message)
+    .join("\n");
+
+  expect(blocking).toContain("DELETE /orders/{id}");
+  expect(blocking).toContain("orders/admin");
+  expect(blocking).toContain("authorizerFn");
+  expect(blocking).toContain("GET /legacy");
+  expect(blocking).toContain("POST /admin/jobs");
+  expect(blocking).toContain("GET /admin/report");
+  expect(blocking).toContain("POST /admin/keys");
+  expect(high).toContain(
+    "arn:aws:lambda:us-east-1:123456789012:function:external-authorizer"
+  );
+  expect(
+    migration.report.supported.filter((item) => item.includes(" API event"))
+  ).toEqual([
+    "HTTP API event: listOrders GET /orders",
+    "HTTP API event: listOrders GET /health",
+  ]);
+  expect(
+    migration.report.unsupported.filter((item) => item.includes(" API event"))
+  ).toHaveLength(7);
+  expect(migration.files["./voke-auth/MIGRATION_REPORT.md"]).toMatch(
+    /## Manual work by risk\n\n### Blocking\n\n\| Area/u
+  );
+  expect(migration.files["./voke-auth/SERVERLESS_COMPATIBILITY.md"]).toMatch(
+    /\| HTTP authorizers +\| Manual work/u
+  );
+  expect(migration.files["./voke-auth/SERVERLESS_COMPATIBILITY.md"]).toMatch(
+    /\| HTTP API event +\| Manual work/u
+  );
+});
+
+test("reads provider.httpApi authorizers and reports its other keys", async () => {
+  const migration = await readAuthorizerFixture();
+
+  expect(migration.report.unknownFields.map((field) => field.path)).toEqual([
+    "provider.httpApi.payload",
+  ]);
+});
+
+test("blocks authorizers whose settings are not literal or not equivalent", () => {
+  const migration = migrate(`service: odd-auth
+provider:
+  name: aws
+  httpApi:
+    authorizers:
+      dynamicJwt:
+        issuerUrl: \${self:custom.issuer}
+        audience: [app]
+      busyFunction:
+        type: request
+        functionName: worker
+        enableSimpleResponses: true
+      legacyPayload:
+        type: request
+        functionArn: arn:aws:lambda:us-east-1:1:function:a
+        enableSimpleResponses: true
+        payloadVersion: "1.0"
+functions:
+  worker:
+    handler: src/worker.handler
+    events:
+      - httpApi:
+          method: get
+          path: /one
+          authorizer: dynamicJwt
+      - httpApi:
+          method: get
+          path: /two
+          authorizer: busyFunction
+      - httpApi:
+          method: get
+          path: /three
+          authorizer: legacyPayload
+      - httpApi:
+          method: get
+          path: /four
+          authorizer: none
+`);
+  const routes = migration.files["./out/src/routes/worker.ts"] ?? "";
+  const blocking = migration.report.manualTasks.filter(
+    (task) => task.risk === "blocking"
+  );
+
+  expect(routes.match(/authorizer: "migrationBlocked"/gu)).toHaveLength(4);
+  expect(blocking).toHaveLength(4);
+  expect(blocking[0]?.reason).toContain(`\${self:custom.issuer}`);
+  expect(migration.files["./out/src/authorizers.ts"]).not.toContain(
+    "dynamicJwt"
+  );
+});
+
+test("converts httpApi CORS true and reports other CORS settings", () => {
+  const enabled = migrate(
+    minimalService(`  httpApi:
+    cors: true
+`)
+  );
+  const detailed = migrate(
+    minimalService(`  httpApi:
+    cors:
+      allowedOrigins: [https://example.com]
+functions:
+  api:
+    handler: src/api.handler
+    events:
+      - http:
+          method: get
+          path: /x
+          cors: true
+`)
+  );
+
+  expect(enabled.files["./out/voke.config.ts"]).toContain(
+    "api: { cors: true },"
+  );
+  expect(enabled.report.converted).toContainEqual(
+    expect.objectContaining({
+      confidence: "medium",
+      message: expect.stringContaining("CORS"),
+    })
+  );
+  expect(detailed.files["./out/voke.config.ts"]).not.toContain("cors");
+  expect(
+    detailed.report.manualTasks.filter(
+      (task) => task.message.includes("CORS") && task.risk === "medium"
+    )
+  ).toHaveLength(2);
+});
+
+test("reports function settings that the generated project drops", () => {
+  const migration = migrate(
+    serverlessYaml.replace(
+      "    handler: src/functions/list-orders.handler\n",
+      "    handler: src/functions/list-orders.handler\n    timeout: 15\n    memorySize: 512\n    runtime: nodejs18.x\n    layers:\n      - arn:aws:lambda:sa-east-1:1:layer:shared:1\n"
+    )
+  );
+  const task = migration.report.manualTasks.find((item) =>
+    item.message.startsWith("Function listOrders ")
+  );
+
+  expect(task?.risk).toBe("medium");
+  expect(task?.message).toContain("timeout 15");
+  expect(task?.message).toContain("memorySize 512");
+  expect(task?.message).toContain("runtime nodejs18.x");
+  expect(task?.message).toContain("layers");
+  expect(task?.message).toContain("TABLE_NAME → LIST_ORDERS_TABLE_NAME");
+});
+
+test("reports the deployment bucket and the package individually flag", () => {
+  const migration = migrate(advancedServerlessYaml, "./voke-advanced");
+  const messages = migration.report.manualTasks.map((task) => task);
+
+  expect(messages).toContainEqual(
+    expect.objectContaining({
+      message: expect.stringContaining("provider.deploymentBucket"),
+      risk: "low",
+    })
+  );
+  expect(messages).toContainEqual(
+    expect.objectContaining({
+      message: expect.stringContaining("package.individually"),
+    })
+  );
+});
+
+test("generates a DynamoDB table only when no property is lost", () => {
+  const migration = migrate(`service: tables
+provider:
+  name: aws
+resources:
+  Resources:
+    PlainTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: id
+            AttributeType: S
+        KeySchema:
+          - AttributeName: id
+            KeyType: HASH
+    NamedTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: named
+        KeySchema:
+          - AttributeName: id
+            KeyType: HASH
+    IndexedTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        KeySchema:
+          - AttributeName: id
+            KeyType: HASH
+        GlobalSecondaryIndexes:
+          - IndexName: byOwner
+    NumericTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        AttributeDefinitions:
+          - AttributeName: id
+            AttributeType: N
+        KeySchema:
+          - AttributeName: id
+            KeyType: HASH
+    DynamicParameter:
+      Type: AWS::SSM::Parameter
+      Properties:
+        Type: String
+        Value: \${ssm:/other}
+`);
+  const config = migration.files["./out/voke.config.ts"] ?? "";
+
+  expectCleanConfig(config);
+  expect(config).toContain('"PlainTable": dynamodbTable({ partitionKey: "id"');
+
+  for (const name of [
+    "NamedTable",
+    "IndexedTable",
+    "NumericTable",
+    "DynamicParameter",
+  ]) {
+    expect(config).not.toContain(name);
+    expect(migration.report.manualTasks).toContainEqual(
+      expect.objectContaining({
+        message: expect.stringContaining(`CloudFormation resource ${name} `),
+        risk: "high",
+      })
+    );
+  }
+});
+
+test("writes the same package.json as voke create", async () => {
+  const migration = migrate(serverlessYaml);
+  const directory = tempPath(`voke-create-${crypto.randomUUID()}`);
+
+  await createApiProject({ directory, name: "orders-api" });
+
+  const generated = migration.files["./out/package.json"] ?? "";
+
+  expect(generated).not.toContain("workspace:");
+  expect(JSON.parse(generated)).toEqual(
+    await Bun.file(`${directory}/package.json`).json()
+  );
+  expect(JSON.parse(generated).name).toBe("orders-api");
+  await Bun.$`rm -rf ${directory}`;
+});
+
+test("writes a standalone tsconfig.json", () => {
+  const migration = migrate(serverlessYaml);
+  const tsconfig = JSON.parse(migration.files["./out/tsconfig.json"] ?? "{}");
+
+  expect(tsconfig.extends).toBeUndefined();
+  expect(tsconfig.compilerOptions.strict).toBe(true);
+});
+
+test("prints the blocking tasks after migrating through the CLI", async () => {
+  const directory = tempPath(`voke-serverless-${crypto.randomUUID()}`);
+  const outDirectory = `${directory}/voke`;
+  const serverlessPath = `${import.meta.dir}/../../../examples/serverless-migration/http-api-authorizers/serverless.yml`;
+  const lines: string[] = [];
+  const blocking = migrate(
+    await Bun.file(serverlessPath).text(),
+    outDirectory
+  ).report.manualTasks.filter((task) => task.risk === "blocking");
+
+  await runCli(
+    ["migrate", "serverless", serverlessPath, "--out", outDirectory],
+    {
+      output: (message) => lines.push(message),
+    }
+  );
+
+  expect(blocking.length).toBeGreaterThan(0);
+  expect(lines).toEqual([
+    `Wrote migration skeleton to ${outDirectory}`,
+    `${blocking.length} blocking task(s) in ${outDirectory}/MIGRATION_REPORT.md:`,
+    ...blocking.map((task) => `- ${task.message}`),
+  ]);
+  await Bun.$`rm -rf ${directory}`;
+});
+
+test("rejects an unreadable serverless.yml without writing files", async () => {
+  const directory = tempPath(`voke-serverless-${crypto.randomUUID()}`);
+  const serverlessPath = `${directory}/serverless.yml`;
+  const outDirectory = `${directory}/voke`;
+
+  await Bun.$`mkdir -p ${directory}`;
+  await Bun.write(
+    serverlessPath,
+    "service: tagged\ncustom:\n  value: !Join\n    - a\n"
+  );
+
+  await expect(
+    runCli(["migrate", "serverless", serverlessPath, "--out", outDirectory])
+  ).rejects.toBeInstanceOf(CliUsageError);
+  expect(await Bun.file(`${outDirectory}/voke.config.ts`).exists()).toBe(false);
+  await Bun.$`rm -rf ${directory}`;
 });

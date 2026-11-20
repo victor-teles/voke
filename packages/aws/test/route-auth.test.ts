@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { createFunctions, http, route, voke } from "voke";
+import { VokeConfigError, createFunctions, http, route, voke } from "voke";
 
 import {
   aws,
@@ -11,7 +11,7 @@ import {
   requestAuthorizer,
 } from "../src/index";
 
-const eventWithAuthorizer = (authorizer: unknown) => ({
+const eventWithAuthorizer = (authorizer?: unknown) => ({
   headers: { authorization: "Bearer token" },
   isBase64Encoded: false,
   rawPath: "/me",
@@ -127,4 +127,69 @@ test("requests without an authorizer result still evaluate the authorizer locall
     data: { auth: { context: { userId: "local" }, source: "lambda" } },
   });
   expect(calls.count).toBe(1);
+});
+
+const encodeSegment = (value: unknown) =>
+  btoa(JSON.stringify(value))
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replaceAll("=", "");
+
+const unsignedJwt = (claims: Record<string, unknown>): string =>
+  `${encodeSegment({ alg: "none", typ: "JWT" })}.${encodeSegment(claims)}.`;
+
+test("deployed JWT routes answer 401 when API Gateway attached no authorizer result", async () => {
+  const event = eventWithAuthorizer();
+  const token = unsignedJwt({
+    aud: "users",
+    exp: 32_503_680_000,
+    iss: "https://auth.example.com",
+    sub: "forged",
+  });
+  const handler = createLambdaHandlers({
+    default: createAuthGateway({ count: 0 }),
+  }).http;
+
+  if (handler === undefined) {
+    throw new Error("Expected a generated http handler");
+  }
+
+  const response = (await handler({
+    ...event,
+    headers: { authorization: `Bearer ${token}` },
+    rawPath: "/profile",
+    requestContext: {
+      ...event.requestContext,
+      http: { ...event.requestContext.http, path: "/profile" },
+    },
+  })) as { statusCode: number };
+
+  expect(response.statusCode).toBe(401);
+});
+
+const buildJwtAuthorizer = (identitySource?: string | readonly string[]) =>
+  jwtAuthorizer({ audience: "a", identitySource, issuer: "https://i" });
+
+test("jwtAuthorizer accepts exactly one header or query string identity source", () => {
+  expect(buildJwtAuthorizer().identitySource).toEqual([
+    "$request.header.Authorization",
+  ]);
+  expect(
+    buildJwtAuthorizer("$request.header.X-Access-Token").identitySource
+  ).toEqual(["$request.header.X-Access-Token"]);
+  expect(
+    buildJwtAuthorizer(["$request.querystring.access_token"]).identitySource
+  ).toEqual(["$request.querystring.access_token"]);
+  expect(() =>
+    buildJwtAuthorizer([
+      "$request.header.Authorization",
+      "$request.querystring.token",
+    ])
+  ).toThrow(VokeConfigError);
+  expect(() => buildJwtAuthorizer("$context.routeKey")).toThrow(
+    VokeConfigError
+  );
+  expect(() => buildJwtAuthorizer("$request.cookie.token")).toThrow(
+    VokeConfigError
+  );
 });

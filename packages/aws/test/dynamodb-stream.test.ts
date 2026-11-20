@@ -264,9 +264,11 @@ test("dynamodbStream() stores the mapping settings and whether it validates item
       properties: {
         batchSize: 10,
         bisectOnError: true,
+        deadLetterQueue: true,
         enabled: true,
         itemSchema: true,
         maxBatchingWindowSeconds: 0,
+        maxRetryAttempts: 10,
         startingPosition: "trimHorizon",
       },
       resource: "ordersTable",

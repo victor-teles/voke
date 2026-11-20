@@ -1,21 +1,19 @@
 ---
 title: Resources and bindings
-description: Declare AWS resources such as tables, queues and buckets in voke.config.ts, and read their names and URLs from Function code.
+description: Declare AWS resources such as tables, queues and buckets in voke.config.ts, link them to the Functions that use them, and read their names and URLs from Function code.
 ---
 
-After reading this page you can declare the AWS resources your project needs, find their deployed
-names and URLs from a Function, create AWS SDK clients that work both locally and on AWS, and know
-which access each Function gets.
+After this page you can declare the AWS resources your project needs, link each one to the Functions that use it, read its deployed name or URL from a handler, and create AWS SDK clients that work both locally and on AWS. It also lists the access a link grants.
 
 ## Declare resources
 
 Declare resources in `resources` in `voke.config.ts`, with the builders from
-`@voke/aws/cloudformation`. The key of each entry (`usersTable` below) is the **resource key**: you
-use it to bind the resource in code, and Voke derives the CloudFormation logical id from it.
+`@vokejs/aws/cloudformation`. The key of each entry (`usersTable` below) is the **resource key**: you
+use it to link the resource to a Function, and Voke derives the CloudFormation logical id from it.
 
-```ts twoslash
-import { aws } from "@voke/aws";
-import { dynamodbTable, s3Bucket, sqsQueue } from "@voke/aws/cloudformation";
+```ts title="voke.config.ts" twoslash
+import { aws } from "@vokejs/aws";
+import { dynamodbTable, s3Bucket, sqsQueue } from "@vokejs/aws/cloudformation";
 import { defineConfig } from "voke";
 
 export default defineConfig({
@@ -34,16 +32,18 @@ in the Local AWS Provider. See [Local AWS](/docs/guides/local-aws).
 
 ## Builders
 
-| Builder                          | AWS resource                  | Options                                                                                                                                     | Binding attribute |
-| -------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- |
-| `dynamodbTable(options?)`        | `AWS::DynamoDB::Table`        | `partitionKey` (default `"id"`), `sortKey`. Both are string (`S`) keys. Billing is on demand (`PAY_PER_REQUEST`). `stream`, `ttlAttribute`. | `name`            |
-| `sqsQueue(options?)`             | `AWS::SQS::Queue`             | `visibilityTimeoutSeconds`. See [SQS events](/docs/guides/sqs-events#queue-visibility-timeout).                                             | `url`             |
-| `kinesisStream(options?)`        | `AWS::Kinesis::Stream`        | `shardCount` (provisioned mode; on demand by default), `retentionHours`. See [Kinesis events](/docs/guides/kinesis-events).                 | `name`            |
-| `snsTopic()`                     | `AWS::SNS::Topic`             | None. See [SNS events](/docs/guides/sns-events).                                                                                            | `arn`             |
-| `eventBus()`                     | `AWS::Events::EventBus`       | None. See [EventBridge events](/docs/guides/eventbridge-events).                                                                            | `name`            |
-| `s3Bucket()`                     | `AWS::S3::Bucket`             | None. See [S3 events](/docs/guides/s3-events).                                                                                              | `name`            |
-| `secret()`                       | `AWS::SecretsManager::Secret` | None. AWS generates the secret value.                                                                                                       | `id`              |
-| `ssmParameter({ value, type? })` | `AWS::SSM::Parameter`         | `value` (required), `type`: `"String"` (default) or `"StringList"`.                                                                         | `name`            |
+Each builder declares one AWS resource and exposes one binding attribute.
+
+| Builder                          | AWS resource                  | Options                                                                                                                                                                               | Binding attribute |
+| -------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- |
+| `dynamodbTable(options?)`        | `AWS::DynamoDB::Table`        | `partitionKey` (default `"id"`), `sortKey`. Both are string (`S`) keys. Billing is on demand (`PAY_PER_REQUEST`). `stream`, `ttlAttribute`.                                           | `name`            |
+| `sqsQueue(options?)`             | `AWS::SQS::Queue`             | `visibilityTimeoutSeconds`. See [SQS events](/docs/guides/sqs-events#queue-visibility-timeout). `deadLetterQueue: false` (see [Dead-letter queues](/docs/guides/dead-letter-queues)). | `url`             |
+| `kinesisStream(options?)`        | `AWS::Kinesis::Stream`        | `shardCount` (provisioned mode; on demand by default), `retentionHours`. See [Kinesis events](/docs/guides/kinesis-events).                                                           | `name`            |
+| `snsTopic()`                     | `AWS::SNS::Topic`             | None. See [SNS events](/docs/guides/sns-events).                                                                                                                                      | `arn`             |
+| `eventBus()`                     | `AWS::Events::EventBus`       | None. See [EventBridge events](/docs/guides/eventbridge-events).                                                                                                                      | `name`            |
+| `s3Bucket()`                     | `AWS::S3::Bucket`             | None. See [S3 events](/docs/guides/s3-events).                                                                                                                                        | `name`            |
+| `secret()`                       | `AWS::SecretsManager::Secret` | None. AWS generates the secret value.                                                                                                                                                 | `id`              |
+| `ssmParameter({ value, type? })` | `AWS::SSM::Parameter`         | `value` (required), `type`: `"String"` (default) or `"StringList"`.                                                                                                                   | `name`            |
 
 `dynamodbTable({ stream })` also turns on the table's stream, with a view type such as
 `"NEW_AND_OLD_IMAGES"`, so a Function can consume it. See
@@ -54,49 +54,128 @@ time after the epoch-seconds value in that attribute has passed. Deletion runs i
 usually within a few days, so reads can still return expired items. The attribute is not a key, so
 it needs no declaration. The [idempotency Plugin](/docs/guides/idempotency) uses it for its table.
 
-AWS generates the physical names. Your code never hard-codes a table name or a queue URL: it reads
-them from bindings.
+AWS generates the physical names. Your code never hard-codes a table name or a queue URL: a Function
+links the resource and reads its binding.
 
-`secret` from `@voke/aws/cloudformation` declares a Secrets Manager resource. `secret` from
-`@voke/aws` is a different function that reads a secret at run time. To read the value of a declared
-`secret()` or `ssmParameter()`, use a [Runtime Variable](/docs/guides/runtime-variables) with
-`.fromResource(key)`.
+<Callout type="info" title="Two functions are named secret">
+  `secret` from `@vokejs/aws/cloudformation` declares a Secrets Manager
+  resource. `secret` from `@vokejs/aws` is a different function that reads a
+  secret at run time. To read the value of a declared `secret()` or
+  `ssmParameter()`, use a [Runtime Variable](/docs/guides/runtime-variables)
+  with `.fromResource(key)`.
+</Callout>
+
+## Data retention
+
+A table, a bucket and a generated secret hold data that exists nowhere else, and a redeploy cannot
+recreate it. Voke calls them **data-bearing resources** and keeps them by default, on every stage:
+`dynamodbTable()`, `s3Bucket()` and `secret()` get `DeletionPolicy: Retain`,
+`UpdateReplacePolicy: Retain` and the metadata entry `VokeRetain: true` in the template. When such a
+resource leaves the stack, is replaced, or the stage is removed, CloudFormation leaves it in the
+account instead of deleting it.
+
+The other builders are not data-bearing. A queue and a stream carry records in transit for a bounded
+time, and a retained one would have no consumer but still cost money. A topic and an event bus store
+nothing, and a parameter's value is in your config.
+
+To delete data-bearing resources with their stack, set `retainData` on the AWS Provider. It is
+`true`, `false`, or a predicate that decides per resource with the resolved stage, including
+`--stage`:
+
+```ts title="voke.config.ts" twoslash
+import { aws } from "@vokejs/aws";
+import { dynamodbTable, s3Bucket } from "@vokejs/aws/cloudformation";
+import { defineConfig } from "voke";
+
+export default defineConfig({
+  name: "users",
+  // Keep data on prod only; every other stage deletes it with the stack.
+  provider: aws({ retainData: ({ stage }) => stage === "prod" }),
+  resources: {
+    usersTable: dynamodbTable({ partitionKey: "id" }),
+    cacheBucket: s3Bucket(),
+  },
+});
+```
+
+The predicate receives `{ key, stage, type }`: the resource key, the stage and the CloudFormation
+type, so `({ key }) => key !== "cacheBucket"` keeps every data-bearing resource except one. Decide
+retention here, not from `process.env.VOKE_STAGE` in the config: the config file does not see the
+`--stage` flag.
+
+The resource key, and a table's `partitionKey` and `sortKey`, identify the resource. Renaming the
+key or changing a table's keys means a new, empty resource. `voke deploy` refuses such a change
+until you pass `--accept-data-loss`. See
+[Changes that remove or replace data](/docs/guides/deploy#changes-that-remove-or-replace-data).
+
+Raw resource definitions in `resources` (objects with `cloudFormationType` instead of a builder)
+pass through untouched: Voke adds no policy to them, whatever their type. `voke deploy` still
+refuses to remove or replace one whose type is a table, a bucket or a secret.
+
+CloudFormation applies the policy of the template that is already deployed. A stack deployed with an
+earlier Voke version has no policy yet, so a resource you remove in the first deploy after the
+upgrade is still deleted. Deploy once without removing anything to protect it.
 
 ## Read a resource from a Function
 
-Every Function gets one environment variable per declared resource:
-`VOKE_RESOURCE_<KEY>_<ATTRIBUTE>`, with the resource key and the binding attribute in upper snake
-case. `usersTable` gets `VOKE_RESOURCE_USERS_TABLE_NAME`, and `jobsQueue` gets
-`VOKE_RESOURCE_JOBS_QUEUE_URL`.
-
-Use `bindResource(key, attribute)` from `@voke/aws` instead of reading `process.env` yourself:
+A Function lists the resources it uses in `resources`, by resource key. Each entry is a **Resource
+Link**. The Function's handler then reads a linked resource's binding value with
+`context.resource(key)`: a table name, a queue URL, a topic ARN, a secret id.
 
 ```ts twoslash
-import { bindResource } from "@voke/aws";
+import { schema } from "@vokejs/schema";
+import { fn } from "voke";
 
 // ---cut---
-const usersTable = bindResource("usersTable", "name");
-
-usersTable.envName; // "VOKE_RESOURCE_USERS_TABLE_NAME"
-const tableName = usersTable.value();
+const countUsers = fn({
+  resources: ["usersTable"],
+  output: schema.string(),
+  handler: (_payload, context) => context.resource("usersTable"),
+});
 ```
 
-`value()` reads the environment variable each time you call it. If the variable is missing or empty,
-it throws `VokeResourceBindingError` (code `RESOURCE_BINDING_ERROR`) with the variable name in the
-message. The attribute must be the builder's binding attribute from the table above: there is no
-`VOKE_RESOURCE_USERS_TABLE_ARN`, for example.
+Every Function builder takes `resources`: `fn`, `http`, `requestAuthorizer`, `durable` and every
+Event Source builder (`sqs`, `sns`, `eventBridge`, `schedule`, `kinesis`, `dynamodbStream`, `s3`).
+The keys are typed from the Function's own list: with `resources: ["usersTable"]`,
+`context.resource("jobsQueue")` does not compile, and a Function without `resources` cannot call
+`context.resource` at all. That each key exists in `voke.config.ts` is checked when the model is
+built: `voke dev`, `voke synth`, `voke build` and `voke deploy` fail with a `VokeConfigError` that
+names the Function and the key, for example
+`Function "countUsers" links resource "usrsTable", but no matching resource is defined.`
+
+A link gives the Function two things, and no other Function gets them:
+
+- the binding, an environment variable `VOKE_RESOURCE_<KEY>_<ATTRIBUTE>` with the resource key and
+  the binding attribute in upper snake case (`usersTable` gets `VOKE_RESOURCE_USERS_TABLE_NAME`,
+  `jobsQueue` gets `VOKE_RESOURCE_JOBS_QUEUE_URL`);
+- the resource's statement in the Function's IAM role. See
+  [Access a link grants](#access-a-link-grants).
+
+`context.resource` checks the link every time it runs, in `voke dev`, in tests and on AWS, so a
+missing link fails before you deploy. It throws `VokeResourceBindingError` (code
+`RESOURCE_BINDING_ERROR`):
+
+- `Function "<key>" does not link resource "<resource>". Add it to the Function: resources: ["<resource>"]`
+  when the Function does not link the resource.
+- `Missing resource binding: VOKE_RESOURCE_...` when the variable is unset or empty.
+
+Read bindings through `context.resource`, not from `process.env`. `voke dev` runs every Function in
+one process with every binding set, so a direct read passes locally and finds nothing once deployed.
+Code that runs outside a handler takes the value as an argument.
 
 Where the values come from:
 
-- **Deployed**, CloudFormation sets them on every Lambda from the stack's resources.
+- **Deployed**, CloudFormation sets them on each Lambda from the stack's resources, for the
+  resources that Function links.
 - **In `voke dev`**, Voke sets them from the resources in the Local AWS Provider. With the AWS
   Emulator, run `voke local bootstrap` first: Voke reads the names it recorded. See
   [Local AWS](/docs/guides/local-aws).
-- **In tests**, set them yourself, for example in the environment of `bun test`.
+- **In tests**, set the variable yourself and compose the Gateway with the config,
+  `voke(functions, { config })`. See [Testing](/docs/guides/testing).
 
 ## Create AWS SDK clients with `createAwsClientConfig()`
 
-Pass `createAwsClientConfig()` from `@voke/aws` to every AWS SDK client you create, for example
+Pass `createAwsClientConfig()` from `@vokejs/aws` to every AWS SDK client you create, for example
 `new DynamoDBClient(createAwsClientConfig())`. It returns `{ region, endpoint? }`:
 
 - `region` is the first value set among the `region` option, `AWS_REGION` and `AWS_DEFAULT_REGION`.
@@ -105,7 +184,7 @@ Pass `createAwsClientConfig()` from `@voke/aws` to every AWS SDK client you crea
   and local commands set these to the Local AWS Provider. A deployed Lambda has neither, so
   `endpoint` is left out and the SDK uses its default AWS endpoint.
 
-<Callout type="warn">
+<Callout type="warn" title="SQS calls can reach real AWS">
   Do not skip `createAwsClientConfig()` for SQS. SQS queue URLs carry the real AWS host
   (`https://sqs.<region>.amazonaws.com/...`). An SQS client without an explicit endpoint sends a
   call for that queue URL to that host, which is real AWS, even while you run locally.
@@ -115,12 +194,13 @@ You can pass overrides: `createAwsClientConfig({ region: "eu-west-1" })`.
 
 ## Example: a DynamoDB table read by a route
 
-The table is declared in `voke.config.ts`, and a route reads its name and the client config:
+The table is declared in `voke.config.ts`, the Function links it, and its route reads the table name
+and the client config:
 
 ```ts twoslash
 // @filename: voke.config.ts
-import { aws } from "@voke/aws";
-import { dynamodbTable } from "@voke/aws/cloudformation";
+import { aws } from "@vokejs/aws";
+import { dynamodbTable } from "@vokejs/aws/cloudformation";
 import { defineConfig } from "voke";
 
 export default defineConfig({
@@ -133,25 +213,24 @@ export default defineConfig({
 
 // @filename: src/index.ts
 import { DynamoDBClient, GetItemCommand } from "@aws-sdk/client-dynamodb";
-import { bindResource, createAwsClientConfig } from "@voke/aws";
-import { schema } from "@voke/schema";
-import { createFunctions, http, route, voke } from "voke";
+import { createAwsClientConfig } from "@vokejs/aws";
+import { schema } from "@vokejs/schema";
+import { createFunctions, http, voke } from "voke";
 
 import config from "../voke.config";
 
-const usersTable = bindResource("usersTable", "name");
-
 const functions = createFunctions({
   http: http({
-    routes: [
+    resources: ["usersTable"],
+    routes: (route) => [
       route.get("/users/:id", {
         params: schema.object({ id: schema.string() }),
-        handler: async (request) => {
+        handler: async (request, context) => {
           const client = new DynamoDBClient(createAwsClientConfig());
           const { Item } = await client.send(
             new GetItemCommand({
               Key: { id: { S: request.params.id } },
-              TableName: usersTable.value(),
+              TableName: context.resource("usersTable"),
             })
           );
 
@@ -165,44 +244,109 @@ const functions = createFunctions({
 export default voke(functions, { config });
 ```
 
+The handler's `context` is typed with the Function's links when routes are written with the callback
+form, `routes: (route) => [...]`. With the shared `route` import, `context.resource` accepts any
+key and the link is checked at run time only.
+
 Install the AWS SDK clients you use (`bun add @aws-sdk/client-dynamodb`). `voke build` leaves
 `@aws-sdk/*` out of the bundle by default, because the Lambda Node.js runtime provides it.
 
-## Access each Function gets
+## Access a link grants
 
 Voke synthesizes one IAM role per Function. Each role gets the AWS managed policy
-`AWSLambdaBasicExecutionRole` (logs), plus one policy, `VokeResourceAccess`, with these statements for
-**every** declared resource:
+`AWSLambdaBasicExecutionRole` (logs), plus one policy, `VokeResourceAccess`, with one statement for
+each resource the Function links:
 
-| Builder           | Actions                                                                                   | Resource                              |
-| ----------------- | ----------------------------------------------------------------------------------------- | ------------------------------------- |
-| `dynamodbTable()` | `dynamodb:GetItem`, `PutItem`, `UpdateItem`, `DeleteItem`, `Query`, `Scan`                | The table ARN.                        |
-| `sqsQueue()`      | `sqs:SendMessage`, `ReceiveMessage`, `DeleteMessage`, `GetQueueAttributes`                | The queue ARN.                        |
-| `kinesisStream()` | `kinesis:PutRecord`, `kinesis:PutRecords`                                                 | The stream ARN.                       |
-| `snsTopic()`      | `sns:Publish`                                                                             | The topic ARN.                        |
-| `eventBus()`      | `events:PutEvents`                                                                        | The event bus ARN.                    |
-| `s3Bucket()`      | `s3:ListBucket` on the bucket; `s3:GetObject`, `PutObject`, `DeleteObject` on its objects | The bucket ARN, and `<bucket ARN>/*`. |
-| `secret()`        | `secretsmanager:GetSecretValue`                                                           | The secret ARN.                       |
-| `ssmParameter()`  | `ssm:GetParameter`, `ssm:GetParameters`                                                   | The parameter ARN.                    |
+| Builder           | Actions                                                                                                                            | Resource                              |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| `dynamodbTable()` | `dynamodb:GetItem`, `PutItem`, `UpdateItem`, `DeleteItem`, `Query`, `Scan`, `BatchGetItem`, `BatchWriteItem`, `ConditionCheckItem` | The table ARN.                        |
+| `sqsQueue()`      | `sqs:SendMessage`, `ReceiveMessage`, `DeleteMessage`, `GetQueueAttributes`                                                         | The queue ARN.                        |
+| `kinesisStream()` | `kinesis:PutRecord`, `kinesis:PutRecords`                                                                                          | The stream ARN.                       |
+| `snsTopic()`      | `sns:Publish`                                                                                                                      | The topic ARN.                        |
+| `eventBus()`      | `events:PutEvents`                                                                                                                 | The event bus ARN.                    |
+| `s3Bucket()`      | `s3:ListBucket` on the bucket; `s3:GetObject`, `PutObject`, `DeleteObject` on its objects                                          | The bucket ARN, and `<bucket ARN>/*`. |
+| `secret()`        | `secretsmanager:GetSecretValue`                                                                                                    | The secret ARN.                       |
+| `ssmParameter()`  | `ssm:GetParameter`, `ssm:GetParameters`                                                                                            | The parameter ARN.                    |
 
-Access is scoped to each resource's ARN, never to `*`. But it is not scoped per Function: every
-Function in the project gets every statement and every `VOKE_RESOURCE_*` binding, whether or not it
-uses the resource. Voke has no way yet to bind a resource to some Functions only.
+A DynamoDB transaction needs no action of its own: each item in it is authorized by its item action,
+and a condition check by `dynamodb:ConditionCheckItem`. A link grants the whole list; read-only links
+are not available yet.
 
-[Runtime Variables](/docs/guides/runtime-variables#iam-permissions) are different: only the Function
-that declares one gets its permission.
+Access is scoped to each resource's ARN, never to `*`, and to the Functions that link the resource.
+The rules:
 
-Stream **Event Sources** are different too: only the Function that consumes a stream gets read access
-to it. A [Kinesis](/docs/guides/kinesis-events#what-gets-deployed) consumer gets the stream-read
-actions on the stream ARN. A [DynamoDB stream](/docs/guides/dynamodb-stream-events#what-gets-deployed)
-consumer gets them on the table's stream ARN, plus `dynamodb:ListStreams` on `*`.
+- **A Function that does not link a resource** gets neither its statement nor its binding. Deployed,
+  a read fails with `AccessDenied` or a missing binding.
+- **An `http()` Function is one Function**: its links cover all its routes. To isolate a route, put
+  it in its own `http()` Function.
+- **An Event Source** gives its Function what the trigger needs on the source resource, and nothing
+  else: an SQS consumer gets `sqs:ReceiveMessage`, `DeleteMessage` and `GetQueueAttributes` on its
+  queue, and a [Kinesis](/docs/guides/kinesis-events#what-gets-deployed) or
+  [DynamoDB stream](/docs/guides/dynamodb-stream-events#what-gets-deployed) consumer gets read access
+  to the stream. SNS, EventBridge, S3 and schedule triggers need nothing on the role. A handler that
+  also sends to its queue, reads the uploaded object or writes the table links that resource.
+- **A [Runtime Variable](/docs/guides/runtime-variables#iam-permissions)** built with
+  `.fromResource(key)` gives its Function the read permission and the binding it needs without a
+  link. It does not make `context.resource(key)` available.
+- **A resource a [Plugin](/docs/guides/plugins) contributes** is linked like any other, for example
+  the idempotency table.
+- **`awsPolicy()` statements from a Plugin** reach every Function role, because a Plugin's Function
+  Wrap runs around every Function.
+- **An in-process invocation** (`functions.invoke` that runs the other Function's handler in the
+  same process) runs with the caller's role and environment. A read there must be linked by both the
+  running Function and the Function that was entered first; otherwise it throws
+  `Function "<key>" reads resource "<resource>" while running in-process inside Function "<entry>", which does not link it.`
+  An invocation that leaves the process, such as starting a Durable Function, starts with its own
+  links.
 
 ## Next steps
 
-- [SQS events](/docs/guides/sqs-events): consume a declared queue with a Function.
-- [SNS events](/docs/guides/sns-events) and [EventBridge events](/docs/guides/eventbridge-events): run a Function for each message on a declared topic or event bus.
-- [Kinesis events](/docs/guides/kinesis-events) and [DynamoDB stream events](/docs/guides/dynamodb-stream-events): consume a declared stream with a Function.
-- [S3 events](/docs/guides/s3-events): run a Function for each object created in or deleted from a declared bucket.
-- [Runtime Variables](/docs/guides/runtime-variables): read a declared secret or parameter.
-- [Local AWS](/docs/guides/local-aws): create the resources locally.
-- [Config reference](/docs/reference/config): every `voke.config.ts` setting.
+<Cards>
+  <Card icon={<Mail />} href="/docs/guides/sqs-events" title="SQS events">
+    Consume a declared queue with a Function.
+  </Card>
+  <Card icon={<Megaphone />} href="/docs/guides/sns-events" title="SNS events">
+    Run a Function for each message on a declared topic.
+  </Card>
+  <Card
+    icon={<Radio />}
+    href="/docs/guides/eventbridge-events"
+    title="EventBridge events"
+  >
+    Run a Function for each event on a declared event bus.
+  </Card>
+  <Card
+    icon={<Waves />}
+    href="/docs/guides/kinesis-events"
+    title="Kinesis events"
+  >
+    Consume a declared stream with a Function.
+  </Card>
+  <Card
+    icon={<Database />}
+    href="/docs/guides/dynamodb-stream-events"
+    title="DynamoDB stream events"
+  >
+    Consume the stream of a declared table with a Function.
+  </Card>
+  <Card icon={<FolderInput />} href="/docs/guides/s3-events" title="S3 events">
+    Run a Function for each object created in or deleted from a declared bucket.
+  </Card>
+  <Card
+    icon={<KeyRound />}
+    href="/docs/guides/runtime-variables"
+    title="Runtime Variables"
+  >
+    Read a declared secret or parameter.
+  </Card>
+  <Card icon={<Boxes />} href="/docs/guides/local-aws" title="Local AWS">
+    Create the resources locally.
+  </Card>
+  <Card
+    icon={<SlidersHorizontal />}
+    href="/docs/reference/config"
+    title="Config reference"
+  >
+    Every `voke.config.ts` setting.
+  </Card>
+</Cards>

@@ -1,4 +1,4 @@
-import { schema } from "@voke/schema";
+import { schema } from "@vokejs/schema";
 import { createFunctions, fn } from "voke";
 
 const getUserInput = schema.object({

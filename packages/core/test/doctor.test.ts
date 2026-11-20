@@ -85,7 +85,7 @@ test("warns without a Provider and runs only the core checks without diagnostics
 
   expect(withoutProvider.report.failed).toBe(false);
   expect(withoutProvider.lines.at(-1)).toBe(
-    'warn  Provider    not configured; add provider: aws() from "@voke/aws" to voke.config.ts'
+    'warn  Provider    not configured; add provider: aws() from "@vokejs/aws" to voke.config.ts'
   );
   expect(withoutDiagnostics.lines.at(-1)).toBe("ok    Provider    plain");
   expect(withoutDiagnostics.lines).toHaveLength(5);

@@ -156,6 +156,14 @@ test("two scheduled Functions share one Scheduler role that may invoke both", ()
               { "Fn::GetAtt": ["NightlyFunction", "Arn"] },
             ],
           },
+          {
+            Action: "sqs:SendMessage",
+            Effect: "Allow",
+            Resource: [
+              { "Fn::GetAtt": ["HourlyFunctionDeadLetterQueue", "Arn"] },
+              { "Fn::GetAtt": ["NightlyFunctionDeadLetterQueue", "Arn"] },
+            ],
+          },
         ],
         Version: "2012-10-17",
       },

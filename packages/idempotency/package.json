@@ -1,6 +1,6 @@
 {
-  "name": "@voke/idempotency",
-  "version": "0.0.0",
+  "name": "@vokejs/idempotency",
+  "version": "0.1.0",
   "description": "A Voke Plugin that makes a retried handler run once, backed by a DynamoDB table it provisions.",
   "keywords": [
     "aws",
@@ -17,32 +17,44 @@
   },
   "files": [
     "src",
+    "dist",
     "README.md",
     "LICENSE"
   ],
   "type": "module",
-  "types": "./src/index.ts",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "@vokejs/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
-    "build": "bun build ./src/index.ts --outdir ./dist --target bun",
+    "build": "rm -rf dist && bunx tsgo --project tsconfig.build.json",
     "test": "bun test",
     "typecheck": "bunx tsgo --project tsconfig.json --noEmit",
     "clean": "rm -rf dist coverage",
-    "prepack": "cp ../../LICENSE .",
+    "prepack": "bun run build && cp ../../LICENSE .",
     "postpack": "rm -f LICENSE"
   },
   "dependencies": {
-    "@aws-sdk/client-dynamodb": "^3.1053.0",
-    "@voke/aws": "workspace:*",
-    "voke": "workspace:*"
+    "@aws-sdk/client-dynamodb": "^3.1053.0"
   },
   "devDependencies": {
-    "@types/bun": "latest",
+    "@types/bun": "catalog:",
     "@typescript/native-preview": "catalog:",
-    "@voke/http": "workspace:*",
-    "@voke/schema": "workspace:*"
+    "@vokejs/aws": "workspace:*",
+    "@vokejs/http": "workspace:*",
+    "@vokejs/schema": "workspace:*",
+    "voke": "workspace:*"
+  },
+  "peerDependencies": {
+    "@vokejs/aws": "workspace:*",
+    "voke": "workspace:*"
   },
   "engines": {
     "bun": ">=1.4.4"

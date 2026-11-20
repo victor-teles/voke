@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 
 import {
   createAuthorizers,
@@ -6,9 +6,10 @@ import {
   requestAuthorizer,
   secret,
   sqs,
-} from "@voke/aws";
+} from "@vokejs/aws";
 import type { MiddlewareHandler } from "hono";
 
+import packageJson from "../package.json";
 import { voke } from "../src/app";
 import type { VokeEnv } from "../src/context";
 import { VokeConfigError } from "../src/errors";
@@ -25,7 +26,7 @@ import type {
 } from "../src/invoke";
 import { Voke } from "../src/route-builder";
 import { createVariableProvider, createVariableSource } from "../src/variables";
-import { setEnv } from "./support/env";
+import { setEnv, withEnv } from "./support/env";
 
 const schema = <TInput, TOutput = TInput>(
   validate: (value: TInput) => TOutput
@@ -71,8 +72,11 @@ test("executes route-backed functions through typed route calls and gateway requ
             id: req.params.id,
             includePosts: req.query.includePosts,
           }),
-          headers: schema<Headers, { "x-request-id": string }>((headers) => ({
-            "x-request-id": headers.get("x-request-id") ?? "",
+          headers: schema<
+            Record<string, string | undefined>,
+            { "x-request-id": string }
+          >((headers) => ({
+            "x-request-id": headers["x-request-id"] ?? "",
           })),
           params: schema<{ id: string }, { id: string }>((params) => ({
             id: params.id ?? "",
@@ -109,7 +113,7 @@ test("executes route-backed functions through typed route calls and gateway requ
   voke(functions, { config: { name: "api" } });
 
   const routeResult = await functions.route("GET", "/users/:id", {
-    headers: new Headers({ "x-request-id": "req_1" }),
+    headers: { "x-request-id": "req_1" },
     params: { id: "usr_1" },
     query: { includePosts: "true" },
   });
@@ -354,7 +358,7 @@ test("prints a human function summary automatically under voke dev", () => {
   }
 
   expect(logs.map((log) => log.trimEnd())).toEqual([
-    `  ${ansi.cyan}${ansi.bold}VOKE${ansi.reset} ${ansi.dim}v0.0.0${ansi.reset}  ${ansi.green}ready in 0 ms${ansi.reset}
+    `  ${ansi.cyan}${ansi.bold}VOKE${ansi.reset} ${ansi.dim}v${packageJson.version}${ansi.reset}  ${ansi.green}ready in 0 ms${ansi.reset}
 
   ${ansi.green}➜${ansi.reset}  ${ansi.bold}Local:${ansi.reset}   http://localhost:3000/
   ${ansi.green}➜${ansi.reset}  ${ansi.bold}Network:${ansi.reset} use --hostname 0.0.0.0 to expose
@@ -420,6 +424,7 @@ test("returns a stable Voke error envelope when route body validation fails thro
   expect(response.status).toBe(400);
   expect(await response.json()).toEqual({
     error: {
+      code: "INVALID_REQUEST",
       issues: [{ message: "name is required", path: ["body"] }],
       message: "Invalid body",
     },
@@ -455,6 +460,7 @@ test("returns stable Voke error envelopes when route params, query, or headers v
   expect(paramsResponse.status).toBe(400);
   expect(await paramsResponse.json()).toEqual({
     error: {
+      code: "INVALID_REQUEST",
       issues: [{ message: "id is invalid", path: ["params"] }],
       message: "Invalid params",
     },
@@ -462,6 +468,7 @@ test("returns stable Voke error envelopes when route params, query, or headers v
   expect(queryResponse.status).toBe(400);
   expect(await queryResponse.json()).toEqual({
     error: {
+      code: "INVALID_REQUEST",
       issues: [{ message: "page is invalid", path: ["query"] }],
       message: "Invalid query",
     },
@@ -469,13 +476,14 @@ test("returns stable Voke error envelopes when route params, query, or headers v
   expect(headersResponse.status).toBe(400);
   expect(await headersResponse.json()).toEqual({
     error: {
+      code: "INVALID_REQUEST",
       issues: [{ message: "authorization is required", path: ["headers"] }],
       message: "Invalid headers",
     },
   });
 });
 
-test("returns a stable Voke error envelope when route output validation fails through gateway requests", async () => {
+test("answers the generic 500 and logs the issues when route output validation fails through gateway requests", async () => {
   const app = new Voke();
   const functions = createFunctions({
     users: fn({
@@ -489,15 +497,24 @@ test("returns a stable Voke error envelope when route output validation fails th
   });
   const gateway = voke(functions, { config: { name: "api" } });
 
-  const response = await gateway.request("/users/usr_1");
+  const errorLog = spyOn(console, "error").mockImplementation(() => {});
 
-  expect(response.status).toBe(500);
-  expect(await response.json()).toEqual({
-    error: {
-      issues: [{ message: "id is required", path: ["result"] }],
-      message: "Invalid result",
-    },
-  });
+  try {
+    const response = await withEnv({ VOKE_DEV_SUMMARY: undefined }, () =>
+      gateway.request("/users/usr_1")
+    );
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Internal server error",
+      },
+    });
+    expect(errorLog).toHaveBeenCalledTimes(1);
+  } finally {
+    errorLog.mockRestore();
+  }
 });
 
 test("invokes routes without request parts when the route does not require them", async () => {
@@ -562,6 +579,7 @@ test("uses the same route validation classification for typed route calls and ga
   expect(response.status).toBe(400);
   expect(await response.json()).toEqual({
     error: {
+      code: "INVALID_REQUEST",
       issues: [{ message: "id is invalid", path: ["params"] }],
       message: "Invalid params",
     },

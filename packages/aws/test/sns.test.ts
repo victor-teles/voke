@@ -102,11 +102,16 @@ test("sns() stores the topic and only the filter settings that were set", () => 
   });
 
   expect(plain.events).toEqual([
-    { properties: {}, resource: "ordersTopic", source: "sns" },
+    {
+      properties: { deadLetterQueue: true },
+      resource: "ordersTopic",
+      source: "sns",
+    },
   ]);
   expect(filtered.events).toEqual([
     {
       properties: {
+        deadLetterQueue: true,
         filterPolicy: { type: ["created"] },
         filterPolicyScope: "MessageBody",
       },

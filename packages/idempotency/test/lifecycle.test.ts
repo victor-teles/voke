@@ -1,10 +1,11 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 
 import { IdempotencyError } from "../src/errors";
-import { hashValue, runIdempotent } from "../src/idempotent";
+import { hashValue, maxResultBytes, runIdempotent } from "../src/idempotent";
 import type { RunIdempotentInput } from "../src/idempotent";
 import { memoryStore } from "../src/memory-store";
-import type { IdempotencyStore } from "../src/store";
+import type { IdempotencyRecord, IdempotencyStore } from "../src/store";
+import { failingStore } from "./failing-store";
 
 const startOfDay = Date.UTC(2026, 10, 15);
 
@@ -198,4 +199,284 @@ test("key order in a payload does not change its hash", () => {
     hashValue({ amount: 10, nested: { a: 1, b: 2 }, orderId: "o" })
   );
   expect(hashValue({ amount: 10 })).not.toBe(hashValue({ amount: 11 }));
+});
+
+const pending = <TResult>() => Promise.withResolvers<TResult>();
+
+test("a call while a handler outlives expiresAfterSeconds fails with IDEMPOTENCY_IN_PROGRESS", async () => {
+  const clock = fakeClock();
+  const input = lifecycle(memoryStore(), clock.now, {
+    expiresAfterSeconds: 5,
+    timeoutSeconds: 30,
+  });
+  const { promise, resolve } = pending<string>();
+  const first = runIdempotent(input, () => promise);
+  const { calls, run } = counter("second");
+
+  clock.advance(6000);
+  expect(await rejectionCode(runIdempotent(input, run))).toBe(
+    "IDEMPOTENCY_IN_PROGRESS"
+  );
+  expect(calls.count).toBe(0);
+
+  clock.advance(24_000);
+  expect(await rejectionCode(runIdempotent(input, run))).toBe(
+    "IDEMPOTENCY_IN_PROGRESS"
+  );
+  expect(calls.count).toBe(0);
+
+  clock.advance(1);
+  await expect(runIdempotent(input, run)).resolves.toBe("second");
+  expect(calls.count).toBe(1);
+
+  resolve("first");
+  await first;
+});
+
+test("an in-progress record expires no earlier than its in-progress window", async () => {
+  const acquired: IdempotencyRecord[] = [];
+  const recording = (): IdempotencyStore => {
+    const store = memoryStore();
+
+    return {
+      ...store,
+      acquire: (record, now) => {
+        acquired.push(record);
+
+        return store.acquire(record, now);
+      },
+    };
+  };
+  const clock = fakeClock();
+
+  await runIdempotent(
+    lifecycle(recording(), clock.now, {
+      expiresAfterSeconds: 5,
+      timeoutSeconds: 30,
+    }),
+    () => "short"
+  );
+  await runIdempotent(lifecycle(recording(), clock.now), () => "default");
+
+  const [short, defaults] = acquired;
+
+  expect(short?.inProgressExpiresAt).toBe(startOfDay + 30_000);
+  expect(short?.expiresAt).toBe(
+    Math.ceil((short?.inProgressExpiresAt ?? 0) / 1000)
+  );
+  expect(defaults?.expiresAt).toBe(startOfDay / 1000 + 3600);
+});
+
+test("a completed record replays for expiresAfterSeconds even when the timeout is longer", async () => {
+  const clock = fakeClock();
+  const input = lifecycle(memoryStore(), clock.now, {
+    expiresAfterSeconds: 5,
+    timeoutSeconds: 30,
+  });
+  const { calls, run } = counter("done");
+
+  await runIdempotent(input, run);
+  clock.advance(5000);
+  await expect(runIdempotent(input, run)).resolves.toBe("done");
+  expect(calls.count).toBe(1);
+
+  clock.advance(1000);
+  await runIdempotent(input, run);
+  expect(calls.count).toBe(2);
+});
+
+// Silences console.error for `run` and returns the arguments of each call.
+const capturingErrors = async (
+  run: () => Promise<void>
+): Promise<unknown[][]> => {
+  const errorLog = spyOn(console, "error").mockImplementation(() => {});
+
+  try {
+    await run();
+
+    return errorLog.mock.calls.map((call) => [...call]);
+  } finally {
+    errorLog.mockRestore();
+  }
+};
+
+test("when release fails too, the handler's error is the one thrown and the release failure is logged once", async () => {
+  const clock = fakeClock();
+  const releaseError = new Error("table unavailable");
+  const failure = new Error("card declined");
+  const input = lifecycle(
+    failingStore(memoryStore(), { release: releaseError }),
+    clock.now,
+    { id: "charge##secret-key-hash" }
+  );
+
+  const logged = await capturingErrors(async () => {
+    await expect(
+      runIdempotent(input, () => {
+        throw failure;
+      })
+    ).rejects.toBe(failure);
+  });
+
+  expect(logged).toHaveLength(1);
+  expect(String(logged[0]?.[0])).toContain('Function "charge"');
+  expect(String(logged[0]?.[0])).not.toContain("secret-key-hash");
+  expect(logged[0]?.[1]).toBe(releaseError);
+});
+
+test("after a failed release, a call inside the Function timeout is rejected, and one after it runs", async () => {
+  const clock = fakeClock();
+  const store = memoryStore();
+
+  await capturingErrors(async () => {
+    await runIdempotent(
+      lifecycle(
+        failingStore(store, { release: new Error("table unavailable") }),
+        clock.now
+      ),
+      () => {
+        throw new Error("card declined");
+      }
+    ).catch(() => {});
+  });
+
+  const healthy = lifecycle(store, clock.now);
+  const { calls, run } = counter("charged");
+
+  expect(await rejectionCode(runIdempotent(healthy, run))).toBe(
+    "IDEMPOTENCY_IN_PROGRESS"
+  );
+  clock.advance(15_001);
+  await expect(runIdempotent(healthy, run)).resolves.toBe("charged");
+  expect(calls.count).toBe(1);
+});
+
+test("a failed completion write rejects with IDEMPOTENCY_COMPLETE_FAILED and keeps the store's error as cause", async () => {
+  const clock = fakeClock();
+  const throttled = new Error("slow down");
+  const { calls, run } = counter("charged");
+  const rejection = await runIdempotent(
+    lifecycle(failingStore(memoryStore(), { complete: throttled }), clock.now),
+    run
+  ).catch((error: unknown) => error);
+
+  expect(rejection).toBeInstanceOf(IdempotencyError);
+  expect((rejection as IdempotencyError).code).toBe(
+    "IDEMPOTENCY_COMPLETE_FAILED"
+  );
+  expect((rejection as IdempotencyError).cause).toBe(throttled);
+  expect((rejection as IdempotencyError).message).toContain(
+    'Function "charge"'
+  );
+  expect(calls.count).toBe(1);
+});
+
+test("after a failed completion write the record still blocks until the Function timeout", async () => {
+  const clock = fakeClock();
+  const store = memoryStore();
+
+  await runIdempotent(
+    lifecycle(
+      failingStore(store, { complete: new Error("slow down") }),
+      clock.now
+    ),
+    () => "charged"
+  ).catch(() => {});
+
+  const healthy = lifecycle(store, clock.now);
+  const { calls, run } = counter("charged again");
+
+  expect(await rejectionCode(runIdempotent(healthy, run))).toBe(
+    "IDEMPOTENCY_IN_PROGRESS"
+  );
+  expect(calls.count).toBe(0);
+  clock.advance(15_001);
+  await expect(runIdempotent(healthy, run)).resolves.toBe("charged again");
+  expect(calls.count).toBe(1);
+});
+
+test("a result over maxResultBytes is recorded and fails with IDEMPOTENCY_RESULT_TOO_LARGE", async () => {
+  const clock = fakeClock();
+  const input = lifecycle(memoryStore(), clock.now);
+  const { calls, run } = counter("x".repeat(maxResultBytes));
+
+  expect(await rejectionCode(runIdempotent(input, run))).toBe(
+    "IDEMPOTENCY_RESULT_TOO_LARGE"
+  );
+  clock.advance(1000);
+  expect(await rejectionCode(runIdempotent(input, run))).toBe(
+    "IDEMPOTENCY_RESULT_TOO_LARGE"
+  );
+  expect(calls.count).toBe(1);
+});
+
+test("the result size limit counts UTF-8 bytes", async () => {
+  const clock = fakeClock();
+  const twoByteCharacters = "é".repeat(maxResultBytes / 2);
+  const fits = "x".repeat(maxResultBytes - 2);
+
+  expect(
+    await rejectionCode(
+      runIdempotent(
+        lifecycle(memoryStore(), clock.now),
+        () => twoByteCharacters
+      )
+    )
+  ).toBe("IDEMPOTENCY_RESULT_TOO_LARGE");
+
+  const input = lifecycle(memoryStore(), clock.now);
+  const { calls, run } = counter(fits);
+
+  await expect(runIdempotent(input, run)).resolves.toBe(fits);
+  await expect(runIdempotent(input, run)).resolves.toBe(fits);
+  expect(calls.count).toBe(1);
+});
+
+test("an oversized-result record expires like a completed one", async () => {
+  const clock = fakeClock();
+  const input = lifecycle(memoryStore(), clock.now, {
+    expiresAfterSeconds: 60,
+  });
+  const { calls, run } = counter("x".repeat(maxResultBytes));
+
+  await runIdempotent(input, run).catch(() => {});
+  clock.advance(61_000);
+  expect(await rejectionCode(runIdempotent(input, run))).toBe(
+    "IDEMPOTENCY_RESULT_TOO_LARGE"
+  );
+  expect(calls.count).toBe(2);
+});
+
+test("a payload mismatch is reported before an oversized-result status", async () => {
+  const clock = fakeClock();
+  const store = memoryStore();
+  const { run } = counter("x".repeat(maxResultBytes));
+
+  await runIdempotent(lifecycle(store, clock.now), run).catch(() => {});
+
+  expect(
+    await rejectionCode(
+      runIdempotent(
+        lifecycle(store, clock.now, { validation: hashValue({ amount: 20 }) }),
+        run
+      )
+    )
+  ).toBe("IDEMPOTENCY_PAYLOAD_MISMATCH");
+});
+
+test("a failed markResultTooLarge rejects with IDEMPOTENCY_COMPLETE_FAILED", async () => {
+  const clock = fakeClock();
+  const denied = new Error("access denied");
+  const rejection = await runIdempotent(
+    lifecycle(
+      failingStore(memoryStore(), { markResultTooLarge: denied }),
+      clock.now
+    ),
+    () => "x".repeat(maxResultBytes)
+  ).catch((error: unknown) => error);
+
+  expect((rejection as IdempotencyError).code).toBe(
+    "IDEMPOTENCY_COMPLETE_FAILED"
+  );
+  expect((rejection as IdempotencyError).cause).toBe(denied);
 });

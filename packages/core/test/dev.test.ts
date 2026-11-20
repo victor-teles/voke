@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
 
-import { aws } from "@voke/aws";
-import { dynamodbTable, sqsQueue } from "@voke/aws/cloudformation";
-import { floci } from "@voke/aws/local";
-import type { LocalProvider } from "@voke/aws/local";
+import { aws } from "@vokejs/aws";
+import { dynamodbTable, sqsQueue } from "@vokejs/aws/cloudformation";
+import { floci } from "@vokejs/aws/local";
+import type { LocalProvider } from "@vokejs/aws/local";
 
 import { runCli } from "../src/cli";
 import { defineConfig } from "../src/config";

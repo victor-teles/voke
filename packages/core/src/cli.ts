@@ -7,12 +7,14 @@ import { createInterface } from "node:readline/promises";
 import packageJson from "../package.json";
 import {
   assertKnownFlags,
+  assertPositionals,
   CliUsageError,
   cliUsageMessage,
   formatCommandHelp,
   formatHelp,
   formatPluginHelp,
   isHelpRequest,
+  localSubcommands,
   missingProviderMessage,
   parseFlags,
   pluginCommandSpecs,
@@ -33,6 +35,7 @@ import { generateRemoteModules } from "./remote";
 import { readEnv } from "./runtime-env";
 import { createProject, unscopedName } from "./scaffold";
 import { writeServerlessMigration } from "./serverless-migration";
+import type { ServerlessMigrationManualTask } from "./serverless-migration";
 
 export { CliUsageError, type ParsedFlags } from "./cli-spec";
 export { createApiProject } from "./scaffold";
@@ -40,6 +43,11 @@ export { createApiProject } from "./scaffold";
 interface CliOptions {
   /** Reads one line of confirmation; defaults to the terminal. */
   confirm?: (prompt: string) => Promise<string>;
+  /**
+   * The project directory: where the config file, package.json and the entrypoint resolve.
+   * Default: the working directory. Build output and spawned tools still use the working directory.
+   */
+  cwd?: string;
   /** Whether the CLI may prompt; defaults to whether stdin is a terminal. */
   interactive?: boolean;
   output?: CliOutput;
@@ -48,6 +56,9 @@ interface CliOptions {
 }
 
 type CliOutput = (message: string) => void;
+
+const projectDirectory = (options: CliOptions): string =>
+  options.cwd ?? process.cwd();
 
 type CommandRunner = (
   command: string[],
@@ -64,7 +75,6 @@ interface CommandRunOptions {
 }
 
 type CommandHandler = (
-  args: string[],
   flags: ParsedFlags,
   options: CliOptions
 ) => Promise<void>;
@@ -164,23 +174,29 @@ const hideBunDevelopmentServerBanner = (line: string): boolean =>
 
 export const migrateServerless = async (
   flags: ParsedFlags
-): Promise<string> => {
+): Promise<{
+  blockingTasks: ServerlessMigrationManualTask[];
+  directory: string;
+}> => {
   const sourcePath = flags.positional[0] ?? "./serverless.yml";
-  const outDirectory =
-    flags.values.out ?? flags.positional[1] ?? "./voke-migration";
+  const outDirectory = flags.values.out ?? "./voke-migration";
   const source = await Bun.file(sourcePath).text();
-
-  await writeServerlessMigration({
+  const migration = await writeServerlessMigration({
     outDirectory,
     source,
   });
 
-  return outDirectory;
+  return {
+    blockingTasks: migration.report.manualTasks.filter(
+      (task) => task.risk === "blocking"
+    ),
+    directory: outDirectory,
+  };
 };
 
 /** Without a config file, the project is named after ./package.json (scope stripped). */
-const packageJsonName = async (): Promise<string | undefined> => {
-  const file = Bun.file("package.json");
+const packageJsonName = async (cwd: string): Promise<string | undefined> => {
+  const file = Bun.file(resolve(cwd, "package.json"));
 
   if (!(await file.exists())) {
     return undefined;
@@ -206,27 +222,32 @@ const assertProviderConfigured = (config: VokeConfig): void => {
 
 /** The config file `loadConfigFromFlags` reads, when it exists. */
 const configPathFromFlags = async (
-  flags: ParsedFlags
+  flags: ParsedFlags,
+  cwd: string
 ): Promise<string | undefined> => {
   const configPath = flags.values.config ?? "voke.config.ts";
 
-  return (await Bun.file(configPath).exists()) ? configPath : undefined;
+  return (await Bun.file(resolve(cwd, configPath)).exists())
+    ? configPath
+    : undefined;
 };
 
-const loadConfigFromFlags = async (flags: ParsedFlags): Promise<VokeConfig> => {
+const loadConfigFromFlags = async (
+  flags: ParsedFlags,
+  cwd: string
+): Promise<VokeConfig> => {
   const configPath = flags.values.config ?? "voke.config.ts";
 
-  if (await Bun.file(configPath).exists()) {
-    return loadVokeConfig({ path: configPath });
-  }
-
-  if (flags.values.config !== undefined) {
-    return loadVokeConfig({ path: configPath });
+  if (
+    flags.values.config !== undefined ||
+    (await Bun.file(resolve(cwd, configPath)).exists())
+  ) {
+    return loadVokeConfig({ cwd, path: configPath });
   }
 
   return defineConfig({
     entrypoint: flags.values.entrypoint,
-    name: flags.values.name ?? (await packageJsonName()) ?? "api",
+    name: flags.values.name ?? (await packageJsonName(cwd)) ?? "api",
     region: flags.values.region,
     stage: flags.values.stage,
   });
@@ -288,7 +309,7 @@ export const build = async (
   if (createPlan === undefined) {
     throw new CliUsageError(
       config.provider === undefined
-        ? "No provider configured for build."
+        ? missingProviderMessage(config.name)
         : `Provider "${config.provider.name}" does not support build.`
     );
   }
@@ -407,6 +428,8 @@ const writeDeployOutputs = async (
 
 /** Builds the project through its Provider and deploys it to the stage. */
 export const deployProject = async (options: {
+  /** Apply changes that remove or replace a resource that holds data. Default `false`. */
+  acceptDataLoss?: boolean;
   config: VokeConfig;
   /** The config file the config was loaded from; the deployed handlers import it. */
   configPath?: string;
@@ -420,7 +443,7 @@ export const deployProject = async (options: {
   stage: string;
 }): Promise<ProviderDeployResult> => {
   const output = options.output ?? console.log;
-  const cwd = options.cwd ?? readEnv("PWD") ?? ".";
+  const cwd = options.cwd ?? process.cwd();
 
   assertDeployableStage(options.stage);
 
@@ -444,6 +467,7 @@ export const deployProject = async (options: {
   });
   const artifact = await artifactFilesOf(plan, cwd);
   const result = await deployToProvider({
+    acceptDataLoss: options.acceptDataLoss ?? false,
     artifactDirectory: artifact.directory,
     artifactFiles: artifact.files,
     config,
@@ -562,8 +586,6 @@ export const dev = async (
   });
 };
 
-const localSubcommands = ["start", "stop", "reset", "bootstrap"] as const;
-
 type LocalSubcommand = (typeof localSubcommands)[number];
 
 const isLocalSubcommand = (
@@ -575,13 +597,14 @@ const isLocalSubcommand = (
 export const local = async (
   subcommand: string | undefined,
   flags: ParsedFlags,
-  run: CommandRunner = runCommand
+  run: CommandRunner = runCommand,
+  cwd: string = process.cwd()
 ): Promise<void> => {
   if (!isLocalSubcommand(subcommand)) {
     throw new CliUsageError("Usage: voke local <start|stop|reset|bootstrap>");
   }
 
-  const loaded = await loadConfigFromFlags(flags);
+  const loaded = await loadConfigFromFlags(flags, cwd);
   const config = defineConfig({
     ...loaded,
     entrypoint: flags.values.entrypoint ?? loaded.entrypoint,
@@ -608,19 +631,13 @@ export const local = async (
   });
 };
 
-const remote = async (
-  subcommand: string | undefined,
-  flags: ParsedFlags
-): Promise<string[]> => {
-  if (subcommand !== "generate") {
-    throw new CliUsageError("Usage: voke remote generate [name]");
-  }
-
-  const config = await loadConfigFromFlags(flags);
+/** `voke remote generate [name]`: one remote when named, otherwise every remote. */
+const remote = async (flags: ParsedFlags, cwd: string): Promise<string[]> => {
+  const config = await loadConfigFromFlags(flags, cwd);
+  const [, name] = flags.positional;
 
   return await generateRemoteModules(config, {
-    names:
-      flags.positional.length === 0 ? undefined : flags.positional.slice(1),
+    names: name === undefined ? undefined : [name],
   });
 };
 
@@ -645,13 +662,39 @@ const synthResultLine = async (out: string): Promise<string> => {
 const outputOf = (options: CliOptions): CliOutput =>
   options.output ?? console.log;
 
+const portPattern = /^\d+$/u;
+const maxPort = 65_535;
+
+/** `--port`, when given: digits only, from 1 to 65535. */
+const portFromFlags = (flags: ParsedFlags): number | undefined => {
+  const value = flags.values.port;
+
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const port = Number(value);
+
+  if (!portPattern.test(value) || port < 1 || port > maxPort) {
+    throw new CliUsageError(
+      `Invalid value for --port: ${JSON.stringify(value)}. Expected a port number from 1 to 65535.`
+    );
+  }
+
+  return port;
+};
+
 const commandHandlers: Record<string, CommandHandler> = {
-  build: async (_args, flags, options) => {
-    const config = await loadConfigFromFlags(flags);
+  build: async (flags, options) => {
+    const cwd = projectDirectory(options);
+    const config = await loadConfigFromFlags(flags, cwd);
+
+    assertProviderConfigured(config);
+
     const entrypoint = flags.positional[0] ?? flags.values.entrypoint;
-    const project = await loadProject({ config, entrypoint });
+    const project = await loadProject({ config, cwd, entrypoint });
     const plan = await build(config, {
-      configPath: await configPathFromFlags(flags),
+      configPath: await configPathFromFlags(flags, cwd),
       entrypoint: entrypoint ?? config.entrypoint,
       functions: project.functions,
       outdir: flags.positional[1] ?? flags.values.outdir,
@@ -660,7 +703,7 @@ const commandHandlers: Record<string, CommandHandler> = {
 
     outputOf(options)(`Built ${plan.outdir}`);
   },
-  create: async (_args, flags, options) => {
+  create: async (flags, options) => {
     const [name, directory] = flags.positional;
 
     if (name === "api" && directory !== undefined) {
@@ -669,29 +712,29 @@ const commandHandlers: Record<string, CommandHandler> = {
       );
     }
 
-    if (name === undefined) {
-      throw new CliUsageError("Missing the project name");
-    }
-
     await createProject({
       directory,
       force: isFlagSet(flags, "force"),
       install: !isFlagSet(flags, "no-install"),
-      name,
+      // assertPositionals has checked the required name.
+      name: name ?? "",
       output: outputOf(options),
       run: options.run ?? runCommand,
     });
   },
-  deploy: async (_args, flags, options) => {
-    const config = await loadConfigFromFlags(flags);
+  deploy: async (flags, options) => {
+    const cwd = projectDirectory(options);
+    const config = await loadConfigFromFlags(flags, cwd);
 
     assertProviderConfigured(config);
 
-    const project = await loadProject({ config });
+    const project = await loadProject({ config, cwd });
 
     await deployProject({
+      acceptDataLoss: isFlagSet(flags, "accept-data-loss"),
       config,
-      configPath: await configPathFromFlags(flags),
+      configPath: await configPathFromFlags(flags, cwd),
+      cwd,
       dryRun: isFlagSet(flags, "dry-run"),
       functions: project.functions,
       output: options.output,
@@ -700,8 +743,8 @@ const commandHandlers: Record<string, CommandHandler> = {
       stage: resolveStage(flags, config),
     });
   },
-  dev: async (_args, flags, options) => {
-    const config = await loadConfigFromFlags(flags);
+  dev: async (flags, options) => {
+    const config = await loadConfigFromFlags(flags, projectDirectory(options));
 
     if (config.provider === undefined) {
       outputOf(options)(`Note: ${missingProviderMessage(config.name)}`);
@@ -711,16 +754,16 @@ const commandHandlers: Record<string, CommandHandler> = {
       endpoint: flags.values.endpoint,
       entrypoint: flags.positional[0] ?? flags.values.entrypoint,
       hostname: flags.values.hostname,
-      port:
-        flags.values.port === undefined ? undefined : Number(flags.values.port),
+      port: portFromFlags(flags),
       region: flags.values.region,
       run: options.run ?? runCommand,
       stage: flags.values.stage,
     });
   },
-  doctor: async (_args, flags, options) => {
+  doctor: async (flags, options) => {
     const result = await runDoctor({
       configPath: flags.values.config,
+      cwd: projectDirectory(options),
       output: outputOf(options),
     });
 
@@ -733,36 +776,45 @@ const commandHandlers: Record<string, CommandHandler> = {
       );
     }
   },
-  local: async ([subcommand], flags, options) => {
-    await local(subcommand, flags, options.run ?? runCommand);
+  local: async (flags, options) => {
+    const [subcommand] = flags.positional;
+
+    await local(
+      subcommand,
+      flags,
+      options.run ?? runCommand,
+      projectDirectory(options)
+    );
     outputOf(options)(localResults[subcommand as LocalSubcommand]);
   },
-  migrate: async (_args, flags, options) => {
-    if (flags.positional[0] !== "serverless") {
-      throw new CliUsageError(
-        "Usage: voke migrate serverless [serverless.yml] [--out ./voke-migration]"
-      );
-    }
-
-    const directory = await migrateServerless({
+  migrate: async (flags, options) => {
+    const { blockingTasks, directory } = await migrateServerless({
       positional: flags.positional.slice(1),
       values: flags.values,
     });
+    const output = outputOf(options);
 
-    outputOf(options)(`Wrote migration skeleton to ${directory}`);
+    output(`Wrote migration skeleton to ${directory}`);
+
+    if (blockingTasks.length > 0) {
+      output(
+        `${blockingTasks.length} blocking task(s) in ${directory}/MIGRATION_REPORT.md:`
+      );
+
+      for (const task of blockingTasks) {
+        output(`- ${task.message}`);
+      }
+    }
   },
-  remote: async (args, flags, options) => {
-    const paths = await remote(args[0], {
-      positional: flags.positional,
-      values: flags.values,
-    });
+  remote: async (flags, options) => {
+    const paths = await remote(flags, projectDirectory(options));
 
     for (const path of paths) {
       outputOf(options)(`Wrote ${path}`);
     }
   },
-  remove: async (_args, flags, options) => {
-    const config = await loadConfigFromFlags(flags);
+  remove: async (flags, options) => {
+    const config = await loadConfigFromFlags(flags, projectDirectory(options));
 
     assertProviderConfigured(config);
 
@@ -777,19 +829,20 @@ const commandHandlers: Record<string, CommandHandler> = {
       options
     );
   },
-  synth: async (_args, flags, options) => {
-    const config = await loadConfigFromFlags(flags);
+  synth: async (flags, options) => {
+    const cwd = projectDirectory(options);
+    const config = await loadConfigFromFlags(flags, cwd);
 
     assertProviderConfigured(config);
 
-    const entrypoint = flags.values.entrypoint ?? flags.positional[0];
-    const project = await loadProject({ config, entrypoint });
+    const entrypoint = flags.positional[0] ?? flags.values.entrypoint;
+    const project = await loadProject({ config, cwd, entrypoint });
     const out = await synth({
       config,
       entrypoint,
       functions: project.functions,
       name: flags.values.name,
-      out: flags.values.out ?? flags.positional[1],
+      out: flags.positional[1] ?? flags.values.out,
       region: flags.values.region,
       stage: flags.values.stage,
     });
@@ -809,8 +862,8 @@ const withUsage = (error: unknown, command: string): unknown =>
 
 // Help lists Plugin commands when ./voke.config.ts loads; a config that fails to load never
 // breaks help, which then lists the built-in commands only.
-const helpPlugins = async (): Promise<readonly VokePlugin[]> => {
-  const path = resolve(readEnv("PWD") ?? ".", "voke.config.ts");
+const helpPlugins = async (cwd: string): Promise<readonly VokePlugin[]> => {
+  const path = resolve(cwd, "voke.config.ts");
 
   try {
     if (!(await Bun.file(path).exists())) {
@@ -828,10 +881,11 @@ const helpPlugins = async (): Promise<readonly VokePlugin[]> => {
 const printTopLevel = async (
   command: string | undefined,
   args: string[],
-  output: CliOutput
+  output: CliOutput,
+  cwd: string
 ): Promise<boolean> => {
   if (command === undefined || command === "--help" || command === "-h") {
-    output(formatHelp(await helpPlugins()));
+    output(formatHelp(await helpPlugins(cwd)));
     return true;
   }
 
@@ -843,7 +897,7 @@ const printTopLevel = async (
   if (command === "help") {
     output(
       args[0] === undefined
-        ? formatHelp(await helpPlugins())
+        ? formatHelp(await helpPlugins(cwd))
         : formatCommandHelp(args[0])
     );
     return true;
@@ -879,13 +933,14 @@ const runPluginCommand = async (
   options: CliOptions
 ): Promise<void> => {
   const output = outputOf(options);
+  const cwd = projectDirectory(options);
   const configPath = configFlagValue(args) ?? "voke.config.ts";
 
-  if (!(await Bun.file(configPath).exists())) {
+  if (!(await Bun.file(resolve(cwd, configPath)).exists())) {
     throw unknownCommandError(name);
   }
 
-  const config = await loadVokeConfig({ path: configPath });
+  const config = await loadVokeConfig({ cwd, path: configPath });
   const plugin = config.plugins.find(
     (candidate) => candidate.name === name && candidate.cli !== undefined
   );
@@ -920,9 +975,9 @@ const runPluginCommand = async (
 
   try {
     const flags = parseFlags(key, rest, specs);
-    const cwd = readEnv("PWD") ?? ".";
 
     assertKnownFlags(key, flags, [], specs);
+    assertPositionals(key, flags, specs);
     printRunDetails([name, ...args], options);
     await command.run({
       config,
@@ -951,7 +1006,7 @@ export const runCli = async (
   const [command, ...args] = argv;
   const output = outputOf(options);
 
-  if (await printTopLevel(command, args, output)) {
+  if (await printTopLevel(command, args, output, projectDirectory(options))) {
     return;
   }
 
@@ -978,8 +1033,9 @@ export const runCli = async (
       assertKnownFlags(command, flags);
     }
 
+    assertPositionals(command, flags);
     printRunDetails(argv, options);
-    await handler(args, flags, options);
+    await handler(flags, options);
   } catch (error) {
     throw withUsage(error, command);
   }

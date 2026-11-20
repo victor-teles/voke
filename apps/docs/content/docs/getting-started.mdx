@@ -1,14 +1,14 @@
 ---
-title: Getting Started
+title: Quickstart
 description: Create a Voke API, run it locally, test it, deploy it to AWS and remove it again.
 ---
 
 After this page you have a Voke API that runs on your machine, passes its tests, and deploys to AWS Lambda with one command. You need [Bun](https://bun.sh) installed.
 
-<Callout type="info">
-  Voke is not published yet, and the published names (`voke`, `@voke/*`) are not
-  final. The steps below work once Voke is published. Until then, [try it from
-  the repository](#try-it-from-the-repository).
+<Callout type="info" title="Voke is not published yet">
+  The published names (`voke`, `@vokejs/*`) are not final. The steps below work
+  once Voke is published. Until then, [try it from the
+  repository](#try-it-from-the-repository).
 </Callout>
 
 ## Create, run and deploy
@@ -19,10 +19,10 @@ After this page you have a Voke API that runs on your machine, passes its tests,
 ### Create the project
 
 ```bash
-voke create my-api
+bunx voke create my-api
 ```
 
-`voke create` writes the starter files into `./my-api`, runs `bun install` in it, and prints the next steps:
+`bunx` downloads the `voke` CLI and runs it; inside the project, the scripts use the project's own `voke`. `voke create` writes the starter files into `./my-api`, runs `bun install` in it, and prints the next steps:
 
 ```txt
 Created my-api in ./my-api
@@ -57,7 +57,7 @@ bun run dev
 bun test
 ```
 
-The starter test sends `GET /health` to the Gateway through `createTestClient()` from `@voke/testing`. No server or AWS account is needed.
+The starter test sends `GET /health` to the Gateway through `createTestClient()` from `@vokejs/testing`. No server or AWS account is needed.
 
 </Step>
 <Step>
@@ -70,7 +70,11 @@ bun run deploy
 
 `bun run deploy` runs `voke deploy --stage dev`. It builds the project, deploys a CloudFormation stack named `my-api-dev`, and prints the stack outputs, with the API URL (`ApiUrl`) first. The first deploy in an account and region also creates a `voke-bootstrap` stack that holds the deployment artifacts.
 
-Deploying needs AWS credentials: an AWS profile, an SSO login, or credentials in environment variables. Run `voke doctor` to check Bun, the config, the project and your AWS credentials. See [Troubleshooting](/docs/guides/troubleshooting) when a check fails.
+<Callout type="info" title="Deploying needs AWS credentials">
+  Use an AWS profile, an SSO login, or credentials in environment variables. Run
+  `voke doctor` to check Bun, the config, the project and your AWS credentials.
+  See [Troubleshooting](/docs/guides/troubleshooting) when a check fails.
+</Callout>
 
 </Step>
 <Step>
@@ -81,7 +85,7 @@ Deploying needs AWS credentials: an AWS profile, an SSO login, or credentials in
 bun run remove
 ```
 
-`bun run remove` runs `voke remove --stage dev`. It asks you to type `my-api-dev` to confirm, then deletes the stack and its resources.
+`bun run remove` runs `voke remove --stage dev`. It asks you to type `my-api-dev` to confirm, then deletes the stack and its resources. Tables, buckets and secrets are kept with their data; Voke lists each one with the command that deletes it.
 
 </Step>
 </Steps>
@@ -105,20 +109,27 @@ bun run remove
   <File name=".gitignore" />
 </Files>
 
-- `voke.config.ts`: the project name, the entrypoint and the Provider (`provider: aws()`). The Provider is set only here, and `deploy`, `synth` and `local` need it.
-- `src/index.ts`: the entrypoint. It declares the Functions and exports the Gateway.
-- `src/routes/health.ts`: the `GET /health` route, made with the Route Builder.
-- `test/api.test.ts`: a `bun test` test that calls `GET /health` through `@voke/testing`.
-- `package.json`: the dependencies and the scripts `build`, `clean`, `deploy`, `dev`, `local`, `remove`, `synth`, `test` and `typecheck`.
-- `tsconfig.json`: strict TypeScript settings for Bun. `bun run typecheck` uses it.
-- `README.md`: the four commands you use most.
-- `.gitignore`: ignores `node_modules`, `dist`, `.voke`, `.env*` and `coverage`.
+| File                   | What it holds                                                                                                                                    |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `voke.config.ts`       | The project name, the entrypoint and the Provider (`provider: aws()`). The Provider is set only here, and `deploy`, `synth` and `local` need it. |
+| `src/index.ts`         | The entrypoint. It declares the Functions and exports the Gateway.                                                                               |
+| `src/routes/health.ts` | The `GET /health` route, made with the Route Builder.                                                                                            |
+| `test/api.test.ts`     | A `bun test` test that calls `GET /health` through `@vokejs/testing`.                                                                            |
+| `package.json`         | The dependencies and the scripts `build`, `clean`, `deploy`, `dev`, `local`, `remove`, `synth`, `test` and `typecheck`.                          |
+| `tsconfig.json`        | Strict TypeScript settings for Bun. `bun run typecheck` uses it. Stricter flags work too: Voke ships declaration files.                          |
+| `README.md`            | The four commands you use most.                                                                                                                  |
+| `.gitignore`           | Ignores `node_modules`, `dist`, `.voke`, `.env*` and `coverage`.                                                                                 |
 
 [Concepts](/docs/concepts) explains the entrypoint, the Gateway and the other terms.
 
 ## Try it from the repository
 
-Until Voke is published, run the example API in the Voke repository:
+Until Voke is published, run the example API in the Voke repository.
+
+<Steps>
+<Step>
+
+### Clone the repository and run the tests
 
 ```bash
 git clone https://github.com/victor-teles/voke.git
@@ -130,6 +141,11 @@ bun test
 
 `bun test` runs the example's tests against the Gateway in process. It needs no server, Docker or AWS account.
 
+</Step>
+<Step>
+
+### Run the example API locally
+
 The example's `voke.config.ts` declares a DynamoDB table and an SQS queue, so `voke dev` needs them running on your machine first. That uses the AWS Emulator in Docker, and bootstrapping it needs the AWS CLI:
 
 ```bash
@@ -138,11 +154,30 @@ bunx voke local bootstrap   # creates the table and the queue
 bun run dev                 # serves the API on http://localhost:3000
 ```
 
-Stop the API with `Ctrl+C` and the emulator with `bunx voke local stop`. Without the emulator running, `voke dev` stops with `AWS Emulator is not running`. See [Local AWS](/docs/guides/local-aws).
+<Callout type="warn" title="Start the emulator first">
+
+Without the emulator running, `voke dev` stops with `AWS Emulator is not running`.
+
+</Callout>
+
+Stop the API with `Ctrl+C` and the emulator with `bunx voke local stop`. See [Local AWS](/docs/guides/local-aws).
+
+</Step>
+</Steps>
 
 ## Next steps
 
-- [Concepts](/docs/concepts): what each part of the project does.
-- [HTTP routes](/docs/guides/http-routes): add routes with params, bodies and schemas.
-- [Testing](/docs/guides/testing): test Functions and routes with `bun test`.
-- [Deploy](/docs/guides/deploy): stages, regions and dry runs.
+<Cards>
+  <Card icon={<BookOpen />} href="/docs/concepts" title="Concepts">
+    What each part of the project does.
+  </Card>
+  <Card icon={<Route />} href="/docs/guides/http-routes" title="HTTP routes">
+    Add routes with params, bodies and schemas.
+  </Card>
+  <Card icon={<FlaskConical />} href="/docs/guides/testing" title="Testing">
+    Test Functions and routes with `bun test`.
+  </Card>
+  <Card icon={<CloudUpload />} href="/docs/guides/deploy" title="Deploy">
+    Stages, regions and dry runs.
+  </Card>
+</Cards>

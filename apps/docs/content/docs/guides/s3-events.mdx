@@ -3,18 +3,18 @@ title: S3 events
 description: Run a Function for each object created in or deleted from an S3 bucket, and test the Function locally.
 ---
 
-After reading this page you can run a Function when an object is created in or deleted from a
-bucket, filter the objects by key, and test the Function without AWS.
+After this page you can run a Function when an object is created in or deleted from a bucket,
+filter the objects by key, and test the Function without AWS.
 
 ## Declare the bucket and the Function
 
-Declare the bucket in `resources` with `s3Bucket()` from `@voke/aws/cloudformation`. Then create the
-Function with `s3()` from `@voke/aws`, and pass the bucket's resource key as `bucket`:
+Declare the bucket in `resources` with `s3Bucket()` from `@vokejs/aws/cloudformation`. Then create the
+Function with `s3()` from `@vokejs/aws`, and pass the bucket's resource key as `bucket`:
 
 ```ts twoslash
 // @filename: voke.config.ts
-import { aws } from "@voke/aws";
-import { s3Bucket } from "@voke/aws/cloudformation";
+import { aws } from "@vokejs/aws";
+import { s3Bucket } from "@vokejs/aws/cloudformation";
 import { defineConfig } from "voke";
 
 export default defineConfig({
@@ -26,7 +26,7 @@ export default defineConfig({
 });
 
 // @filename: src/index.ts
-import { s3 } from "@voke/aws";
+import { s3 } from "@vokejs/aws";
 import { createFunctions } from "voke";
 
 export const functions = createFunctions({
@@ -35,8 +35,12 @@ export const functions = createFunctions({
     on: ["created"],
     prefix: "incoming/",
     suffix: ".jpg",
-    handler: async (event) => {
-      console.info(`${event.key} (${event.size} bytes) in ${event.bucket}`);
+    // Links the bucket, so the handler can read the uploaded object.
+    resources: ["uploadsBucket"],
+    handler: async (event, context) => {
+      console.info(
+        `${event.key} (${event.size} bytes) in ${context.resource("uploadsBucket")}`
+      );
     },
   }),
 });
@@ -49,6 +53,8 @@ export const functions = createFunctions({
 - `prefix` and `suffix` are optional. With them, only keys that start with `prefix` and end with
   `suffix` invoke the Function. They compare the key exactly as EventBridge delivers it (see
   [Object keys](#object-keys)).
+- `resources: ["uploadsBucket"]` links the bucket. The trigger does not need it; reading or writing
+  the bucket's objects does.
 - A Function has one bucket. To react to two buckets, create two Functions.
 
 ## Handle an event
@@ -70,12 +76,22 @@ metadata, not an application payload. The handler receives:
 | `id`, `time`   | The event id and when the change happened, ISO 8601.                        |
 | `raw`          | The original EventBridge event.                                             |
 
-The handler returns nothing. EventBridge invokes the Function asynchronously, so Lambda retries a
-failed invocation and then drops the event. An event that is not an S3 object event fails the
-invocation with an `InvokeError` with code `INVALID_PAYLOAD`.
+The handler returns nothing.
 
-The Function's role can already read, write and delete the bucket's objects, so the handler can read
-the object with the bucket binding. See [Resources and bindings](/docs/guides/resources).
+<Callout type="warn" title="Invalid payloads fail the invocation">
+
+An event that is not an S3 object event fails the invocation with an `InvokeError` with code
+`INVALID_PAYLOAD`.
+
+</Callout>
+
+EventBridge invokes the Function asynchronously, so Lambda retries a failed invocation twice and
+then sends the event to the Function's [dead-letter queue](/docs/guides/dead-letter-queues).
+
+To read the object, the Function links the bucket with `resources: ["uploadsBucket"]`. The link
+gives its role read, write and delete access to the bucket's objects and gives the handler the
+bucket name through `context.resource("uploadsBucket")`. Without the link the role has no access to
+the bucket. See [Resources and bindings](/docs/guides/resources#access-a-link-grants).
 
 ## Object keys
 
@@ -83,7 +99,7 @@ Voke passes `event.key` through exactly as EventBridge delivers it. It never URL
 `+` stays a `+` and `%20` stays `%20`. The `prefix` and `suffix` filters match the same delivered
 key.
 
-<Callout type="warn">
+<Callout type="warn" title="Key encoding is not confirmed">
 
 The classic S3 notification format URL-encodes keys (`red flower.jpg` arrives as `red+flower.jpg`).
 The AWS documentation does not say whether S3 events delivered through EventBridge do the same, and
@@ -94,11 +110,11 @@ key into another. Test keys with spaces, `+` or non-ASCII characters before you 
 
 ## Test an S3 Function
 
-`voke dev` does not receive events from buckets. Test an S3 Function with
-`functions.sendEvent(name, { key })`. It runs the same handler code as the deployed Lambda:
+Test an S3 Function with `functions.sendEvent(name, { key })`. It runs the same handler code as the
+deployed Lambda:
 
 ```ts twoslash
-import { s3 } from "@voke/aws";
+import { s3 } from "@vokejs/aws";
 import { createFunctions } from "voke";
 
 const functions = createFunctions({
@@ -125,8 +141,14 @@ Only `key` is required, and Voke uses it verbatim. `kind` defaults to the first 
 `kind` that is not in `on` is rejected. `bucket` defaults to the bucket's resource key, `id` to
 `evt_1` and `time` to now. You can also pass `size`, `etag` and `versionId`.
 
-`prefix` and `suffix` are not applied locally: `sendEvent` always calls the handler, as it does for
-every Event Source.
+<Callout type="info" title="Local runs do not create the trigger">
+
+`voke dev` does not receive events from buckets, and `prefix` and `suffix` are not applied locally:
+`sendEvent` always calls the handler, as it does for every Event Source. `voke local bootstrap`
+creates the bucket but not the rule or the EventBridge setting: the local stack holds resources
+only. See [Local AWS](/docs/guides/local-aws).
+
+</Callout>
 
 See [Testing](/docs/guides/testing) for test setup.
 
@@ -140,14 +162,13 @@ See [Testing](/docs/guides/testing) for test setup.
   `source: ["aws.s3"]`, the `detail-type` values from `on` (`Object Created`, `Object Deleted`), the
   bucket by name, and the key filter, with the Function as its target;
 - an `AWS::Lambda::Permission` that lets `events.amazonaws.com` invoke the Function, only from that
-  rule.
+  rule;
+- an `AWS::SQS::Queue` dead-letter queue and an `AWS::Lambda::EventInvokeConfig` that sends failed
+  events to it, unless you pass `deadLetterQueue: false`. See [Dead-letter queues](/docs/guides/dead-letter-queues).
 
 Voke does not use classic bucket notifications to Lambda. They would make the bucket depend on the
-Function, and every Function's role depends on the bucket, so CloudFormation would reject the stack
-as a circular dependency.
-
-`voke local bootstrap` creates the bucket but not the rule or the EventBridge setting: the local
-stack holds resources only. See [Local AWS](/docs/guides/local-aws).
+Function, and the role of a Function that links the bucket depends on the bucket, so CloudFormation
+would reject the stack as a circular dependency.
 
 ## Good to know
 
@@ -163,9 +184,7 @@ stack holds resources only. See [Local AWS](/docs/guides/local-aws).
 
 ## Limits
 
-<Callout type="info">
-
-S3 support is intentionally small in v1:
+<Callout type="info" title="S3 support is intentionally small in v1">
 
 - Only object created and object deleted events. Restore, tagging, ACL, storage class and replication
   events are not supported.
@@ -178,6 +197,22 @@ S3 support is intentionally small in v1:
 
 ## Next steps
 
-- [Resources and bindings](/docs/guides/resources): read the object from the handler.
-- [EventBridge events](/docs/guides/eventbridge-events): match other EventBridge events.
-- [Testing](/docs/guides/testing): test Functions and the Gateway.
+<Cards>
+  <Card
+    icon={<Database />}
+    href="/docs/guides/resources"
+    title="Resources and bindings"
+  >
+    Read the object from the handler.
+  </Card>
+  <Card
+    icon={<Radio />}
+    href="/docs/guides/eventbridge-events"
+    title="EventBridge events"
+  >
+    Match other EventBridge events.
+  </Card>
+  <Card icon={<FlaskConical />} href="/docs/guides/testing" title="Testing">
+    Test Functions and the Gateway.
+  </Card>
+</Cards>
